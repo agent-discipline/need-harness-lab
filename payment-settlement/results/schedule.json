@@ -1,0 +1,182 @@
+[
+  {
+    "order": 1,
+    "arm": 1,
+    "core": 1,
+    "run_id": "sol-arm1-core01"
+  },
+  {
+    "order": 2,
+    "arm": 2,
+    "core": 1,
+    "run_id": "sol-arm2-core01"
+  },
+  {
+    "order": 3,
+    "arm": 3,
+    "core": 1,
+    "run_id": "sol-arm3-core01"
+  },
+  {
+    "order": 4,
+    "arm": 2,
+    "core": 2,
+    "run_id": "sol-arm2-core02"
+  },
+  {
+    "order": 5,
+    "arm": 3,
+    "core": 2,
+    "run_id": "sol-arm3-core02"
+  },
+  {
+    "order": 6,
+    "arm": 1,
+    "core": 2,
+    "run_id": "sol-arm1-core02"
+  },
+  {
+    "order": 7,
+    "arm": 3,
+    "core": 3,
+    "run_id": "sol-arm3-core03"
+  },
+  {
+    "order": 8,
+    "arm": 1,
+    "core": 3,
+    "run_id": "sol-arm1-core03"
+  },
+  {
+    "order": 9,
+    "arm": 2,
+    "core": 3,
+    "run_id": "sol-arm2-core03"
+  },
+  {
+    "order": 10,
+    "arm": 3,
+    "core": 4,
+    "run_id": "sol-arm3-core04"
+  },
+  {
+    "order": 11,
+    "arm": 2,
+    "core": 4,
+    "run_id": "sol-arm2-core04"
+  },
+  {
+    "order": 12,
+    "arm": 1,
+    "core": 4,
+    "run_id": "sol-arm1-core04"
+  },
+  {
+    "order": 13,
+    "arm": 1,
+    "core": 5,
+    "run_id": "sol-arm1-core05"
+  },
+  {
+    "order": 14,
+    "arm": 3,
+    "core": 5,
+    "run_id": "sol-arm3-core05"
+  },
+  {
+    "order": 15,
+    "arm": 2,
+    "core": 5,
+    "run_id": "sol-arm2-core05"
+  },
+  {
+    "order": 16,
+    "arm": 2,
+    "core": 6,
+    "run_id": "sol-arm2-core06"
+  },
+  {
+    "order": 17,
+    "arm": 1,
+    "core": 6,
+    "run_id": "sol-arm1-core06"
+  },
+  {
+    "order": 18,
+    "arm": 3,
+    "core": 6,
+    "run_id": "sol-arm3-core06"
+  },
+  {
+    "order": 19,
+    "arm": 1,
+    "core": 7,
+    "run_id": "sol-arm1-core07"
+  },
+  {
+    "order": 20,
+    "arm": 2,
+    "core": 7,
+    "run_id": "sol-arm2-core07"
+  },
+  {
+    "order": 21,
+    "arm": 3,
+    "core": 7,
+    "run_id": "sol-arm3-core07"
+  },
+  {
+    "order": 22,
+    "arm": 2,
+    "core": 8,
+    "run_id": "sol-arm2-core08"
+  },
+  {
+    "order": 23,
+    "arm": 3,
+    "core": 8,
+    "run_id": "sol-arm3-core08"
+  },
+  {
+    "order": 24,
+    "arm": 1,
+    "core": 8,
+    "run_id": "sol-arm1-core08"
+  },
+  {
+    "order": 25,
+    "arm": 3,
+    "core": 9,
+    "run_id": "sol-arm3-core09"
+  },
+  {
+    "order": 26,
+    "arm": 1,
+    "core": 9,
+    "run_id": "sol-arm1-core09"
+  },
+  {
+    "order": 27,
+    "arm": 2,
+    "core": 9,
+    "run_id": "sol-arm2-core09"
+  },
+  {
+    "order": 28,
+    "arm": 3,
+    "core": 10,
+    "run_id": "sol-arm3-core10"
+  },
+  {
+    "order": 29,
+    "arm": 2,
+    "core": 10,
+    "run_id": "sol-arm2-core10"
+  },
+  {
+    "order": 30,
+    "arm": 1,
+    "core": 10,
+    "run_id": "sol-arm1-core10"
+  }
+]

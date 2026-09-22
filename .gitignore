@@ -1,0 +1,16 @@
+.gradle/
+build/
+.idea/
+*.iml
+__pycache__/
+*.pyc
+.env
+.runs/
+results/raw/
+results/local/
+*.sqlite*
+
+.record.lock
+
+# Controller runtime artifacts may contain raw prompts or auth-adjacent CLI logs.
+.runs/
