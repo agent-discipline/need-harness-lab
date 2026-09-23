@@ -1,0 +1,79 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/session-mode-guard.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/reinject-mode.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/capture-prompt.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/git-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/codex-scan.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/gate-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/gate-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/scope-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/template-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/gate-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/task-mode-guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

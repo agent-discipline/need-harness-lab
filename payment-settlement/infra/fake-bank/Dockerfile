@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY server.py .
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 BANK_JOURNAL=/data/bank.sqlite3 PORT=8081
+EXPOSE 8081
+CMD ["python", "server.py"]
