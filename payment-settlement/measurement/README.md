@@ -12,7 +12,7 @@ python3 -m unittest discover -s measurement -v
 
 ## 원본 계약과 중복 방지
 
-CLI0.155.1 실측에서 `codex exec --json`의 `turn.completed.usage`는 **같은 세션 누적값**이었다. `runner/launch.py`는 원본 누적값을 보존하고 직전 snapshot을 빼서 `usage_semantics=delta` 이벤트를 만든다. normalize에는 이 차분 이벤트만 전달한다. 세션이 바뀌면 counter baseline도 새로 시작하고 감소하면 오류로 처리한다. 기본 이벤트에 고유 ID가 없을 수 있으므로 수집 시 세션 내 영속적인 `event_id`(예: turn-0001)를 한 번 부여하고 이후 재처리에서도 유지한다. 파일을 재수집할 때마다 ID를 바꾸면 안 된다. 원본 바이트 로그를 별도로 보존한다. 이벤트 내용 해시를 ID로 쓰면 사용량이 같은 다른 요청이 사라지므로 그렇게 하지 않는다.
+CLI0.155.1 실측에서 `codex exec --json`의 `turn.completed.usage`는 **같은 세션 누적값**이었다. `codex/runner/launch.py`는 원본 누적값을 보존하고 직전 snapshot을 빼서 `usage_semantics=delta` 이벤트를 만든다. normalize에는 이 차분 이벤트만 전달한다. 세션이 바뀌면 counter baseline도 새로 시작하고 감소하면 오류로 처리한다. 기본 이벤트에 고유 ID가 없을 수 있으므로 수집 시 세션 내 영속적인 `event_id`(예: turn-0001)를 한 번 부여하고 이후 재처리에서도 유지한다. 파일을 재수집할 때마다 ID를 바꾸면 안 된다. 원본 바이트 로그를 별도로 보존한다. 이벤트 내용 해시를 ID로 쓰면 사용량이 같은 다른 요청이 사라지므로 그렇게 하지 않는다.
 
 OpenAI는 최종 Responses 응답 또는 `response.completed` 이벤트, Anthropic은 스트림을 조립한 최종 message를 받는다. Anthropic message_start/message_delta 조각은 거부한다. 누적 token_count 스냅샷과 cumulative/unknown 사용량은 거부하며 요청별 증분을 추출하는 별도 어댑터 없이는 합산하지 않는다. Codex 이벤트는 delta 표시가 없으면 거부한다. OpenAI/Anthropic의 지원 최종 이벤트는 해당 provider의 요청별 사용량 계약을 따른다. 임의 누적 수치를 최종 응답으로 위장해 입력하지 않는다.
 
@@ -33,4 +33,4 @@ OpenAI는 최종 Responses 응답 또는 `response.completed` 이벤트, Anthrop
 
 추가 계측 역할: 프롬프트 작성자는 `prompt-author`, PM은 `pm`, 사용자 대리 응답자는 `user-proxy`, 테스트 설계자는 `test-designer`로 기록한다.
 
-CLI0.155.1의 `cache_write_input_tokens`, `reasoning_output_tokens`도 보존한다. 실제2턴 검증은 `results/setup/codex/` 참조: input13086→26213, output7→17로 누적되며 올바른 총합은26230이다. 재개값을 그대로 더한39323은 잘못된 중복 집계다.
+CLI0.155.1의 `cache_write_input_tokens`, `reasoning_output_tokens`도 보존한다. 실제2턴 검증은 `codex/docs/results/setup/codex/` 참조: input13086→26213, output7→17로 누적되며 올바른 총합은26230이다. 재개값을 그대로 더한39323은 잘못된 중복 집계다.
