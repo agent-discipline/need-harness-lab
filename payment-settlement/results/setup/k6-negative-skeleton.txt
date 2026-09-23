@@ -1,0 +1,72 @@
+ Container payment-lab-smoke-bank-1  Running
+ Container payment-lab-smoke-db-1  Running
+ Container payment-lab-smoke-app-1  Running
+ Container payment-lab-smoke-bank-1  Waiting
+ Container payment-lab-smoke-db-1  Waiting
+ Container payment-lab-smoke-db-1  Healthy
+ Container payment-lab-smoke-bank-1  Healthy
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: /tests/payments.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 1 max VUs, 10m30s max duration (incl. graceful stop):
+              * default: 1 iterations shared among 1 VUs (maxDuration: 10m0s, gracefulStop: 30s)
+
+
+
+  █ THRESHOLDS 
+
+    checks
+    ✗ 'rate==1' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 27      51.525122/s
+    checks_succeeded...: 0.00%   0 out of 27
+    checks_failed......: 100.00% 27 out of 27
+
+    ✗ C01 success
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C04 replay same ID
+      ↳  0% — ✓ 0 / ✗ 20
+    ✗ C05 payload conflict
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C02 zero invalid
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C10 decline
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C06 all accepted
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C06 same nonempty ID
+      ↳  0% — ✓ 0 / ✗ 1
+    ✗ C12 accepted
+      ↳  0% — ✓ 0 / ✗ 1
+
+    HTTP
+    http_req_duration....: avg=155.56ms min=1.69ms   med=171.96ms max=360.13ms p(90)=341.76ms p(95)=343.57ms
+    http_req_failed......: 100.00% 125 out of 125
+    http_reqs............: 125     238.54223/s
+
+    EXECUTION
+    iteration_duration...: avg=523.93ms min=523.93ms med=523.93ms max=523.93ms p(90)=523.93ms p(95)=523.93ms
+    iterations...........: 1       1.908338/s
+
+    NETWORK
+    data_received........: 39 kB   75 kB/s
+    data_sent............: 29 kB   55 kB/s
+
+
+
+
+running (00m00.5s), 0/1 VUs, 1 complete and 0 interrupted iterations
+default ✓ [ 100% ] 1 VUs  00m00.5s/10m0s  1/1 shared iters
+time="2026-09-22T20:25:49Z" level=error msg="thresholds on metrics 'checks' have been crossed"
+

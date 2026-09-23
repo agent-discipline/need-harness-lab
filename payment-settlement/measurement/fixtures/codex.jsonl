@@ -1,0 +1,2 @@
+{"type": "turn.completed", "event_id": "turn-0001", "usage": {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 200}, "usage_semantics": "delta"}
+{"type": "turn.completed", "event_id": "turn-0001", "usage": {"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 200}, "usage_semantics": "delta"}

@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "01a0ccc2-6a53-70b3-86a0-281da83d1519"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "RUNNER_OK"}}
+{"type": "turn.completed", "usage": {"input_tokens": 13086, "cached_input_tokens": 11136, "cache_write_input_tokens": 0, "output_tokens": 7, "reasoning_output_tokens": 0}, "event_id": "setup-cli-smoke2:0001:4", "reported_cumulative_usage": {"input_tokens": 13086, "cached_input_tokens": 11136, "cache_write_input_tokens": 0, "output_tokens": 7, "reasoning_output_tokens": 0}, "usage_semantics": "delta"}

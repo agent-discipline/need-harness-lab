@@ -1,0 +1,1 @@
+{"type":"message","id":"msg-example-1","model":"example-model","usage":{"input_tokens":100,"cache_read_input_tokens":600,"cache_creation_input_tokens":300,"output_tokens":200}}

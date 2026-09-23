@@ -1,0 +1,99 @@
+{
+  "scope": "SETUP_ONLY",
+  "timestamp_utc": "2026-09-22T20:25:49.498418+00:00",
+  "starter_copies": 30,
+  "all_starters_identical": true,
+  "passed": true,
+  "checks": [
+    {
+      "check": "seed",
+      "command": [
+        "docker",
+        "compose",
+        "-p",
+        "payment-lab-smoke",
+        "-f",
+        "/home/jun/project/need-haness-lab/payment-settlement/compose.yaml",
+        "exec",
+        "-T",
+        "db",
+        "psql",
+        "-U",
+        "lab",
+        "-d",
+        "payment",
+        "-At",
+        "-c",
+        "SELECT count(*), min(id), max(id), sum(balance_minor) FROM users; SELECT count(*), min(fee_bps), max(fee_bps), sum(settlement_balance_minor) FROM agencies;"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "passed": true
+    },
+    {
+      "check": "k6-smoke",
+      "command": [
+        "docker",
+        "compose",
+        "-p",
+        "payment-lab-smoke",
+        "-f",
+        "/home/jun/project/need-haness-lab/payment-settlement/compose.yaml",
+        "--profile",
+        "test",
+        "run",
+        "--rm",
+        "k6",
+        "run",
+        "/tests/smoke.js"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "passed": true
+    },
+    {
+      "check": "k6-negative-skeleton",
+      "command": [
+        "docker",
+        "compose",
+        "-p",
+        "payment-lab-smoke",
+        "-f",
+        "/home/jun/project/need-haness-lab/payment-settlement/compose.yaml",
+        "--profile",
+        "test",
+        "run",
+        "--rm",
+        "k6",
+        "run",
+        "/tests/payments.js"
+      ],
+      "exit_code": 99,
+      "expected_exit_code": 99,
+      "passed": true
+    }
+  ],
+  "containers": [
+    {
+      "name": "/payment-lab-smoke-app-1",
+      "image_id": "sha256:5606f070a4a3570a77717593783a9491c028754952c19773d06679e9fdf76c58",
+      "nano_cpus": 1500000000,
+      "memory_bytes": 1610612736,
+      "health": "healthy"
+    },
+    {
+      "name": "/payment-lab-smoke-db-1",
+      "image_id": "sha256:3ce79a779d23ce1c87202af4710c77b1ca882d4964ac680e4184956f2f945ca1",
+      "nano_cpus": 1500000000,
+      "memory_bytes": 2147483648,
+      "health": "healthy"
+    },
+    {
+      "name": "/payment-lab-smoke-bank-1",
+      "image_id": "sha256:fd04ffacd62b4d59a6245d4a843870e998aaaed50be3e5a70576ea72defda7cb",
+      "nano_cpus": 500000000,
+      "memory_bytes": 268435456,
+      "health": "healthy"
+    }
+  ]
+}

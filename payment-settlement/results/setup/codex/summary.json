@@ -1,0 +1,22 @@
+{
+  "run_id": "setup-cli-smoke2",
+  "event_count": 2,
+  "input_tokens": 26213,
+  "output_tokens": 17,
+  "total_tokens": 26230,
+  "cached_input_tokens": 24064,
+  "cache_write_input_tokens": 0,
+  "reasoning_tokens": 0,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "gpt-6-sol/high"
+  ],
+  "actual_models": [],
+  "actual_model_missing_events": 2,
+  "scope": "SETUP_ONLY",
+  "configured_model": "gpt-6-sol",
+  "configured_effort": "high",
+  "resume_same_thread": true,
+  "backend_model_attested": false
+}

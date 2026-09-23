@@ -1,0 +1,60 @@
+ Container payment-lab-smoke-bank-1  Running
+ Container payment-lab-smoke-db-1  Running
+ Container payment-lab-smoke-app-1  Running
+ Container payment-lab-smoke-bank-1  Waiting
+ Container payment-lab-smoke-db-1  Waiting
+ Container payment-lab-smoke-bank-1  Healthy
+ Container payment-lab-smoke-db-1  Healthy
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: /tests/smoke.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 1 max VUs, 10m30s max duration (incl. graceful stop):
+              * default: 1 iterations shared among 1 VUs (maxDuration: 10m0s, gracefulStop: 30s)
+
+
+
+  █ THRESHOLDS 
+
+    checks
+    ✓ 'rate==1' rate=100.00%
+
+    http_req_failed
+    ✓ 'rate==0' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 2       297.883464/s
+    checks_succeeded...: 100.00% 2 out of 2
+    checks_failed......: 0.00%   0 out of 2
+
+    ✓ HTTP 200
+    ✓ DB SELECT succeeds
+
+    HTTP
+    http_req_duration..............: avg=3.88ms min=3.88ms med=3.88ms max=3.88ms p(90)=3.88ms p(95)=3.88ms
+      { expected_response:true }...: avg=3.88ms min=3.88ms med=3.88ms max=3.88ms p(90)=3.88ms p(95)=3.88ms
+    http_req_failed................: 0.00% 0 out of 1
+    http_reqs......................: 1     148.941732/s
+
+    EXECUTION
+    iteration_duration.............: avg=6.34ms min=6.34ms med=6.34ms max=6.34ms p(90)=6.34ms p(95)=6.34ms
+    iterations.....................: 1     148.941732/s
+
+    NETWORK
+    data_received..................: 156 B 23 kB/s
+    data_sent......................: 70 B  10 kB/s
+
+
+
+
+running (00m00.0s), 0/1 VUs, 1 complete and 0 interrupted iterations
+default ✓ [ 100% ] 1 VUs  00m00.0s/10m0s  1/1 shared iters
