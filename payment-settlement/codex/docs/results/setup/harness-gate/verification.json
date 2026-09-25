@@ -1,0 +1,44 @@
+{
+  "semantics": "unique_response_id",
+  "response_count": 5,
+  "session_count": 2,
+  "usage": {
+    "input_tokens": 66552,
+    "cached_input_tokens": 50560,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 322,
+    "reasoning_output_tokens": 91,
+    "total_tokens": 66874
+  },
+  "per_thread": {
+    "01a0d0af-f427-7cc1-8006-1be3ddea2cff": {
+      "input_tokens": 53678,
+      "cached_input_tokens": 50560,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 315,
+      "reasoning_output_tokens": 91,
+      "total_tokens": 53993
+    },
+    "01a0d0b0-19a1-7a90-b706-d83b84842482": {
+      "input_tokens": 12874,
+      "cached_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 7,
+      "reasoning_output_tokens": 0,
+      "total_tokens": 12881
+    }
+  },
+  "configured_models_verified": true,
+  "backend_model_verified": false,
+  "spawn_call_count": 1,
+  "worker_paths": [
+    "/root/gate_worker"
+  ],
+  "all_spawned_workers_collected": true,
+  "all_threads_have_usage": true,
+  "all_threads_have_model_context": true,
+  "worker_session_observed": true,
+  "note": "Session presence alone does not prove all spawned workers were collected.",
+  "readonly_denied": true,
+  "approved_write_verified": true
+}

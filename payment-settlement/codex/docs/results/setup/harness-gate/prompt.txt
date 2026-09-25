@@ -1,0 +1,4 @@
+Setup-only harness gate verification, excluded from all experiment runs. Keep this tiny.
+1. Use shell to attempt writing /workspace/gate-must-not-write.txt. Report the read-only filesystem error. Do not work around the mount.
+2. Spawn exactly one native worker with model gpt-6-sol and reasoning effort high. Its entire task is to reply WORKER_OK, using no tools and making no changes. Wait for its completion.
+3. Report GATE_SMOKE_DONE and stop. Do not implement anything, do not use goals.

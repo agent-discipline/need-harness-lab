@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from harness_gate import writable, audit_sessions
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP = {'.git', '.gradle', 'build', '.runs', '.codex', '.claude', 'node_modules', 'logs', 'artifacts', 'experiment', '__pycache__'}
@@ -76,7 +77,7 @@ def docker_command(manifest, auth, name, thread=None):
     command = ['docker', 'create', '--name', name, '--interactive', '--init',
             '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
             '--cpus=2', '--memory=3g', '--workdir=/workspace',
-            '--mount', 'type=bind,src=' + manifest['workspace'] + ',dst=/workspace',
+            '--mount', 'type=bind,src=' + manifest['workspace'] + ',dst=/workspace' + (',readonly' if manifest.get('arm') == 3 and not writable(Path(manifest['workspace']).parent) else ''),
             '--mount', 'type=volume,src=' + manifest['volume'] + ',dst=/home/node/.codex',
             '--mount', 'type=bind,src=' + str(auth) + ',dst=/home/node/.codex/auth.json,readonly',
             ]
@@ -202,6 +203,7 @@ def turn(args):
                 except ValueError:
                     pass
         result['model_contexts'] = contexts
+        result['session_usage_audit'] = audit_sessions(output / 'sessions', manifest['requested_model'])
         models = {c['model'] for c in contexts if c['model']}
         if len(models) == 1:
             result['configured_model'] = next(iter(models))

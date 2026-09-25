@@ -5,12 +5,16 @@ import json
 from pathlib import Path
 import sys
 
-REQUIRED = ("actual_model", "baseline_sha", "contract_sha256", "image_digests",
+REQUIRED = ("configured_model", "model_configuration_verified", "baseline_sha", "contract_sha256", "image_digests",
             "isolation_verified", "usage_collector_verified", "harness_adapter_verified",
-            "acceptance_suite_verified", "pilot_passed")
+            "acceptance_suite_verified", "pilot_validation_completed")
 
 def blockers(manifest):
     failures = [f"{key}: missing/unverified" for key in REQUIRED if not manifest.get(key)]
+    if manifest.get("configured_model") != manifest.get("selected_model"):
+        failures.append("configured model does not match selected model")
+    if manifest.get("actual_model") is None and not manifest.get("backend_model_identity_unavailable"):
+        failures.append("backend model identity limitation must be recorded")
     if manifest.get("reasoning_effort") != "high":
         failures.append("reasoning_effort must be high")
     policy = manifest.get("cache_policy")

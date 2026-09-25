@@ -1,182 +1,302 @@
 [
   {
     "order": 1,
+    "cycle": 1,
     "arm": 1,
     "core": 1,
-    "run_id": "sol-arm1-core01"
+    "run_id": "sol-arm1-core01",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 2,
+    "cycle": 1,
     "arm": 2,
     "core": 1,
-    "run_id": "sol-arm2-core01"
+    "run_id": "sol-arm2-core01",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 3,
+    "cycle": 1,
     "arm": 3,
     "core": 1,
-    "run_id": "sol-arm3-core01"
+    "run_id": "sol-arm3-core01",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 4,
-    "arm": 2,
+    "cycle": 2,
+    "arm": 1,
     "core": 2,
-    "run_id": "sol-arm2-core02"
+    "run_id": "sol-arm1-core02",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 5,
-    "arm": 3,
+    "cycle": 2,
+    "arm": 2,
     "core": 2,
-    "run_id": "sol-arm3-core02"
+    "run_id": "sol-arm2-core02",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 6,
-    "arm": 1,
+    "cycle": 2,
+    "arm": 3,
     "core": 2,
-    "run_id": "sol-arm1-core02"
+    "run_id": "sol-arm3-core02",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 7,
-    "arm": 3,
+    "cycle": 3,
+    "arm": 1,
     "core": 3,
-    "run_id": "sol-arm3-core03"
+    "run_id": "sol-arm1-core03",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 8,
-    "arm": 1,
+    "cycle": 3,
+    "arm": 2,
     "core": 3,
-    "run_id": "sol-arm1-core03"
+    "run_id": "sol-arm2-core03",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 9,
-    "arm": 2,
+    "cycle": 3,
+    "arm": 3,
     "core": 3,
-    "run_id": "sol-arm2-core03"
+    "run_id": "sol-arm3-core03",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 10,
-    "arm": 3,
+    "cycle": 4,
+    "arm": 1,
     "core": 4,
-    "run_id": "sol-arm3-core04"
+    "run_id": "sol-arm1-core04",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 11,
+    "cycle": 4,
     "arm": 2,
     "core": 4,
-    "run_id": "sol-arm2-core04"
+    "run_id": "sol-arm2-core04",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 12,
-    "arm": 1,
+    "cycle": 4,
+    "arm": 3,
     "core": 4,
-    "run_id": "sol-arm1-core04"
+    "run_id": "sol-arm3-core04",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 13,
+    "cycle": 5,
     "arm": 1,
     "core": 5,
-    "run_id": "sol-arm1-core05"
+    "run_id": "sol-arm1-core05",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 14,
-    "arm": 3,
+    "cycle": 5,
+    "arm": 2,
     "core": 5,
-    "run_id": "sol-arm3-core05"
+    "run_id": "sol-arm2-core05",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 15,
-    "arm": 2,
+    "cycle": 5,
+    "arm": 3,
     "core": 5,
-    "run_id": "sol-arm2-core05"
+    "run_id": "sol-arm3-core05",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 16,
-    "arm": 2,
+    "cycle": 6,
+    "arm": 1,
     "core": 6,
-    "run_id": "sol-arm2-core06"
+    "run_id": "sol-arm1-core06",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 17,
-    "arm": 1,
+    "cycle": 6,
+    "arm": 2,
     "core": 6,
-    "run_id": "sol-arm1-core06"
+    "run_id": "sol-arm2-core06",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 18,
+    "cycle": 6,
     "arm": 3,
     "core": 6,
-    "run_id": "sol-arm3-core06"
+    "run_id": "sol-arm3-core06",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 19,
+    "cycle": 7,
     "arm": 1,
     "core": 7,
-    "run_id": "sol-arm1-core07"
+    "run_id": "sol-arm1-core07",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 20,
+    "cycle": 7,
     "arm": 2,
     "core": 7,
-    "run_id": "sol-arm2-core07"
+    "run_id": "sol-arm2-core07",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 21,
+    "cycle": 7,
     "arm": 3,
     "core": 7,
-    "run_id": "sol-arm3-core07"
+    "run_id": "sol-arm3-core07",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 22,
-    "arm": 2,
+    "cycle": 8,
+    "arm": 1,
     "core": 8,
-    "run_id": "sol-arm2-core08"
+    "run_id": "sol-arm1-core08",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 23,
-    "arm": 3,
+    "cycle": 8,
+    "arm": 2,
     "core": 8,
-    "run_id": "sol-arm3-core08"
+    "run_id": "sol-arm2-core08",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 24,
-    "arm": 1,
+    "cycle": 8,
+    "arm": 3,
     "core": 8,
-    "run_id": "sol-arm1-core08"
+    "run_id": "sol-arm3-core08",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 25,
-    "arm": 3,
+    "cycle": 9,
+    "arm": 1,
     "core": 9,
-    "run_id": "sol-arm3-core09"
+    "run_id": "sol-arm1-core09",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 26,
-    "arm": 1,
+    "cycle": 9,
+    "arm": 2,
     "core": 9,
-    "run_id": "sol-arm1-core09"
+    "run_id": "sol-arm2-core09",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 27,
-    "arm": 2,
+    "cycle": 9,
+    "arm": 3,
     "core": 9,
-    "run_id": "sol-arm2-core09"
+    "run_id": "sol-arm3-core09",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   },
   {
     "order": 28,
-    "arm": 3,
+    "cycle": 10,
+    "arm": 1,
     "core": 10,
-    "run_id": "sol-arm3-core10"
+    "run_id": "sol-arm1-core10",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 1
   },
   {
     "order": 29,
+    "cycle": 10,
     "arm": 2,
     "core": 10,
-    "run_id": "sol-arm2-core10"
+    "run_id": "sol-arm2-core10",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 2
   },
   {
     "order": 30,
-    "arm": 1,
+    "cycle": 10,
+    "arm": 3,
     "core": 10,
-    "run_id": "sol-arm1-core10"
+    "run_id": "sol-arm3-core10",
+    "implementation_policy": "parallel-within-cycle",
+    "measurement_policy": "serial-within-cycle",
+    "commit_order": 3
   }
 ]

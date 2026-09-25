@@ -24,6 +24,9 @@ def main():
         for arm, path in enumerate(paths, 1):
             record_dir = ROOT / "docs/experiments" / str(arm) / f"core{core}"
             record.init_run(record_dir)
+            issues = record_dir / "issues.md"
+            if not issues.exists():
+                issues.write_text((ROOT / "docs/issue-template.md").read_text())
             plan = record_dir / "run.json"
             if not plan.exists():
                 payload = json.loads((ROOT / "docs/results/run-manifest.example.json").read_text())
@@ -44,8 +47,7 @@ def main():
             shutil.copy2(source / relative, snapshot / relative)
         (snapshot / "SOURCE.json").write_text(json.dumps({"path": str(source), "commit": sha,
             "purpose": "read-only experiment reference; not installed as Codex hooks"}, indent=2) + "\n")
-    permutations = [(1,2,3), (2,3,1), (3,1,2), (3,2,1), (1,3,2), (2,1,3),
-                    (1,2,3), (2,3,1), (3,1,2), (3,2,1)]
+    permutations = [(1, 2, 3)] * 10
     schedule = ROOT / "docs/results/schedule.json"
     if not schedule.exists():
         rows = [dict(order=3*(core-1)+position, arm=arm, core=core,

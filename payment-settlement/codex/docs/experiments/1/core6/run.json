@@ -1,5 +1,5 @@
 {
-  "protocol": "payment-settlement-v1",
+  "protocol": "payment-settlement-v2",
   "status": "NOT_STARTED",
   "run_id": "sol-arm1-core06",
   "arm": 1,
@@ -18,11 +18,14 @@
   "resource_profile": "budget-v1",
   "image_digests": {},
   "seed": 20260923,
-  "token_limit": 2000000,
+  "token_limit": 20000000,
   "time_limit_seconds": 28800,
   "feedback_limit": 30,
   "cache_observation_verified": false,
   "selected_model": "gpt-6-sol",
   "goal_enabled": false,
-  "controller": "external-exec-resume"
+  "controller": "external-exec-resume",
+  "cycle": 6,
+  "implementation_parallelism": 3,
+  "load_test_parallelism": 1
 }

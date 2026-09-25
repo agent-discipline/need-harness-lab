@@ -25,7 +25,7 @@ def main():
     run = json.loads((records / "run.json").read_text())
     if run["status"] not in TERMINAL:
         p.error("run has not finished; no experimental commit created")
-    for name in ("summary.md", "transcript.md", "events.jsonl", "usage-summary.json"):
+    for name in ("summary.md", "transcript.md", "events.jsonl", "usage-summary.json", "issues.md"):
         file = records / name
         if not file.is_file() or not file.read_text().strip():
             p.error(f"missing result document: {name}")

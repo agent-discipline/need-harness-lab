@@ -31,7 +31,7 @@ codex/
 └── .runs/                     # 실제 격리 workspace·세션 수집 원본, Git 제외
 ```
 
-`coreN`은 독립 반복 번호다. **각 조건10회, 총30회**. 시행 기록은 서버 코드 폴더에 넣지 않는다. `.runs/<run>/workspace`에는 해당 서버만 내보내므로 다른 시행과 외부 평가 기록을 볼 수 없다.
+`coreN`은 독립 반복 번호다. **각 조건10회, 총30회**를10사이클로 실행한다. 사이클 내부의1·2·3 구현은 병렬, 부하 측정은 순차이며 세 시행의 문서화/커밋 후 다음 사이클로 넘어간다. 시행 기록은 서버 코드 폴더에 넣지 않는다. `.runs/<run>/workspace`에는 해당 서버만 내보내므로 다른 시행과 외부 평가 기록을 볼 수 없다.
 
 공통 기준: [계획](../docs/experiment-plan.md), [요구사항](../docs/requirements.md), [판정 계약](../docs/acceptance.md), [인프라](../infra/README.md), [측정 어댑터](../measurement/README.md).
 
@@ -45,6 +45,6 @@ docker compose -p payment-lab-smoke -f payment-settlement/codex/compose.yaml up 
 docker compose -p payment-lab-smoke -f payment-settlement/codex/compose.yaml --profile test run --rm k6 run /tests/smoke.js
 ```
 
-Codex는 최초 `exec`, 이후 정확한 세션ID의 `resume`로 제어한다. goal은 사용하지 않는다. [runner 사용법](runner/README.md)과 [시행 절차](docs/runbook.md)를 따른다. 각 시행 종료 시 문서·사용량·검증 증거를 마감하고 그 시행 코드와 `docs/experiments` 기록을 함께 커밋한 뒤 다음 시행으로 진행한다.
+Codex는 최초 `exec`, 이후 정확한 세션ID의 `resume`로 제어한다. goal은 사용하지 않는다. [runner 사용법](runner/README.md)과 [시행 절차](docs/runbook.md)를 따른다. 각 시행 종료 시 문서·사용량·검증 증거를 마감하고 그 시행 코드와 `docs/experiments` 기록을 함께 커밋한다. 같은 사이클의 세 시행 마감 후 다음 사이클로 진행한다.
 
 현재 결과: [초기 검증](docs/results/setup/README.md). 초기 서버와 실제 Codex2턴 재개를 확인했고, 본 실험 상태는 각 `run.json`이 정본이다.
