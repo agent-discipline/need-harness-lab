@@ -1,0 +1,237 @@
+{
+  "Id": "f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0",
+  "Created": "2026-09-26T14:46:24.562042035Z",
+  "Path": "k6",
+  "Args": [
+    "run",
+    "--summary-export=/tmp/summary.json",
+    "/tests/workload.js"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-09-26T14:46:24.733934712Z",
+    "FinishedAt": "2026-09-26T14:46:56.84540135Z"
+  },
+  "Image": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+  "ResolvConfPath": "/var/lib/docker/containers/f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0/hostname",
+  "HostsPath": "/var/lib/docker/containers/f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0/hosts",
+  "LogPath": "/var/lib/docker/containers/f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0/f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0-json.log",
+  "Name": "/payment-codex-pilot-verify3-load-0-1790433984",
+  "RestartCount": 0,
+  "Driver": "overlay2",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "docker-default",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    },
+    "NetworkMode": "payment-codex-pilot-verify3_default",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "no",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 1073741824,
+    "NanoCpus": 2000000000,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 2147483648,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": [],
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/jun/project/need-haness-lab/payment-settlement/evaluation/k6",
+        "Target": "/tests",
+        "ReadOnly": true
+      }
+    ],
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle",
+      "/sys/devices/system/cpu/cpu8/thermal_throttle",
+      "/sys/devices/system/cpu/cpu9/thermal_throttle",
+      "/sys/devices/system/cpu/cpu10/thermal_throttle",
+      "/sys/devices/system/cpu/cpu11/thermal_throttle",
+      "/sys/devices/system/cpu/cpu12/thermal_throttle",
+      "/sys/devices/system/cpu/cpu13/thermal_throttle",
+      "/sys/devices/system/cpu/cpu14/thermal_throttle",
+      "/sys/devices/system/cpu/cpu15/thermal_throttle",
+      "/sys/devices/system/cpu/cpu16/thermal_throttle",
+      "/sys/devices/system/cpu/cpu17/thermal_throttle",
+      "/sys/devices/system/cpu/cpu18/thermal_throttle",
+      "/sys/devices/system/cpu/cpu19/thermal_throttle",
+      "/sys/devices/system/cpu/cpu20/thermal_throttle",
+      "/sys/devices/system/cpu/cpu21/thermal_throttle",
+      "/sys/devices/system/cpu/cpu22/thermal_throttle",
+      "/sys/devices/system/cpu/cpu23/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "GraphDriver": {
+    "Data": {
+      "ID": "f04b34b4df4b604a4f435f731116724d144f79e556b8803cce08bfbfc61747c0",
+      "LowerDir": "/var/lib/docker/overlay2/bf02c95ee4cefeceebf6e83d221380ce8a5427a68ce5943dde6a2a12bbe593d5-init/diff:/var/lib/docker/overlay2/02c5332b54595023b44308aea655d048d421b25a6ffbb7a332193e0ab7b10ed8/diff:/var/lib/docker/overlay2/92591747d083e4349c6c7543b67503f553aa11f616bcadf80b25f88ca20fc226/diff:/var/lib/docker/overlay2/aa09084a1897c08ab51f47fa900c65a7b20647194c813fa88293dd03877a7b34/diff:/var/lib/docker/overlay2/f626437f3744cabbdd315def245a0992d344b7454b8759b10d2b20d9a023b0a8/diff",
+      "MergedDir": "/var/lib/docker/overlay2/bf02c95ee4cefeceebf6e83d221380ce8a5427a68ce5943dde6a2a12bbe593d5/merged",
+      "UpperDir": "/var/lib/docker/overlay2/bf02c95ee4cefeceebf6e83d221380ce8a5427a68ce5943dde6a2a12bbe593d5/diff",
+      "WorkDir": "/var/lib/docker/overlay2/bf02c95ee4cefeceebf6e83d221380ce8a5427a68ce5943dde6a2a12bbe593d5/work"
+    },
+    "Name": "overlay2"
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/home/jun/project/need-haness-lab/payment-settlement/evaluation/k6",
+      "Destination": "/tests",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    }
+  ],
+  "Config": {
+    "Hostname": "f04b34b4df4b",
+    "Domainname": "",
+    "User": "12345",
+    "AttachStdin": false,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "RUN_ID=payment-codex-pilot-verify3-load-0-1790433984",
+      "BASE_URL=http://app:8080",
+      "PHASE=warmup",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "Cmd": [
+      "run",
+      "--summary-export=/tmp/summary.json",
+      "/tests/workload.js"
+    ],
+    "Image": "grafana/k6:1.2.3",
+    "Volumes": null,
+    "WorkingDir": "/home/k6",
+    "Entrypoint": [
+      "k6"
+    ],
+    "Labels": {}
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "payment-codex-pilot-verify3_default": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "63e56c7641fb1e29fbe00ebe20f38123e88c5a47e5b8793b65f679b2af7ab193",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "payment-codex-pilot-verify3-load-0-1790433984",
+          "f04b34b4df4b"
+        ]
+      }
+    }
+  }
+}

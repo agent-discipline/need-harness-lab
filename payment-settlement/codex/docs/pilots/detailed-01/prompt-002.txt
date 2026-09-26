@@ -1,0 +1,8 @@
+제외된 상세프롬프트 파일럿의 외부 검증 피드백입니다. 같은 계약을 유지하고 아래 결함을 수정하고 회귀 검증하세요. 실제 테스트 실행/미실행을 구분하고 실패원인과 해결을 기록하세요. 다른 에이전트/goal은 사용하지 마세요.
+
+1. KST 정산 오류: POST payments user900001 agency904 amount101/199/10001 각각201 SUCCEEDED, DB succeeded_at=2026-09-23T23:44:13Z. POST settlements agency904 businessDate2026-09-24 응답201이지만 gross/fee/net/count 모두0. 외부 경계 fixture succeeded_at=2020-01-01T14:59:59Z/15:00:00Z/15:00:01Z 세건 agency920에서 1월1일 정산3건306, 1월2일0건으로 관측됐습니다. Asia/Seoul 성공확정 날짜와 정확히 일치하도록 수정하고 실제 PostgreSQL에서 경계 회귀검증하세요.
+2. 독립 Fable 정적 리뷰8/12로 기준10/12 미달. application이 api DTO를 import하고 HTTP status Pair를 반환하는 역의존, payment same-payload 비교와 HTTP코드분기 중복, settlement의 명세상 업무결정이 repository 한메서드에 집중된 점을 지적했습니다. 레이어 경계/메서드 응집성과 중복을 개선하세요. 과도한 추상화는 피하세요.
+3. 추가 검증 공백: fake BankPort 서비스테스트, DB확정 실패 후 복구, 403 tenant불일치,404 미존재 user/agency, 지속 은행 장애. 기존 restart-recovery.sh는 리뷰입력에서 누락됐으므로 없는 것으로 간주하지 않겠습니다.
+4. 확정tx 예외 시 수락된 결제의 결과불명 응답 계약(202/id) 검토. 일반 잘못된 path/method가503이 되는 오류매핑도 검토하세요. FAILED422 오류body 계약은 기존 code/message를 유지하세요; reviewer 제안을 무조건 새요구사항으로 취급하지 마세요.
+
+현재 사용자 데이터/업무데이터는 파일럿용이며 기존 실행으로 변경되어 있습니다. 테스트는 충돌하지 않는 namespace와 fixture를 사용하세요. 외부 판정기/공통fixture를 수정하지 마세요. 완료 후 변경파일, 실행명령과 결과, 남은 검증을 보고하세요.

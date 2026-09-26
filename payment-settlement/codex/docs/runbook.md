@@ -68,3 +68,9 @@ schedule.json의 cycle 하나씩 진행한다. 한 cycle의 세 구현을 병렬
 Codex CLI 응답은 실제 backend 모델 ID를 제공하지 않아 `actual_model=null`로 보존한다. 실행 전에는 세션 turn_context의 `configured_model=gpt-6-sol` 및 `high`를 검증하고, backend 식별자 미관측을 명시한다. 이를 backend 신원 검증 완료로 표현하지 않는다. 하위 작업자의 설정·사용량은 별도 session audit으로 확인한다.
 
 실제 턴 완료 뒤 `scripts/capture_turn.py --run-id <id> --turn <번호> --analysis <분석파일>`로 프롬프트·전체 최종 메시지·분석·사용량 delta를 시행별 docs에 보존한다. 분석 파일은 평가자가 관측 증거에 근거해 작성한다. 원본 tool/session 로그는 `.runs`에 유지한다.
+
+## 1사이클 실행 명령
+
+준비 증거가 생성된 뒤 `scripts/freeze_readiness.py`로 계약/이미지/검증 범위를 동결한다. `scripts/start_cycle.py --cycle 1 --readiness payment-settlement/codex/docs/results/readiness.json`은 독립 DB/bank/state와 세 최초 모델 호출을 병렬 시작한다. 구현 완료는 실험 완료가 아니며, 관리자가 동일 세션 후속 입력과 순차 외부 판정을 이어간다. 이번 사용자 요청 범위는 cycle1만이며 cycle2는 자동 시작하지 않는다.
+
+대리 사용자 답변은 `scripts/consult_contract.py --questions <질문 또는 명세 원문> --output <새경로>`로 실행한다. 별도 fresh Sol/high 세션에 동결 계약과 질문만 제공하며 구현/다른 시행 코드를 마운트하지 않는다. 원문과 응답별 사용량을 해당 시행 비용에 포함한다.

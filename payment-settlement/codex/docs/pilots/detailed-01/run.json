@@ -1,0 +1,16 @@
+{
+  "run_id": "pilot-detailed-01",
+  "scope": "PILOT_EXCLUDED",
+  "status": "VALIDATING",
+  "arm_style": 2,
+  "requested_model": "gpt-6-sol",
+  "reasoning_effort": "high",
+  "controller": "exec-resume",
+  "cache_policy": "observed-cache",
+  "goal_enabled": false,
+  "baseline_sha": "dfbdaaa6f3952b6280ca3df330ad3a88e7011f0b",
+  "counts_toward_30_runs": false,
+  "implementation_turns": 2,
+  "implementation_total_tokens": 6198289,
+  "formal_runs_completed": 0
+}

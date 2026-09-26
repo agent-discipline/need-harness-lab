@@ -1,0 +1,41 @@
+{
+  "project": "payment-codex-pilot-verify3",
+  "phases": [
+    {
+      "phase": "warmup",
+      "k6_exit_code": 0,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15989319200161844,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": true
+    },
+    {
+      "phase": "normal",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.11616565997246653,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    }
+  ],
+  "all_acceptance_passed": false,
+  "c20_passed": false,
+  "phase_gates_passed": false,
+  "sustainable_rps": null
+}

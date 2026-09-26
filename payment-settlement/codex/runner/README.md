@@ -60,4 +60,4 @@ python3 -m unittest discover -s payment-settlement/runner -v
 
 실제 검증: `results/setup/codex/summary.json` 및 원본 응답 참조. 인증 file UID1000/0600과 Docker cap-drop=ALL 조합에서 root 프로세스는 읽지 못했으므로 이미지 USER를 node(uid1000)로 맞췄다. 호스트 auth 소유자가 다른 UID이면 이미지 사용자 매핑을 맞춘 후 시작해야 한다. 인증 파일을 world-readable로 바꾸지 않는다.
 
-통합 테스트를 수행하는 run은 init에 `--network <해당 Compose project>_default`를 준다. DB_URL/BANK_BASE_URL이 컨테이너 서비스 주소로 제공된다. 다른 시행 네트워크를 연결하지 않는다. turn의 `--timeout-seconds` 기본1800초는 단일 호출 상한이며 run전체8시간/2백만토큰 상한은 외부 관리자가 별도 집계한다. timeout은 해당 호출 컨테이너만 중지하고 원문/상태를 보존한다.
+통합 테스트를 수행하는 run은 init에 `--network <해당 Compose project>_default`를 준다. DB_URL/BANK_BASE_URL이 컨테이너 서비스 주소로 제공된다. 다른 시행 네트워크를 연결하지 않는다. turn의 `--timeout-seconds` 기본1800초는 단일 호출 상한이며 run전체8시간/2천만토큰 상한은 외부 관리자가 별도 집계한다. timeout은 해당 호출 컨테이너만 중지하고 원문/상태를 보존한다.

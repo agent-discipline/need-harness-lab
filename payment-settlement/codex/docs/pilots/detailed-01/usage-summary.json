@@ -1,0 +1,17 @@
+{
+  "run_id": "pilot-detailed-01",
+  "event_count": 2,
+  "input_tokens": 6139391,
+  "output_tokens": 58898,
+  "total_tokens": 6198289,
+  "cached_input_tokens": 5960064,
+  "cache_write_input_tokens": 0,
+  "reasoning_tokens": 21892,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "gpt-6-sol"
+  ],
+  "actual_models": [],
+  "actual_model_missing_events": 2
+}

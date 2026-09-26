@@ -19,7 +19,7 @@ python3 payment-settlement/codex/review/run.py \
 
 `../docs/pilots/detailed-01/review/attempt-01`에서 실제 실행 성공. 모델 `claude-fable-5-1`, 8/12, NEEDS_WORK, 총70,899토큰, list cost $1.52109075. 레이어 역참조·중복·테스트 범위 부족을 지적했다. 리뷰 결과만으로 금전 정확성이 입증되지는 않는다.
 
-첫 packet은 src만 포함하여 기존 `scripts/restart-recovery.sh` 및 은행 계약이 누락되었다. 리뷰의 restart 미제공/은행 미검증 언급은 이 제한과 함께 해석해야 한다. runner는 다음 실행부터 scripts와 은행 계약을 포함하도록 수정했다. 기존 원본 packet과 결과는 변경하지 않았으며 비용 절약을 위해 동일 파일럿 전체 리뷰를 다시 실행하지 않았다. 정식 시행 전에 공통 계약의 기존 2인 리뷰 문구를 Fable 1회 정책으로 정합화해야 한다.
+첫 packet은 src만 포함하여 기존 `scripts/restart-recovery.sh` 및 은행 계약이 누락되었다. 리뷰의 restart 미제공/은행 미검증 언급은 이 제한과 함께 해석해야 한다. runner는 다음 실행부터 scripts와 은행 계약을 포함하도록 수정했다. 기존 원본 packet과 결과는 변경하지 않았으며 비용 절약을 위해 동일 파일럿 전체 리뷰를 다시 실행하지 않았다. 공통 계약도 Fable 1회 정책으로 정합화했다.
 
 ## 엄격한 결과 게이트와 무료 검증
 

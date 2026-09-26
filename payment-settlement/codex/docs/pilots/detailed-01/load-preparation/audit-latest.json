@@ -1,0 +1,32 @@
+{
+  "case": "C19",
+  "status": "PASS",
+  "errors": [],
+  "aggregates": {
+    "user_seed_count": 0,
+    "agency_seed_count": 0,
+    "negative_balance": 0,
+    "balance_conservation": 0,
+    "reservation_conservation": 0,
+    "agency_balance": 0,
+    "orphan_user": 0,
+    "orphan_agency": 0
+  },
+  "queries": {
+    "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+    "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+    "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0 OR reserved_minor<0 OR reserved_minor>balance_minor",
+    "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger l ON l.user_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(l.amount_minor),0)<>1000000) t",
+    "reservation_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status='PENDING' GROUP BY u.id,u.reserved_minor HAVING u.reserved_minor<>coalesce(sum(p.amount_minor),0)) t",
+    "agency_balance": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN settlements s ON s.agency_id=a.id GROUP BY a.id,a.settlement_balance_minor HAVING a.settlement_balance_minor<>coalesce(sum(s.net_amount),0)) t",
+    "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+    "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+  },
+  "counts": {
+    "payments": 14576,
+    "ledger": 14576,
+    "settlements": 0,
+    "items": 0,
+    "bank": 14576
+  }
+}
