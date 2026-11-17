@@ -107,16 +107,44 @@ class FreezeTest(unittest.TestCase):
             evidence.write_text('{}')
             attest = Path(tmp) / 'attest.json'
             with patch.object(freeze_readiness, 'REPO', Path(tmp).resolve()):
-                attest.write_text(json.dumps({'pilot_passed': {'value': True, 'evidence': ['evidence.json']}}))
+                attest.write_text(json.dumps({'acceptance_suite_verified': {'value': True, 'evidence': ['evidence.json']}}))
                 flags, hashes = freeze_readiness.attested(attest)
-                self.assertEqual(flags, {'pilot_passed': True})
-                self.assertEqual(list(hashes['pilot_passed']), ['evidence.json'])
+                self.assertEqual(flags, {'acceptance_suite_verified': True})
+                self.assertEqual(list(hashes['acceptance_suite_verified']), ['evidence.json'])
                 for bad in ({'isolation_verified': {'value': True, 'evidence': ['evidence.json']}},
-                            {'pilot_passed': {'value': True, 'evidence': []}},
-                            {'pilot_passed': {'value': True, 'evidence': ['../outside.json']}}):
+                            {'pilot_passed': {'value': True, 'evidence': ['evidence.json']}},     # derived, never attested
+                            {'acceptance_suite_verified': {'value': True, 'evidence': []}},
+                            {'acceptance_suite_verified': {'value': True, 'evidence': ['../outside.json']}}):
                     attest.write_text(json.dumps(bad))
                     with self.assertRaises(ValueError):
                         freeze_readiness.attested(attest)
+
+    def pilot(self, runs, roles=('pm', 'worker', 'reviewer'), models=None, last='ok', pending=False, censored=False, arm=3):
+        run = runs / 'pilot'
+        models = models or {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5'], 'reviewer': ['claude-fable-5-2']}
+        write(run / 'manifest.json', dict(arm=arm, actual_role_models=models))
+        for n, status in ((1, 'ok'), (2, last)):
+            t = run / 'turns' / ('%04d' % n)
+            write(t / 'result.json', dict(status=status, usage_complete=status == 'ok', reviewer_usage_pending=pending,
+                                         cost={'pinned_session_usd': 0.1, 'reviewer_usd': 0.0, 'reviewer_applicable': True}))
+            (t / 'events.jsonl').write_text(''.join(json.dumps(dict(type='message', id='%s-%d' % (r, n), model='m', role=r,
+                                                                    turn=t.name, usage=USAGE)) + '\n' for r in roles))
+        if censored:
+            write(run / 'censored.json', {'status': 'CENSORED_TIME'})
+        return 'pilot'
+
+    def test_pilot_pass_is_derived_from_the_pilot_run(self):
+        cases = {'complete pilot': ({}, True), 'no worker usage': ({'roles': ('pm', 'reviewer')}, False),
+                 'no reviewer usage': ({'roles': ('pm', 'worker')}, False),
+                 'reviewer pending': ({'pending': True}, False), 'last turn failed': ({'last': 'failed'}, False),
+                 'censored': ({'censored': True}, False), 'not arm 3': ({'arm': 1}, False),
+                 'worker on another model': ({'models': {'pm': ['claude-fable-5-2'], 'worker': ['claude-sonnet-5'],
+                                                         'reviewer': ['claude-fable-5-2']}}, False),
+                 'reviewer model unobserved': ({'models': {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5']}}, False)}
+        for name, (kw, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                passed, detail = freeze_readiness.pilot_evidence(Path(tmp), self.pilot(Path(tmp), **kw))
+                self.assertIs(passed, expected, detail['checks'])
 
     def test_model_match(self):
         self.assertTrue(freeze_readiness.model_matches(['claude-opus-5-5'], 'claude-opus-5-5'))

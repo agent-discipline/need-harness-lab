@@ -2,8 +2,8 @@
 """Freeze protocol payment-settlement-v3-claude: inputs, image ids and observed preparation evidence.
 
 Every verification flag is derived from evidence files with the criterion written below, or stays false.
-Flags that no runner artifact can prove (acceptance suite, harness adapter, pilot) come only from an explicit
---attest file whose evidence paths are hashed into readiness.json. Never claims a pilot result by itself.
+Flags that no runner artifact can prove (acceptance suite, harness adapter) come only from an explicit --attest file
+whose evidence paths are hashed into readiness.json. pilot_passed is derived from the pilot run (--pilot-run).
 """
 import argparse
 from datetime import datetime, timezone
@@ -27,7 +27,7 @@ LIMITS = dict(token_limit=20000000, time_limit_seconds=28800, feedback_limit=30)
 # Inputs whose bytes define the protocol (contract, evaluator, fixtures, prompts, harness, runner, compose).
 FROZEN = ('docs', 'evaluation', 'infra', 'measurement', 'recording', 'claude/prompts', 'claude/harness-source',
           'claude/runner', 'claude/scripts', 'claude/template', 'claude/compose.yaml')
-ATTESTABLE = ('acceptance_suite_verified', 'harness_adapter_verified', 'pilot_passed')
+ATTESTABLE = ('acceptance_suite_verified', 'harness_adapter_verified')     # pilot_passed is derived (pilot_evidence)
 
 
 def sha(path):
@@ -142,6 +142,33 @@ def smoke_evidence(runs, run_ids):
     return flags, actual, detail
 
 
+def pilot_evidence(runs, run_id):
+    """Pilot (spec section 5): one arm 3 run carried to its end, whose subagent usage is separated from the parent's
+    without double counting and whose second reviewer's usage was observed. Derived from the run's own artifacts."""
+    run = Path(runs) / run_id
+    manifest = json.loads((run / 'manifest.json').read_text())
+    results = [json.loads(p.read_text()) for p in sorted(run.glob('turns/*/result.json'))]
+    ok = [r for r in results if r.get('status') == 'ok']
+    ledger = launch.run_ledger(run)
+    roles = ledger['roles']
+    models = role_check(3, manifest.get('actual_role_models') or {}, PILOT_ROLES)
+    checks = {
+        'arm_3': manifest.get('arm') == 3,
+        # carried to its end: not censored and the last turn finished ok (quality acceptance is not part of the pilot gate)
+        'completed': bool(results) and not (run / 'censored.json').exists() and results[-1].get('status') == 'ok',
+        'all_usage_observed': ledger['usage_complete'] and not ledger['conflicts'],
+        # every ok turn's CLI total matches the parent-only or parent+subagent request sum, each request counted once
+        'worker_usage_separated': roles.get('worker', {}).get('requests', 0) > 0 and bool(ok)
+                                  and all(r.get('usage_complete') is True for r in ok),
+        'reviewer_usage_observed': roles.get('reviewer', {}).get('requests', 0) > 0
+                                   and not any(r.get('reviewer_usage_pending') for r in results),
+        'role_models_agreed': all(models.values()),
+    }
+    return all(checks.values()), {'run_id': run_id, 'checks': checks, 'role_model_check': models,
+                                  'ledger': {k: ledger[k] for k in ('roles', 'total_tokens', 'usage_complete', 'cost_usd')},
+                                  'manifest_sha256': sha(run / 'manifest.json')}
+
+
 def attested(path):
     """{flag: {"value": bool, "evidence": [repo-relative paths]}} for ATTESTABLE flags only; evidence is hashed."""
     data = json.loads(Path(path).read_text())
@@ -168,6 +195,7 @@ def main():
     p.add_argument('--smoke-run', action='append', default=[], help='launch.py run id of a paid smoke (repeat; arms 1|2 and 3)')
     p.add_argument('--runs', type=Path, default=ROOT / '.runs')
     p.add_argument('--attest', type=Path, help='JSON attestation for ' + ', '.join(ATTESTABLE))
+    p.add_argument('--pilot-run', help='launch.py run id of the finished arm 3 pilot; pilot_passed is derived from it')
     p.add_argument('--user-proxy-model', required=True,
                    help='user proxy model chosen by the user (no default); consult_contract.py refuses any other model')
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
@@ -187,6 +215,7 @@ def main():
         p.error('smoke runs of all three arms with their agreed models are required (arms smoked: %s, verified actual '
                 'models: %s)' % (sorted(smoked), sorted(actual)))
     attest_flags, attest_evidence = attested(a.attest) if a.attest else ({}, {})
+    pilot_passed, pilot_detail = pilot_evidence(a.runs, a.pilot_run) if a.pilot_run else (False, None)
     frozen = inventory()
     now = datetime.now(timezone.utc).isoformat()
     readiness = dict(
@@ -197,8 +226,8 @@ def main():
         baseline_sha=head, harness_sha=prepare.HARNESS_SHA,
         contract_sha256=hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest(),
         image_digests=dict(found, runner=found['payment-claude-runner:' + launch.CLI_VERSION]),
-        **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE},
-        evidence=dict(smoke_runs=detail, attested=attest_evidence), frozen_at=now,
+        **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE}, pilot_passed=pilot_passed,
+        evidence=dict(smoke_runs=detail, attested=attest_evidence, pilot=pilot_detail), frozen_at=now,
         note='flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed')
     if a.output.exists():
         a.output.rename(a.output.with_name('readiness.superseded-%s.json' % now.replace(':', '-')))
