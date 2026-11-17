@@ -58,7 +58,7 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 `--kind` 없는 재개 턴은 유료 호출 전에 거부된다. `turn_kind`가 없는(또는 `invocation.json`이 없는) 턴 디렉터리가 있으면 상한 계산이 실패하고(건너뛰지 않음) 그 run의 다음 호출은 막힌다. `limit_gate` 결과(`invocation.json`의 `limits_before_call`)와 `ledger.json`에 `turn_kinds`(`delivered`: 성공 전달 수 `initial`·`feedback`·`answer` / `declared`: 시도별 선언 종류 수)와 `answer_turns`(limit 상태)가 남는다. 실패한 `feedback` 턴은 세지 않고, 그 `recovery`가 성공하면 1회로 센다(종전 "성공 턴만 센다" 규칙 유지).
 
-상한에 닿으면 `censored.json`(상태·그때의 사용량·어느 종류의 호출에서 닿았는지 `call`: `turn` 또는 `user-proxy`)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)과 그 호출의 종류를 기록한다. 산출물은 지우지 않는다. 상한은 **다음 유료 호출을 막는 규칙**이다(2026-11-17 결정): `censored.json`은 지우거나 고치지 않으며, 그 run에는 완료 여부와 관계없이 더 이상 호출이 나가지 않는다. 종료 상태는 아래 "종료와 커밋"의 `finish_run.py`가 판정표(`verdict.json`)와 `censored.json`에서 도출한다(종료 상태 표도 그 절).
+상한에 닿으면 `censored.json`(상태·그때의 사용량·어느 종류의 호출에서 닿았는지 `call`: `turn` 또는 `user-proxy`)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)과 그 호출의 종류를 기록한다. 산출물은 지우지 않는다. 상한은 **다음 유료 호출을 막는 규칙**이다(2026-11-17 결정): `censored.json`은 지우거나 고치지 않으며, 그 run에는 완료 여부와 관계없이 더 이상 호출이 나가지 않는다. 종료 상태는 아래 "종료와 커밋"의 `finish_run.py`가 판정표(`verdict.json`)에서 도출하고, `censored.json`은 통과하지 못한 run의 `CENSORED_*` 상태와 상한 표시(`cap_*`)에만 쓰인다(종료 상태 표도 그 절).
 
 ## 실패한 턴의 복구
 
@@ -114,17 +114,19 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 - run당 한 번이다. 이미 종료 상태(또는 `finished_at`)가 있으면 거부하고, 정정은 `--supersede --reason`으로만 한다. 이전 `run.json`은 `run.superseded-<시각>.json`으로 옆에 남고 새 기록의 `supersedes`가 그 파일·해시·사유를 가리킨다. 파일럿 재판정도 같은 방법이다.
 - 상한에 호출 전 차단으로 끝난 run은 새 턴 없이 그 시점까지의 기록으로 판정·종료 기록·커밋한다.
 
-종료 상태(실제 분기 — `finish_run.terminal`):
+종료 상태(실제 분기 — `finish_run.terminal`·`cap_annotation`). **통과 여부는 판정표만으로 정하고, 상한 기록은 표시로 붙는다**(명세 §10.2, 2026-11-18 — 이전의 "턴 초과일 때만 완료 + 초과", "호출 전 차단 + 전부 PASS는 거부"를 대체):
 
 | 판정표 | `censored.json` | `run.json` `status` | 함께 남는 것 |
 |---|---|---|---|
-| 20개 모두 `PASS` | 없음 | `PASSED` | `cap_reached=false` |
-| 20개 모두 `PASS` | `CENSORED_BUDGET`/`CENSORED_TIME`, `first.when="after call"`, `first.call="turn"`(마지막 **턴** 도중 초과) | `PASSED` | `cap_reached=true`, `cap_overshoot`(상한·초과량·그때 사용량·`call`) — 결과 표에서 "완료 + 초과" |
-| 20개 모두 `PASS` | 그 밖(`call="user-proxy"`, `call` 칸 없음, `before call` 차단, `CENSORED_TURNS`) | **거부**(기록 확인 후 메인 보고) | — |
-| 하나라도 `PASS`가 아님 | 있음 | `censored.json`의 `CENSORED_*` | `cap_reached=true` |
-| 하나라도 `PASS`가 아님 | 없음 | `FAILED` | — |
-| (인자 `--invalid-infra`) | 무관 | `INVALID_INFRA` | `invalid_infra`(사유·근거 해시), `all_acceptance_passed=false` |
+| 20개 모두 `PASS` | 없음 | `PASSED` | `cap_reached=false`, `cap`·`cap_*`는 null — 결과 표 "완료" |
+| 20개 모두 `PASS` | 있음, `first.when="before call"`(턴·대리 사용자 호출이 호출 전에 막힘, `CENSORED_TURNS` 포함) | `PASSED` | `cap_reached=true`, `cap_status`·`cap_when="before call"`·`cap_call`(`turn`/`user-proxy`), `cap_overshoot=null` — "완료 + 상한 도달" |
+| 20개 모두 `PASS` | 있음, `first.when="after call"`(턴·대리 사용자 호출 도중 초과) | `PASSED` | `cap_reached=true`, `cap_status`·`cap_when="after call"`·`cap_call`·`cap_overshoot`(초과량) — "완료 + 초과" |
+| 하나라도 `PASS`가 아님 | 있음 | `censored.json`의 `CENSORED_*` | 위와 같은 `cap_*` 표시 |
+| 하나라도 `PASS`가 아님 | 없음 | `FAILED` | `cap_reached=false` |
+| (인자 `--invalid-infra`) | 무관 | `INVALID_INFRA` | `invalid_infra`(사유·근거 해시), `all_acceptance_passed=false`, 상한 기록이 있으면 같은 `cap_*` 표시 |
 | `verdict.json` 없음(그리고 `--invalid-infra` 없음) | 무관 | **거부** | — |
+
+`cap`은 `censored.json`의 `first`를 옮긴 블록(상태·시점·호출 종류·그때 사용량·한도·초과량)이고 `cap_status`·`cap_when`·`cap_call`·`cap_overshoot`는 그 요약이다. `call` 칸이 없는 옛 상한 기록은 `cap_call=null`로 옮긴다. `censored.json`은 고치지 않으므로 상한에 닿은 run은 통과 여부와 관계없이 더 이상 유료 호출을 받지 않는다. 상한 기록의 `status`가 `CENSORED_BUDGET`·`CENSORED_TIME`·`CENSORED_TURNS`가 아니면 통과하지 못한 run의 종료 기록은 거부된다(기록을 확인해 메인에 보고).
 
 `commit_run.py`가 `PASSED`에 요구하는 네 칸은 종료 기록이 아래 원천에서만 쓴다(원천이 없거나 거짓이면 false — `run.json`에 미리 들어 있던 값은 덮어쓴다, 도출 내역은 `evidence_derivation`):
 

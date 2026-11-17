@@ -7,8 +7,9 @@ named in the manifest) and the cap record censored.json.
 PASSED/FAILED are never arguments: PASSED only when all of C01..C20 are PASS in verdict.json. INVALID_INFRA (an
 execution-environment failure unrelated to the implementation) is the only status given by argument, with a reason and
 evidence files. A run is finished once; a correction needs --supersede --reason and keeps the previous run.json beside
-the new one. A passed run whose last call went past the token or time cap is PASSED with the overshoot recorded, only
-when that call was a turn (censored.json 'call'); censored.json is never changed, so the run stays closed to new calls.
+the new one. Pass/fail comes from the verdict table alone; a cap record (censored.json) is copied as annotation
+(cap_reached, status, before/after call, call kind, overshoot) and decides the status only for a run that did not pass
+(CENSORED_*). censored.json is never changed, so a capped run stays closed to new calls.
 """
 import argparse
 from datetime import datetime, timezone
@@ -28,8 +29,7 @@ import freeze_readiness
 CRITERIA = tuple('C%02d' % n for n in range(1, 21))
 RESULTS = ('PASS', 'FAIL', 'PARTIAL', 'NOT_RUN')       # PARTIAL and NOT_RUN are not a pass (evaluation/README.md)
 VERDICT = 'verdict.json'
-# caps a passing last turn may have run past (the feedback cap stops the 31st delivery before it is sent)
-OVERSHOOT_CAPS = ('CENSORED_BUDGET', 'CENSORED_TIME')
+CENSORED_STATUSES = tuple(status for _, status in launch.CENSORED)   # what a cap record (censored.json) may name
 NOT_FINISHABLE = ('NOT_STARTED', 'SETUP_FAILED')        # setup failures follow the runbook's recovery, not this script
 # roles each arm must show with its agreed model at the finish (arm 3 includes the user proxy; the pilot check differs)
 RUN_ROLES = freeze_readiness.FINISH_ROLES
@@ -86,22 +86,30 @@ def read_verdict(folder, run_id):
             'evidence_complete': not missing and not unsupported}
 
 
-def terminal(passed, censored):
-    """(status, cap_overshoot) from the verdict table's outcome and the run's censored.json content (or None)."""
+def cap_annotation(censored):
+    """What run.json carries from the run's cap record (censored.json, never changed): which cap, when it was reached
+    (before a call / after a call), in which kind of call (turn / user-proxy; None when the record does not say), and
+    the overshoot amounts of a call that went past the cap (None for a call refused before it was made)."""
     if censored is None:
-        return ('PASSED' if passed else 'FAILED'), None
-    if not passed:
-        return censored['status'], None                 # not passed and capped: censored as before
+        return None
     first = censored.get('first') or {}
-    if censored.get('status') not in OVERSHOOT_CAPS or first.get('when') != 'after call' or first.get('call') != 'turn':
-        raise ValueError('a run censored %s (%s, call %s) cannot be PASSED: only a last TURN that went past the token or '
-                         'time cap counts as completed with overshoot; a cap record without the call kind does not'
-                         % (censored.get('status'), first.get('when'), first.get('call')))
-    return 'PASSED', {'censored_status': censored['status'], 'overshoot': first.get('overshoot') or {},
-                      'used': first.get('used'), 'limits': first.get('limits'), 'when': first['when'],
-                      'call': first['call'], 'at': first.get('at'),
-                      'record': 'censored.json (runner run directory, unchanged)',
-                      'rule': 'cap stops the next paid call; acceptance passed on the last turn (decision 2026-11-17)'}
+    when = first.get('when')
+    return {'status': censored.get('status'), 'when': when, 'call': first.get('call'), 'at': first.get('at'),
+            'overshoot': (first.get('overshoot') or {}) if when == 'after call' else None,
+            'used': first.get('used'), 'limits': first.get('limits'),
+            'record': 'censored.json (runner run directory, unchanged)'}
+
+
+def terminal(passed, censored):
+    """Terminal status from the verdict table alone: all 20 PASS -> PASSED whatever the cap record says; otherwise
+    the cap record's CENSORED_* when the run was capped, else FAILED. The cap record is annotation (cap_annotation)."""
+    if passed:
+        return 'PASSED'
+    if censored is not None:
+        if censored.get('status') not in CENSORED_STATUSES:
+            raise ValueError('censored.json carries no known cap status: %r' % (censored.get('status'),))
+        return censored['status']
+    return 'FAILED'
 
 
 def readiness_of(manifest):
@@ -170,12 +178,13 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
             if not file.is_file():
                 raise ValueError('INVALID_INFRA evidence does not exist: ' + rel)
             hashes[rel] = sha(file)
-        status, overshoot = 'INVALID_INFRA', None
+        status = 'INVALID_INFRA'
         invalid = {'reason': infra_reason, 'evidence': hashes}
     elif verdict is None:
         raise ValueError('%s missing: the main session writes the verdict table before the finish' % (folder / VERDICT))
     else:
-        status, overshoot = terminal(verdict['passed'], censored)
+        status = terminal(verdict['passed'], censored)
+    cap = cap_annotation(censored)
     fields, derivation = evidence_fields(run, manifest, verdict)
     if invalid:
         fields['all_acceptance_passed'] = False
@@ -185,12 +194,15 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
         shutil.copy2(record_path, kept)
         record['supersedes'] = {'file': kept.name, 'sha256': sha(kept), 'previous_status': record.get('status'),
                                 'reason': supersede_reason, 'at': now}
-    record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_overshoot=overshoot,
-                  cap_reached=censored is not None, finished_at=now, evidence_derivation=derivation, **fields)
+    # the cap record is copied as annotation: the result table tells "completed", "completed + cap reached" (refused
+    # before a call) and "completed + overshoot" (a call went past the cap) apart
+    record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_reached=cap is not None, cap=cap,
+                  cap_status=cap and cap['status'], cap_when=cap and cap['when'], cap_call=cap and cap['call'],
+                  cap_overshoot=cap and cap['overshoot'], finished_at=now, evidence_derivation=derivation, **fields)
     tmp = record_path.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(record_path)
-    return record_path, status, overshoot, fields
+    return record_path, status, cap, fields
 
 
 def main():
@@ -211,11 +223,11 @@ def main():
     if a.evidence and a.invalid_infra is None:
         p.error('--evidence belongs to --invalid-infra')
     try:
-        path, status, overshoot, fields = finish(a.run_id, a.runs, infra_reason=a.invalid_infra, infra_evidence=a.evidence,
-                                                 supersede_reason=a.reason if a.supersede else None)
+        path, status, cap, fields = finish(a.run_id, a.runs, infra_reason=a.invalid_infra, infra_evidence=a.evidence,
+                                           supersede_reason=a.reason if a.supersede else None)
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         p.error(str(exc))
-    print(json.dumps({'record': str(path), 'status': status, 'cap_overshoot': overshoot, **fields}, ensure_ascii=False))
+    print(json.dumps({'record': str(path), 'status': status, 'cap': cap, **fields}, ensure_ascii=False))
     return 0
 
 

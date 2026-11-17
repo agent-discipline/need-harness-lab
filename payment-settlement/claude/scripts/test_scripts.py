@@ -916,30 +916,48 @@ class FinishRunTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.finish(root, infra_reason='x', infra_evidence=['e.txt'])
 
-    def test_overshoot_completion_only_when_the_capped_call_was_a_turn(self):
+    def test_pass_or_fail_comes_from_the_verdict_and_the_cap_record_is_annotation(self):
         after = lambda call, status='CENSORED_BUDGET': {'status': status, 'first': dict(
-            {'when': 'after call', 'overshoot': {'token_limit': 500}, 'used': {}, 'limits': {}},
+            {'when': 'after call', 'overshoot': {'token_limit': 500}, 'used': {'token_limit': 20000500}, 'limits': {}},
             **({'call': call} if call else {}))}
-        with tempfile.TemporaryDirectory() as tmp:
-            root, run, folder = finish_fixture(tmp, censored=after('turn'))
-            before = (run / 'censored.json').read_bytes()
-            _, status, overshoot, _ = self.finish(root)
-            self.assertEqual((status, overshoot['censored_status'], overshoot['call'], overshoot['overshoot']),
-                             ('PASSED', 'CENSORED_BUDGET', 'turn', {'token_limit': 500}))
-            self.assertIs(self.record(folder)['cap_reached'], True)
-            self.assertEqual((run / 'censored.json').read_bytes(), before)
-            with self.assertRaises(RuntimeError):
-                finish_run.launch.limit_gate(run, next_is_feedback=False)
-        for censored in (after('user-proxy'), after(None), after('turn', 'CENSORED_TURNS'),
-                         {'status': 'CENSORED_TIME', 'first': {'when': 'before call', 'call': 'turn'}}):
-            with self.subTest(censored=censored), tempfile.TemporaryDirectory() as tmp:
-                root, _, folder = finish_fixture(tmp, censored=censored)
-                with self.assertRaises(ValueError):
-                    self.finish(root)
-                self.assertEqual(self.record(folder)['status'], 'RUNNING')
-        with tempfile.TemporaryDirectory() as tmp:                              # not passed and capped: censored
-            root, _, _ = finish_fixture(tmp, censored=after('user-proxy', 'CENSORED_TIME'), results={'C01': 'FAIL'})
-            self.assertEqual(self.finish(root)[1:3], ('CENSORED_TIME', None))
+        before_call = lambda status, call: {'status': status, 'first': {'when': 'before call', 'call': call,
+                                                                       'overshoot': {'time_limit_seconds': 3.0}}}
+        cases = {'turn overshoot': (after('turn'), ('CENSORED_BUDGET', 'after call', 'turn', {'token_limit': 500})),
+                 'proxy overshoot': (after('user-proxy', 'CENSORED_TIME'),
+                                     ('CENSORED_TIME', 'after call', 'user-proxy', {'token_limit': 500})),
+                 'record without call kind': (after(None), ('CENSORED_BUDGET', 'after call', None, {'token_limit': 500})),
+                 'blocked before a turn': (before_call('CENSORED_TIME', 'turn'), ('CENSORED_TIME', 'before call', 'turn', None)),
+                 'blocked before a proxy call': (before_call('CENSORED_BUDGET', 'user-proxy'),
+                                                 ('CENSORED_BUDGET', 'before call', 'user-proxy', None)),
+                 'feedback cap': (before_call('CENSORED_TURNS', 'turn'), ('CENSORED_TURNS', 'before call', 'turn', None))}
+        for name, (censored, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                root, run, folder = finish_fixture(tmp, censored=censored)
+                kept = (run / 'censored.json').read_bytes()
+                _, status, cap, _ = self.finish(root)
+                self.assertEqual(status, 'PASSED')                               # all 20 PASS: passed whatever the cap
+                record = self.record(folder)
+                self.assertIs(record['cap_reached'], True)
+                self.assertEqual((record['cap_status'], record['cap_when'], record['cap_call'], record['cap_overshoot']),
+                                 expected)
+                self.assertEqual(record['cap'], cap)
+                self.assertEqual((run / 'censored.json').read_bytes(), kept)     # never modified
+                with self.assertRaises(RuntimeError):                            # still no further paid call
+                    finish_run.launch.limit_gate(run, next_is_feedback=False)
+            with self.subTest(name + ' / not passed'), tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp, censored=censored, results={'C01': 'FAIL'})
+                self.assertEqual(self.finish(root)[1], censored['status'])     # not passed and capped: CENSORED_*
+                self.assertIs(self.record(folder)['cap_reached'], True)
+        with tempfile.TemporaryDirectory() as tmp:                              # no cap record
+            root, _, folder = finish_fixture(tmp)
+            self.assertEqual(self.finish(root)[1:3], ('PASSED', None))
+            record = self.record(folder)
+            self.assertEqual((record['cap_reached'], record['cap_status'], record['cap_overshoot']), (False, None, None))
+        with tempfile.TemporaryDirectory() as tmp:                              # a cap record with no known status
+            root, _, folder = finish_fixture(tmp, censored={'status': 'DONE', 'first': {}}, results={'C01': 'FAIL'})
+            with self.assertRaises(ValueError):
+                self.finish(root)
+            self.assertEqual(self.record(folder)['status'], 'RUNNING')
 
     def test_pilot_records_go_to_the_pilot_folder(self):
         with tempfile.TemporaryDirectory() as tmp:

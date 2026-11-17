@@ -1053,8 +1053,8 @@ CALL_KINDS = ('turn', 'user-proxy')                   # the kinds of paid call a
 
 def censor(dest, state, when, call):
     """Write censored.json once (the first cap reached decides the status); later overshoot is appended, never erased.
-    call names the kind of paid call that was refused or went past the cap ('turn' or 'user-proxy'): only a turn that
-    went past the cap can end in "completed + overshoot" (scripts/finish_run.py)."""
+    call names the kind of paid call that was refused or went past the cap ('turn' or 'user-proxy'); scripts/finish_run.py
+    copies it into run.json as annotation (pass/fail comes from the verdict table)."""
     if call not in CALL_KINDS:
         raise ValueError('call must be one of ' + ', '.join(CALL_KINDS))
     path = dest / 'censored.json'
