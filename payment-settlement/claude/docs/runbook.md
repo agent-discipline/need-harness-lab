@@ -10,7 +10,10 @@ python3 payment-settlement/claude/scripts/verify_setup.py
 docker build -t payment-claude-runner:2.1.326 payment-settlement/claude/runner
 ```
 
-인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 3번의 두 번째 리뷰어(`fable-review`)도 같은 토큰을 컨테이너 환경에서 물려받는다. 추가 자격증명 파일은 없다.
+인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 추가 자격증명 파일은 없다.
+
+- 1·2번: 컨테이너는 이미지 사용자 `node`(uid 1000)로 `claude`를 바로 실행하고 토큰은 컨테이너 환경에서 받는다(변경 없음).
+- 3번(명세 §11, 파일럿 01 뒤): Claude Code 2.1.326은 Bash 도구의 자식 프로세스 환경에서 `CLAUDE_CODE_OAUTH_TOKEN`을 뺀다 — 그래서 PM 셸에서 띄우던 리뷰어가 `Not logged in`으로 실패했다. 이제 3번 컨테이너는 root로 시작하되 능력은 `SETUID`·`SETGID`·`DAC_READ_SEARCH` 셋뿐이고(`--cap-drop=ALL`·`no-new-privileges` 유지), 시작 스크립트 `lab-arm3-start`가 ① 리뷰어 도우미(`fable_review.py serve`)를 별도 계정 `fablereview`(uid 2001)로 띄워 토큰을 **그 프로세스 환경에만** 두고(다른 uid는 `/proc/<pid>/environ`을 읽지 못한다), ② PM을 지금과 같은 `node`로 실행하면서 토큰을 환경변수가 아니라 상속한 파이프(`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=3`, CLI가 한 번 읽음)로 준다. PM 쪽 `fable-review`는 소켓(`/run/fable-review/socket`)으로 작업 디렉터리와 프롬프트만 보내고, 모델·도구·effort·리뷰어 config dir은 도우미 시작 때 고정된다. 리뷰어 config dir(리뷰어 volume, 0700 `fablereview`)과 도우미의 프로세스 환경은 PM의 사용자가 읽을 수 없다. 도우미의 `DAC_READ_SEARCH`는 PM이 `mktemp -d`(0700)로 만든 미러를 읽기 위한 것이고 PM의 파일에 쓰지는 못한다. 무과금 실측(2026-11-18, 더미 토큰·`--network none`): `node`로 읽을 수 있는 파일·`/proc/*/environ`·`cmdline`·`fd` 어디에도 토큰이 없음, 도우미 종료 시도 거부, 미러 읽기 가능·쓰기 거부, 형식 밖 요청 거부(exit 94).
 
 ## 시행 (한 번에 하나, schedule.json 순서)
 
@@ -29,10 +32,14 @@ python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env
 python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
 # 평가자가 판정·피드백(prompts/feedback.md 형식)을 쓴 뒤 같은 세션으로 재개 — 재개 턴은 반드시 --kind를 선언한다
 python3 $L turn --run-id claude-arm1-core01 --resume --kind feedback --prompt /tmp/next-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
-# 3번만: 대리 사용자 답(scripts/consult_contract.py → consults/NNNN/response.txt)을 PM에게 전하는 턴
-python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt /tmp/answer-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
+# 3번만: 대리 사용자 답을 PM에게 전하는 턴. 프롬프트 = consults/NNNN/response.txt 바이트 그대로(머리말·진행자 문구를 붙이지 않는다)
+python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt .runs/claude-arm3-core01/consults/0001/response.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
+
+턴 제한 시간(2026-11-18 결정): **턴마다 따로 정한 제한은 없고 run 상한 8시간만 있다.** `launch.py turn`과 `start_cycle.py`의 `--timeout-seconds` 기본값은 28,800초이고, 실행기가 매 턴 남은 run 시간으로 줄인다(`invocation.json`의 `effective_timeout_seconds`). 값을 주지 않는다.
+
+비용(파일럿 01 실측): `--resume` 턴의 `total_cost_usd`·`modelUsage`는 세션 누적값이다. 장부(`ledger.json`)의 `cost_usd`는 고정 세션의 마지막 누적값(턴마다 직전 턴 대비 증가분 — `cost_by_call`) + 리뷰어 호출 + 대리 사용자 호출이고, 관측하지 못한 값이 있으면 `null`이다(`cost_semantics`). 한 턴에 `result` 이벤트가 여럿이면(백그라운드 워커가 끝난 뒤 세션이 다시 이어짐) 네 카운터를 모두 더해 `usage_cross_check.reported`로 대조한다(`result_events`). `result.usage`는 서브에이전트 요청을 포함하지 않으므로 기대 일치는 `main_delta=0`이고, 상한 게이트는 요청 단위 장부만 쓴다.
 
 이미지: 동결 전(인증 스모크)에는 `--image`(기본 `payment-claude-runner:2.1.326` 태그)를 쓴다. `readiness.json`이 생긴 뒤의 `init`(파일럿·사이클)은 그 동결 digest만 쓴다 — `--image`를 생략하면 digest가 들어가고, 다른 값은 거부된다(바꾸려면 새 프로토콜 버전). 동결 전 실행은 **기본 위치**(`docs/results/readiness.json`)에 동결 파일이 없을 때만 된다 — `--readiness`로 경로를 명시했는데 그 파일이 없으면 `init`은 거부한다. 3번의 대리 사용자 호출(`consult_contract.py`)은 그 run의 manifest에 고정된 이미지(`image`)로만 실행한다(`invocation.json`의 `image`).
 
@@ -182,7 +189,9 @@ python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judgi
 
 - 네트워크: `--network`를 주지 않으면 기본 bridge라 다른 컨테이너에 IP로 닿을 수 있다. 격리 주장은 파일시스템·세션·상태 범위다(Codex 판과 동일한 정직 경계).
 - headless(`-p`)에서 git-guard의 `permissionDecision: ask`는 승인 UI가 없다. push는 금지 영역이므로 실험 영향은 작지만 관측 결과를 run 문서에 남긴다.
-- 3번 두 번째 리뷰어(`fable-review`)는 PM의 Bash 호출이라 하네스의 `codex-scan` 훅(명령 문자열 시크릿 backstop)이 발화하지 않는다. playbook §5 ① 절차 보안 스캔이 유일한 보장이다. 리뷰어 호출이 실패하거나 사용량을 관측하지 못하면 `usage_complete=false`·`reviewer_usage_pending=true`로 남고 성공으로 위장하지 않는다.
+- 3번 두 번째 리뷰어(`fable-review`)는 PM의 Bash 호출이라 하네스의 `codex-scan` 훅(명령 문자열 시크릿 backstop)이 발화하지 않는다. playbook §5 ① 절차 보안 스캔이 유일한 보장이다. 리뷰어 호출이 실패하거나 사용량을 관측하지 못하면 `usage_complete=false`·`reviewer_usage_pending=true`로 남고 성공으로 위장하지 않는다. 예외 하나: API 요청 없이 실패한 시도(원시 결과가 오류·네 카운터 0, transcript에 requestId 있는 줄 없이 `<synthetic>` 0 사용량 줄만)는 "실패한 시도, 사용량 0"으로 `reviewer.failed_attempts_without_requests`에 남고 턴을 미완전으로 만들지 않는다. 실패 시도 수는 턴의 `reviewer.calls_failed_this_turn`과 장부의 `reviewer_calls_failed`·`reviewer_failed_attempts_without_requests`에 보인다.
+- 3번 `fable-review` 종료 코드: 0 성공, 96 빈/오류 리뷰, 97 시도 기록 불가(호출 거부), 94 요청 거부(작업 디렉터리가 `/tmp`·`/workspace` 밖, 빈 프롬프트, 형식 밖 요청), 95 도우미에 닿지 못함, 98 리뷰어 없음(1·2번), 2 인자 있음. 도우미가 준비되지 않으면 `lab-arm3-start`가 PM을 시작하지 않고 exit 91로 끝난다(턴 실패, 유료 호출 없음). 도우미의 로그는 턴의 `stderr.txt`에 `[fable-review-helper]`·`[lab-arm3-start]`로 남는다.
+- 3번 격리의 전제: 호스트 `kernel.yama.ptrace_scope=1`(2026-11-18 확인)이라 PM의 Bash 자식이 부모 `claude`의 메모리(`/proc/<pid>/mem`)를 읽지 못한다. 이 값이 0인 호스트에서는 같은 uid의 메모리 읽기가 가능해지므로 실행 전 확인한다.
 - v1(2026-09-23)의 codex 관련 경계(bubblewrap 샌드박스 실패, read-only auth 갱신)는 v3-claude에 해당하지 않는다.
 
 ## v3 인증 스모크와 동결
@@ -205,7 +214,16 @@ python3 $L turn --run-id smoke-v3-arm2 --prompt $P/smoke-1-prompt.txt --env-file
 python3 $L turn --run-id smoke-v3-arm3 --prompt $P/smoke-3-arm3-negative-prompt.txt --env-file $E --cache-policy observed-cache --max-turns 4 --max-budget-usd 1 --timeout-seconds 600
 ```
 
-확인(각 run의 `turns/0001/result.json`): `status: ok`·`usage_complete: true`·`session_id_confirmed: true`·`incomplete: []`, 1·2번 `transcript_models`가 `claude-opus-5-5`, 3번 `claude-fable-5-2`. 3번은 `stdout.jsonl`의 최종 응답이 `HOOK_BLOCKED: [gate-guard] …`이고 `workspace/src/main/kotlin/lab/payment/Probe.kt`가 없어야 한다(`HOOK_PASSED`나 파일 생성은 실패 — 메인에 보고). 3번 스모크는 리뷰어를 부르지 않으므로 `reviewer.log_absent`·`projects_absent`가 true, `reviewer_dir_rc`가 0이어야 한다(리뷰어 디렉터리를 읽지 못하면 `usage_complete=false`로 남는다 — 그대로 보고). 한 조건이라도 기준을 못 채우면 동결하지 않는다. 같은 run id로는 다시 `init`할 수 없으므로(덮어쓰기 거부) 다시 하는 조건은 새 id(예 `smoke-v3r2-arm3`)로 하고, 동결의 `--smoke-run`에도 그 id를 준다.
+확인(각 run의 `turns/0001/result.json`): `status: ok`·`usage_complete: true`·`session_id_confirmed: true`·`incomplete: []`, 1·2번 `transcript_models`가 `claude-opus-5-5`, 3번 `claude-fable-5-2`. 3번은 `stdout.jsonl`의 최종 응답이 `HOOK_BLOCKED: [gate-guard] …`이고 `workspace/src/main/kotlin/lab/payment/Probe.kt`가 없어야 한다(`HOOK_PASSED`나 파일 생성은 실패 — 메인에 보고). 3번 훅 스모크는 리뷰어를 부르지 않으므로 `reviewer.log_absent`·`projects_absent`가 true, `reviewer_dir_rc`가 0이어야 한다(리뷰어 디렉터리를 읽지 못하면 `usage_complete=false`로 남는다 — 그대로 보고). 한 조건이라도 기준을 못 채우면 동결하지 않는다. 같은 run id로는 다시 `init`할 수 없으므로(덮어쓰기 거부) 다시 하는 조건은 새 id(예 `smoke-v3r2-arm3`)로 하고, 동결의 `--smoke-run`에도 그 id를 준다.
+
+**3번 리뷰어 스모크(명세 §11.5 — 동결 전 필수).** 리뷰어 인증과 리뷰어 역할 사용량 수집을 동결 전에 실제 호출 1회로 확인한다. 3번 run을 하나 더 만들고 PM이 `fable-review`를 한 번 부르게 한다(프롬프트 `smoke-3-arm3-reviewer-prompt.txt`, 9월 파일과 같은 폴더의 새 파일). 리뷰어 호출이 몇 분 걸릴 수 있어 `--timeout-seconds 1800`, `--max-turns 4`:
+
+```bash
+python3 $L init --run-id smoke-v3r3-arm3-reviewer --arm 3 --core 1 --harness payment-settlement/claude/harness-source
+python3 $L turn --run-id smoke-v3r3-arm3-reviewer --prompt $P/smoke-3-arm3-reviewer-prompt.txt --env-file $E --cache-policy observed-cache --max-turns 4 --max-budget-usd 1 --timeout-seconds 1800
+```
+
+확인(`turns/0001/result.json`): `status: ok`·`usage_complete: true`·`incomplete: []`, `roles`에 `reviewer`, `reviewer.calls_succeeded_this_turn` ≥ 1·`reviewer.event_count` ≥ 1·`reviewer_usage_pending: false`, `reviewer.cost_usd`가 숫자, 최종 응답 `REVIEWER_OK: …`. `stderr.txt`에 `[lab-arm3-start] reviewer helper ready`. 이 조건을 채운 3번 스모크 턴이 하나도 없으면 동결의 `usage_collector_verified`는 false다(`freeze_readiness.reviewer_smoke_turn`, readiness의 `evidence.smoke_runs.<id>.reviewer_smoke_turns`). `REVIEWER_FAILED`·`Not logged in`·exit 95/97이면 동결하지 않고 메인에 보고한다. 이미지가 바뀐 뒤에는 세 조건 스모크를 모두 새 이미지로 다시 한다(readiness의 `evidence.smoke_runs.<id>.image_ids`가 동결하는 runner id와 같은지 확인 — 동결 도구는 이 값을 기록만 하고 막지는 않는다).
 
 ### 증거 내보내기 (진행자, 무과금)
 
@@ -255,7 +273,23 @@ python3 payment-settlement/claude/scripts/freeze_readiness.py \
   --attest payment-settlement/claude/docs/results/setup/v3/attestation.json
 ```
 
-(다시 한 조건은 그 새 id로.) 동결 입력(`FROZEN`)에 미커밋 변경이 있으면 거부된다. 스모크 run의 `discard`는 내보내기 뒤에 한다 — 동결은 run 디렉터리의 파일만 읽으므로 volume이 없어도 된다.
+(다시 한 조건은 그 새 id로. 3번 리뷰어 스모크 run도 `--smoke-run`으로 준다.) 동결 입력(`FROZEN`)에 미커밋 변경이 있으면 거부된다. 스모크 run의 `discard`는 내보내기 뒤에 한다 — 동결은 run 디렉터리의 파일만 읽으므로 volume이 없어도 된다.
+
+### 본 실험 전 동결 대체 (사용자 결정 2026-11-18)
+
+동결 입력(실행기·스크립트 등)이나 이미지가 바뀌었는데 **본 실험 run이 하나도 시작되지 않았으면** 프로토콜 이름을 유지한 채 동결을 대체할 수 있다. "시작되지 않음"은 플래그가 아니라 `start_cycle.py`가 쓰는 증거에서 도출한다(`freeze_readiness.experiment_started`): 30개 `docs/experiments/<arm>/core<N>/run.json`이 모두 `NOT_STARTED`, `.runs/claude-armA-coreNN` 폴더 없음, `cycles.json`의 사이클이 모두 `NOT_STARTED`, `experiment: claude-arm…` 커밋 없음(읽지 못한 기록은 "시작됨"으로 본다).
+
+```bash
+python3 payment-settlement/claude/scripts/freeze_readiness.py --supersede-before-runs --reason "<대체 사유>" \
+  --smoke-run <arm1 id> --smoke-run <arm2 id> --smoke-run <arm3 훅 id> --smoke-run <arm3 리뷰어 id> \
+  --attest payment-settlement/claude/docs/results/setup/v3/attestation.json
+```
+
+- 이전 `readiness.json`·`frozen-inputs.json`은 지우지 않고 옆에 `readiness.superseded-<시각>.json`·`frozen-inputs.superseded-<시각>.json`으로 보관된다. 새 readiness의 `supersedes`에 사유·시각·이전 `contract_sha256`·이전 이미지 id·보관 파일과 그 sha256·바뀐 입력 목록이 남는다.
+- `pilot_passed`는 false로 돌아간다(`--pilot-run`과 함께 쓰면 거부). 파일럿은 새 동결로 다시 한다.
+- `--reason`이 없거나 `--replace`와 함께면 거부. 본 실험 run이 하나라도 시작됐으면 거부되고 종전 규칙(동결 뒤 변경 = 프로토콜 버전 변경·전 조건 재실행)이 적용된다.
+- 파일럿 뒤 입력이 그대로일 때의 `--replace --pilot-run`(플래그만 다시 도출)은 그대로다.
+- 증명 파일의 근거(`attestation.json`의 스모크 내보내기)는 새 스모크 run의 파일로 다시 쓴다(메인).
 
 ## 실험 개시 체크리스트
 
@@ -278,5 +312,17 @@ python3 payment-settlement/claude/scripts/freeze_readiness.py \
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
 - [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴 — 명령은 위 "v3 인증 스모크와 동결") → 증거 내보내기 → 메인이 증명 파일 작성 → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3> --attest payment-settlement/claude/docs/results/setup/v3/attestation.json`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 스모크 산출물과 해시된 증명에서만 도출)
 - [ ] 파일럿 개시 전 게이트(파일럿 init 직전, 통과해야만 init): `python3 payment-settlement/claude/scripts/preflight.py --stage pilot --readiness payment-settlement/claude/docs/results/readiness.json --core 1` → `"ready": true`, exit 0. 이 명령은 readiness를 세 조건 각각의 run 기록(`docs/experiments/<arm>/core1/run.json` — 조건·모델·provider)과 합쳐(사이클 게이트 `start_cycle.gate`와 같은 함수 `preflight.merge`, 조건의 관측 모델 `actual_models[<arm>]`이 `actual_model`이 된다) 조건마다 검사한다. `pilot_passed`만 면제되고 나머지 플래그는 전부 리터럴 true여야 한다(가짜 true 금지 — 프로토콜·상한 포함). exit 2면 `blockers`를 메인에 보고하고 파일럿을 시작하지 않는다. (`--arm 3`으로 한 조건만 볼 수 있으나 개시 게이트는 세 조건 전부로 한다.) 이 게이트는 `init --pilot`에 내장돼 있지 않다 — 진행자가 반드시 먼저 실행하고 출력을 파일럿 기록에 남긴다
-- [ ] 파일럿 init: `python3 payment-settlement/claude/runner/launch.py init --pilot --run-id claude-pilot-01 --arm 3 --core 1 --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json` — 파일럿 run id는 `claude-pilot-NN`(그 밖의 id에 `--pilot`, 또는 `--pilot` 없이 이 접두는 거부), 기록은 `docs/pilots/<run id>/`. readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`로 확인한다
+- [ ] 파일럿 init + Compose: 본 실험(`start_cycle.py`)과 같은 순서·같은 방식이다 — run마다 자기 Compose project를 만들고 그 네트워크로 init한다(`--network`가 없으면 실행기가 `DB_URL`·`BANK_BASE_URL`을 넘기지 않아 PM이 DB·은행에 닿지 못한다). 파일럿 01에서 동작한 명령(NN·포트만 바꾼다, 포트는 `ss -ltn`으로 비어 있는지 확인):
+  ```bash
+  N=02; PROJECT=payment-claude-pilot-$N
+  python3 payment-settlement/claude/runner/launch.py init --pilot --run-id claude-pilot-$N --arm 3 --core 1 \
+    --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json \
+    --network ${PROJECT}_default
+  ARM=.runs/claude-pilot-$N CORE=workspace APP_PORT=38001 DB_PORT=39001 BANK_PORT=40001 \
+    docker compose -p $PROJECT -f payment-settlement/claude/compose.yaml up -d --wait db bank
+  python3 payment-settlement/claude/scripts/lab.py prompt --arm 3 > payment-settlement/claude/docs/pilots/claude-pilot-$N/initial-prompt.txt
+  ```
+  (명령은 저장소 루트에서, `ARM`은 `start_cycle.py`처럼 `payment-settlement/claude` 기준 상대 경로 `.runs/<run id>`.) 파일럿 run id는 `claude-pilot-NN`(그 밖의 id에 `--pilot`, 또는 `--pilot` 없이 이 접두는 거부), 기록은 `docs/pilots/<run id>/`. readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`·`network`로 확인한다
+- [ ] 파일럿 턴: 첫 턴 `turn --run-id claude-pilot-NN --prompt <initial-prompt.txt> --env-file … --cache-policy observed-cache`(`--timeout-seconds`는 주지 않는다 — 기본 28,800초를 남은 시간으로 줄임). PM이 질문·승인 요청으로 끝나면 그 응답 전문을 `questions-NNN.txt`로 저장해 `consult_contract.py`로 보내고, `consults/NNNN/response.txt`를 **바이트 그대로** `--resume --kind answer --prompt`로 보낸다. 매 턴 뒤 `normalize` + `capture_turn.py --turn N --analysis <메모>`
+- [ ] 실행 환경 때문에 멈춘 파일럿의 종료(예: `claude-pilot-01`, 명세 §11.8): 판정 없이 `finish_run.py --run-id claude-pilot-NN --invalid-infra "<사유>" --evidence <기록 폴더 기준 근거 파일> [--evidence …]`(근거 예: `reviewer-failure/reviewer-calls.log`·`reviewer-failure/<session>.json`·`conductor-journal.md`). `--invalid-infra`에는 `verdict.json`이 없어도 된다(있으면 판정표 규칙대로 검사되고, 20개 모두 `PASS`면 거부). 근거 파일은 기록 폴더 안에 있어야 하고, 남은 턴은 먼저 `capture_turn.py`로 기록한다. 그 뒤 `docker compose -p payment-claude-pilot-NN -f payment-settlement/claude/compose.yaml down -v`, `launch.py discard --run-id claude-pilot-NN`, 기록 폴더는 남기고 일반 docs 커밋. (파일럿 01은 리뷰어 도우미 이전 manifest라 `reviewer_uid`가 없고, `discard`는 리뷰어 volume을 종전처럼 이미지 사용자로 나열한다)
 - [ ] 파일럿 뒤: `freeze_readiness.py ... --pilot-run <id> --replace`로 `pilot_passed`를 파일럿 산출물에서 도출(파일럿 manifest가 init 때 기록한 `contract_sha256`·`image`가 지금 쓰는 동결값과 같을 때만 통과). `--replace`는 플래그만 다시 도출한다 — 동결 입력(`frozen-inputs.json`)이나 이미지 id가 바뀌었으면 거부된다(프로토콜 버전 변경·전 조건 재실행 대상) → 사이클 개시 게이트(`start_cycle.py`, 항상 `--stage cycle` 기준)
