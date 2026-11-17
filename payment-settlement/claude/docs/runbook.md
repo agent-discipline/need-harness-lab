@@ -66,9 +66,24 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 ## 종료와 커밋
 
-run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ② `launch.py normalize --run-id <id>` → ③ `scripts/capture_turn.py`로 남은 턴 기록(`ledger.json`이 기록에 복사된다) → ④ `launch.py discard --run-id <id>` → ⑤ `commit_run.py`. ④는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
+run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ①′ 평가 비용 기록(아래 절) → ② `launch.py normalize --run-id <id>` → ③ `scripts/capture_turn.py`로 남은 턴 기록(`ledger.json`이 기록에 복사된다) → ④ `launch.py discard --run-id <id>` → ⑤ `commit_run.py`. ④는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
 
 `scripts/commit_run.py --arm N --core M`(Codex 판의 바이트 복사본 — Codex 쪽이 바뀌면 `verify_setup.py` 패리티가 깨지므로 그때 다시 복사한다)이 상태·문서(`summary.md`·`transcript.md`·`events.jsonl`·`usage-summary.json`·**`issues.md`** — 그 시행에서 발생한 문제와 해결)·이전 시행 커밋 여부를 확인한 뒤 해당 core와 기록만 커밋한다. 원격 push는 하지 않는다. 실험 종료 후 `launch.py discard --run-id <id>`가 run별 Docker volume의 파일 목록(내용 아님)을 `discard-<시각>.json`에 기록한 뒤 volume을 제거한다. `credentials_file_in_volume`이 `null`이면 조회 실패이므로 "없음"으로 읽지 않는다.
+
+## 평가 비용 기록 (진행자·판정 어댑터)
+
+진행자(실험 진행 에이전트)와 판정 어댑터의 토큰은 **평가 비용**이다. run의 2,000만 상한에도, 조건의 비용 합계에도 넣지 않고 장부(`ledger.json`)의 `evaluation_cost` 블록에 역할별로 따로 남는다. 기록이 없는 역할은 `"not recorded"`로 보이며 0으로 읽지 않는다.
+
+```bash
+# 판정 어댑터: 그 시행을 위해 어댑터를 LLM으로 작성·수정했을 때, 작성 직후
+python3 payment-settlement/claude/scripts/record_evaluation_cost.py --run-id <id> --role judging-adapter --model <보고된 모델 id> \
+  --total-tokens <합> --source "<숫자의 출처: 예 작성 에이전트 완료 알림 usage>"
+# 진행자: run 종료 순서 ①′에서, 그 run을 맡은 진행자 세션의 사용량으로
+python3 payment-settlement/claude/scripts/record_evaluation_cost.py --run-id <id> --role conductor --model <보고된 모델 id> \
+  --input-tokens N --cache-creation-input-tokens N --cache-read-input-tokens N --output-tokens N --source "<출처>"
+```
+
+원천이 네 카운터를 주면 넷 다(`usage`), 합계만 주면 `--total-tokens`만 넣는다(분할은 미관측으로 남는다). 한 진행자 세션이 여러 run을 맡아 run별로 나눌 수 없으면 `--source`에 그 세션이 맡은 run id를 함께 적는다. 기록은 `.runs/<id>/evaluation/NNNN/record.json`에 쌓이고 덮어쓰지 않는다. 판정 어댑터를 LLM 없이 썼으면 그 사실을 `issues.md`에 적는다(기록하지 않으면 `not recorded`로 남는다).
 
 ## 사이클 준비 실패 복구
 

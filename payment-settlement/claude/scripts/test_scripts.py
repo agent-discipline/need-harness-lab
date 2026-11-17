@@ -18,6 +18,7 @@ import capture_turn
 import consult_contract
 import freeze_readiness
 import preflight
+import record_evaluation_cost
 import start_cycle
 
 USAGE = {'input_tokens': 1, 'cache_creation_input_tokens': 2, 'cache_read_input_tokens': 3, 'output_tokens': 4}
@@ -609,6 +610,63 @@ class ConsultContractTest(unittest.TestCase):
             ledger = json.loads((run_dir / 'ledger.json').read_text())
             self.assertEqual((ledger['consults'], ledger['consults_completed'], ledger['consults_not_completed']),
                              (3, 1, ['0002', '0003']))
+
+
+class EvaluationCostTest(unittest.TestCase):
+    def run_dir(self, tmp):
+        run = Path(tmp) / 'runs/claude-arm1-core01'
+        write(run / 'manifest.json', {'run_id': 'claude-arm1-core01', 'arm': 1})
+        t = run / 'turns/0001'
+        write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': '2026-11-17T00:00:00+00:00'})
+        write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'cost': {'pinned_session_usd': 0.5, 'reviewer_applicable': False}})
+        (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r1', model='m', role='implementer', turn='0001', usage=USAGE)) + '\n')
+        return run
+
+    def cli(self, tmp, *extra):
+        argv = ['record_evaluation_cost.py', '--runs', str(Path(tmp) / 'runs'), '--run-id', 'claude-arm1-core01'] + list(extra)
+        err = io.StringIO()
+        with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            try:
+                return record_evaluation_cost.main(), err.getvalue()
+            except SystemExit as exc:
+                return exc.code, err.getvalue()
+
+    def test_conductor_and_judging_adapter_are_evaluation_cost_outside_cap_and_arm_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.run_dir(tmp)
+            launch = record_evaluation_cost.launch
+            before = launch.run_ledger(run)
+            self.assertEqual(before['evaluation_cost']['roles'],
+                             {'conductor': {'status': 'not recorded'}, 'judging-adapter': {'status': 'not recorded'}})
+            code, err = self.cli(tmp, '--role', 'conductor', '--model', 'claude-opus-5-5', '--input-tokens', '100',
+                                 '--cache-creation-input-tokens', '0', '--cache-read-input-tokens', '900', '--output-tokens',
+                                 '50', '--source', 'agent completion notice', '--cost-usd', '0.3')
+            self.assertEqual(code, 0, err)
+            ledger = json.loads((run / 'ledger.json').read_text())
+            block = ledger['evaluation_cost']
+            self.assertEqual(block['roles']['conductor']['total_tokens'], 1050)
+            self.assertEqual(block['roles']['conductor']['cost_usd'], 0.3)
+            self.assertEqual(block['roles']['judging-adapter'], {'status': 'not recorded'})
+            self.assertFalse(block['counted_in_run_cap'] or block['counted_in_arm_cost'])
+            # the run's own sums are untouched: no role, no tokens, no cost, no cap usage
+            self.assertEqual(set(ledger['roles']), {'implementer'})
+            self.assertEqual((ledger['total_tokens'], ledger['cost_usd']), (before['total_tokens'], before['cost_usd']))
+            self.assertEqual(launch.limit_state(run)['used']['token_limit'], before['total_tokens'])
+            code, err = self.cli(tmp, '--role', 'judging-adapter', '--model', 'claude-opus-5-5', '--total-tokens', '40',
+                                 '--source', 'completion notice total only')
+            self.assertEqual(code, 0, err)
+            adapter = launch.run_ledger(run)['evaluation_cost']['roles']['judging-adapter']
+            self.assertEqual((adapter['total_tokens'], adapter['usage'], adapter['cost_usd']), (40, None, None))
+            # incomplete or contradictory input is refused, nothing written
+            for bad in (['--role', 'conductor', '--model', 'm', '--input-tokens', '1', '--source', 's'],
+                        ['--role', 'conductor', '--model', 'm', '--source', 's'],
+                        ['--role', 'pm', '--model', 'm', '--total-tokens', '1', '--source', 's'],
+                        ['--role', 'conductor', '--model', 'm', '--total-tokens', '-1', '--source', 's'],
+                        ['--role', 'conductor', '--model', 'm', '--total-tokens', '1', '--source', ' ']):
+                self.assertNotEqual(self.cli(tmp, *bad)[0], 0, bad)
+            self.assertEqual(len(list((run / 'evaluation').iterdir())), 2)
+            (run / 'evaluation/0003').mkdir()                              # a record cut short is listed, not skipped
+            self.assertEqual(launch.run_ledger(run)['evaluation_cost']['unreadable'], ['evaluation/0003'])
 
 
 class LoadCheckTest(unittest.TestCase):

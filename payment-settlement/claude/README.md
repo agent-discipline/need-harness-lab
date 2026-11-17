@@ -19,6 +19,7 @@
 - `harness-source/`: 하네스 v4.3 commit 7b0ef7b의 `git archive` 사본(`SOURCE.json`). Codex 쪽 사본(1754f16)과 의도적으로 다르다
 - `prompts/3-harness.md`: Claude 전용(네이티브 훅·Fable PM·구현·테스트·리뷰 워커 Opus·`fable-review`·컨테이너 환경 사실)
 - `runner/`: Claude Code 2.1.326 격리 실행기 ([runner/README.md](runner/README.md))
+- `scripts/record_evaluation_cost.py`: 진행자·판정 어댑터 토큰을 run별 평가 비용으로 기록(상한·조건 비용 밖, 장부 `evaluation_cost`)
 - `scripts/{start_cycle,freeze_readiness,consult_contract,capture_turn,load_check}.py`: Codex 판 스크립트의 Claude 실행기 이식본(`test_scripts.py`)
 - `docs/runbook.md`, `docs/isolation-and-measurement.md`: Claude 판 절차와 측정 차이
 - `docs/auth-token.md`: 발급한 인증 토큰이 무엇이고 어떻게 보관·교체하는지
