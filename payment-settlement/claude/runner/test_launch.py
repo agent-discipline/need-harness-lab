@@ -234,6 +234,26 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(sorted(mapping), ['pm', 'worker'])
             self.assertEqual(len((out / mapping['worker']).read_text().splitlines()), 1)
 
+    def test_web_tool_calls_and_effort_are_observed_per_role(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            projects = Path(tmp) / 'projects/-workspace'
+            (projects / 's/subagents').mkdir(parents=True)
+            web = {'type': 'tool_use', 'id': 'tu-1', 'name': 'WebSearch', 'input': {}}
+            fetch = {'type': 'tool_use', 'id': 'tu-2', 'name': 'WebFetch', 'input': {}}
+            main = [{'type': 'assistant', 'requestId': 'r-pm', 'sessionId': 's', 'perTurnEffort': 'high',
+                     'message': {'model': 'p', 'usage': USAGE, 'content': [{'type': 'text', 'text': 'x'}]}},
+                    {'type': 'assistant', 'requestId': 'r-pm', 'sessionId': 's', 'perTurnEffort': 'high',
+                     'message': {'model': 'p', 'usage': USAGE, 'content': [web]}}]
+            worker = [{'type': 'assistant', 'requestId': 'r-w', 'sessionId': 's', 'isSidechain': True,
+                       'message': {'model': 'w', 'usage': USAGE, 'content': [fetch, web | {'id': 'tu-3'}]}}]
+            (projects / 's.jsonl').write_text(''.join(json.dumps(l) + '\n' for l in main))
+            (projects / 's/subagents/a.jsonl').write_text(''.join(json.dumps(l) + '\n' for l in worker * 2))  # copies
+            events, _, _, _ = launch.build_events(Path(tmp) / 'projects', set(), 'r', '0001', 3)
+            seen = launch.observations(events, True)
+            self.assertEqual(seen['by_role'], {'pm': {'web_tool_uses': 1, 'efforts': ['high']},
+                                               'worker': {'web_tool_uses': 2, 'efforts': ['unobserved']}})
+            self.assertFalse(launch.observations(events, False)['web_tool_uses_complete'])
+
     def test_inspect_redaction_and_scrub(self):
         raw = json.dumps([{'Config': {'Env': ['CLAUDE_CODE_OAUTH_TOKEN=secret-value', 'PATH=/bin']}}]).encode()
         redacted = launch.redact_inspect(raw)

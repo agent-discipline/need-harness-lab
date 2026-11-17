@@ -448,8 +448,15 @@ def build_events(projects, seen, run_id, turn_id, arm, role=None):
                 continue
             message = item.get('message') if isinstance(item.get('message'), dict) else {}
             usage = message.get('usage')
-            entry = entries.setdefault(rid, {'usages': [], 'models': set(), 'worker': False, 'files': set(),
-                                             'sessions': set(), 'missing': False, 'first': (rel, number), 'timestamp': item.get('timestamp')})
+            entry = entries.setdefault(rid, {'usages': [], 'models': set(), 'worker': False, 'files': set(), 'tools': set(),
+                                             'efforts': set(), 'sessions': set(), 'missing': False, 'first': (rel, number),
+                                             'timestamp': item.get('timestamp')})
+            # tool calls of this response (unique by tool_use id across lines and copies) and the CLI-recorded effort
+            for block in message.get('content') if isinstance(message.get('content'), list) else []:
+                if isinstance(block, dict) and block.get('type') == 'tool_use':
+                    entry['tools'].add((block.get('id'), block.get('name')))
+            if isinstance(item.get('perTurnEffort'), str):
+                entry['efforts'].add(item['perTurnEffort'])
             entry['worker'] = entry['worker'] or bool(item.get('isSidechain')) or bool(item.get('agentId')) or bool(item.get('parent_tool_use_id'))
             entry['files'].add(rel)
             if item.get('sessionId'):
@@ -479,9 +486,24 @@ def build_events(projects, seen, run_id, turn_id, arm, role=None):
                        'usage': entry['usages'][0], 'usage_scope': 'own_request',
                        'role': role or ('worker' if entry['worker'] else main_role), 'run_id': run_id, 'turn': turn_id,
                        'file': entry['first'][0], 'line': entry['first'][1], 'copies': len(entry['files']),
-                       'transcript_sessions': sorted(entry['sessions']), 'timestamp': entry['timestamp']})
+                       'transcript_sessions': sorted(entry['sessions']), 'timestamp': entry['timestamp'],
+                       'web_tool_uses': sum(1 for _, n in entry['tools'] if n in WEB_TOOLS),
+                       'effort': next(iter(entry['efforts'])) if len(entry['efforts']) == 1 else None})
     stats['session_ids'] = sorted(stats['session_ids'])
     return events, sorted(new_ids), incomplete, stats
+
+def observations(events, complete):
+    """Per role: WebSearch/WebFetch tool calls seen in the transcripts and the efforts the CLI recorded per request.
+    A request without a recorded effort shows as 'unobserved'; web counts cover only collected requests, so they are
+    marked incomplete whenever the turn or run is (never presented as an observed zero)."""
+    by_role = {}
+    for event in events:
+        role = by_role.setdefault(event['role'], {'web_tool_uses': 0, 'efforts': set()})
+        role['web_tool_uses'] += event.get('web_tool_uses') or 0
+        role['efforts'].add(event.get('effort') or 'unobserved')
+    return {'by_role': {r: {'web_tool_uses': v['web_tool_uses'], 'efforts': sorted(v['efforts'])} for r, v in sorted(by_role.items())},
+            'web_tool_uses_complete': bool(complete),
+            'source': 'transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort'}
 
 def sum_usage(events):
     total = {k: 0 for k in USAGE_KEYS}
@@ -774,6 +796,7 @@ def run_ledger(dest):
                   for role, evs in sorted(roles.items())},
         'total_tokens': total_tokens(sum_usage(events)), 'usage_complete': complete, 'tokens_are_lower_bound': not complete,
         'incomplete_calls': ['%s/%s' % (k, i) for k, i, d in calls if d.get('usage_complete') is not True] + unreadable,
+        'observed_tools_and_effort': observations(events, complete),
         'conflicts': conflicts, 'turns': sum(1 for k, _, _ in calls if k == 'turn'),
         'consults': sum(1 for k, _, _ in calls if k == 'consult'),
         'cost_usd': None if cost_unobserved else round(sum(costs), 6), 'cost_unobserved': cost_unobserved,
@@ -901,6 +924,7 @@ def turn(args):
             'cost': turn_cost(stream_result, reviewer),
             'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
             'web_requests': reported.get('server_tool_use') if reported else None,
+            'observed_tools_and_effort': observations(events, not incomplete and copied.returncode == 0),
             'usage_complete': (not incomplete and result['result'] is not None and proc.returncode == 0
                                and copied.returncode == 0 and bool(events)
                                and stats.get('unparsable_lines', 1) == 0 and result['unparsed_lines'] == 0
