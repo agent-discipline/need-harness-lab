@@ -148,17 +148,20 @@ def tools_match(observed, frozen):
 
 def run_isolation_check(run, manifest, readiness):
     """isolation_verified of one run: its init self-test passed, every hook self-test it ran before a call (arm 3)
-    passed, and its observed tool surface equals the surface frozen for its arm."""
+    passed — including a failed one that stopped the turn before any turn directory existed (runner
+    selftest-failures-before-call/) — and its observed tool surface equals the surface frozen for its arm."""
     pre = []
     for path in sorted(Path(run).glob('turns/*/invocation.json')):
         try:
             pre.append(json.loads(path.read_text()).get('hook_selftest_before_call'))
         except (OSError, ValueError):
             pre.append({'passed': False, 'unreadable': str(path)})
+    failed_before_turn = launch.precall_selftest_failures(run)
     checks = {'init_selftest_passed': (manifest.get('selftest') or {}).get('passed') is True,
               # a harness run (arm 3) self-tests before every call; arms 1/2 record None
               'call_selftests_passed': all((p is None and not manifest.get('harness')) or
                                            (isinstance(p, dict) and p.get('passed') is True) for p in pre),
+              'no_selftest_failed_before_a_turn': not failed_before_turn,
               'tools_equal_frozen': tools_match(manifest.get('observed_tools'), frozen_tools(readiness, manifest.get('arm')))}
     return all(checks.values()), checks
 

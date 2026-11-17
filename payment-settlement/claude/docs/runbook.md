@@ -64,6 +64,8 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 `turn`이 유료 호출 이후 예외로 끝나면 `turns/NNNN/`에 원문과 `result.json{status:"failed"}`가 남는다(`cli_status`는 CLI exit code, `status`는 수집·토큰 스캔까지 끝난 뒤의 최종 판정). 다음 `turn`은 새 번호를 받는다. 실패한 턴을 이어 가는 재개 턴은 `--kind recovery`로 선언한다(위 상한 절의 표 — 실패한 `feedback`의 복구는 성공 시 피드백 1회). **첫 턴/재개 판정은 config volume에 그 session id의 transcript가 존재하는지로 한다**: 실패한 호출이라도 transcript를 남겼으면 다음 턴은 `--resume`이어야 하고, 남기지 않았으면 `--session-id` 첫 턴이다(실행기가 실측해 반대 지정을 거부한다). 실패 턴에서 완전히 수집된 요청은 `request-ids.txt`에 들어가고, 원장에 들어가기 전에 중단된 요청은 다음 턴에서 다시 집계된다. `normalize`는 모든 턴의 이벤트를 requestId로 병합해(첫 등장 usage, worker 역할은 단조) 중복을 막는다. 디렉터리를 손으로 지우지 않는다.
 
+3번의 호출 전 훅 self-test가 실패하면(또는 self-test 자체가 돌지 못하면) 턴 디렉터리를 만들기 전에 멈추고 유료 호출은 나가지 않는다. 그 실패는 `.runs/<run>/selftest-failures-before-call/<시각>.json`(`paid_call: false`·시도한 `turn_kind`·self-test 보고)에 남는다. 이 기록은 턴이 아니므로 턴 번호·상한 셈·장부에 들어가지 않고, 다음 시도는 `recovery`가 아니라 원래 선언하려던 종류의 턴이다. 대신 그 run의 `isolation_verified`는 false가 된다(아래 증거 칸 표) — 원인을 `issues.md`에 적고 메인에 보고한다.
+
 ## 종료와 커밋
 
 순서(고정, 요구사항 명세 §10.1):
@@ -131,7 +133,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 | `all_acceptance_passed` | 판정표 20개 모두 `PASS` + 모든 기준에 근거 파일이 있고 전부 존재 |
 | `usage_complete` | 실행 폴더(`.runs/<id>`)에서 종료 기록 시점에 계산한 run 장부의 `usage_complete` |
 | `all_role_models_verified` | manifest의 역할별 관측 모델 + 요청 이벤트(대리 사용자 포함)를 합의 모델과 대조 — 동결과 같은 함수 `freeze_readiness.run_role_check`. 있어야 할 역할(1·2번 `implementer`, 3번 `pm`·`worker`·`reviewer`·`user-proxy` — `freeze_readiness.FINISH_ROLES`)이 관측되지 않으면 false. 3번은 사전 인터뷰가 의무이므로 대리 사용자 호출이 한 번도 관측되지 않은 run은 false다(동결의 파일럿 검사는 `PILOT_ROLES` = `pm`·`worker`·`reviewer` 그대로). explorer의 Sonnet 예외는 요청 단위 |
-| `isolation_verified` | 그 run의 init self-test와 3번의 호출 전 self-test가 모두 통과 + 그 run의 도구 목록이 동결 파일(manifest가 가리키는 `readiness.json`의 `evidence.smoke_runs`)의 그 조건 도구 목록과 같음 — `freeze_readiness.run_isolation_check`. 세 조건 간 비교는 동결 때 한 번 |
+| `isolation_verified` | 그 run의 init self-test와 3번의 호출 전 self-test가 모두 통과(턴 기록의 `hook_selftest_before_call` + 턴 전에 실패해 `selftest-failures-before-call/`에 남은 기록이 하나도 없음) + 그 run의 도구 목록이 동결 파일(manifest가 가리키는 `readiness.json`의 `evidence.smoke_runs`)의 그 조건 도구 목록과 같음 — `freeze_readiness.run_isolation_check`. 세 조건 간 비교는 동결 때 한 번 |
 
 통과했는데 네 칸 중 하나라도 false면 상태는 `PASSED`로 쓰이고 `commit_run.py`가 커밋을 막는다. 우회 경로는 없다: 진행자는 거기서 멈추고 원인을 `issues.md`에 적어 메인에 보고하며, 메인이 사용자에게 보고한다(다음 사이클은 시작하지 않는다). 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
 

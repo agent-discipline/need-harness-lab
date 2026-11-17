@@ -887,6 +887,48 @@ class RunLimitTest(unittest.TestCase):
                     self.assertNotIn(['docker', 'create'], [c for c, _ in calls])
                     self.assertFalse((dest / 'turns/0002').exists())
 
+    def test_failed_precall_selftest_is_recorded_without_a_turn_and_the_next_attempt_is_a_normal_turn(self):
+        for failure in ({'passed': False, 'selftest_failed': '1', 'harness_changed': 'hooks/gate-guard.sh'},
+                        OSError('docker daemon unreachable')):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                dest = self.make_run(root, arm=3)
+                calls = []
+                def fake_run(cmd, **kw):
+                    calls.append(cmd[:2])
+                    return SimpleNamespace(returncode=125, stdout=b'', stderr=b'stop here')
+                args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True,
+                                       kind='feedback', dry_run=False, cache_policy='observed-cache', timeout_seconds=7200,
+                                       max_turns=None, max_budget_usd=None)
+                st = dict(side_effect=failure) if isinstance(failure, Exception) else dict(return_value=failure)
+                with patch.object(launch.subprocess, 'run', side_effect=fake_run), \
+                     patch.object(launch, 'session_exists', return_value=True), patch.object(launch, 'selftest', **st), \
+                     self.assertRaises((RuntimeError, OSError)):
+                    launch.turn(args)
+                self.assertEqual(calls, [])                                      # no paid call went out
+                self.assertEqual(sorted(p.name for p in (dest / 'turns').iterdir()), ['0001'])   # no turn directory
+                failures = launch.precall_selftest_failures(dest)
+                self.assertEqual(len(failures), 1)
+                self.assertIs(failures[0]['paid_call'], False)
+                self.assertEqual(failures[0]['turn_kind_attempted'], 'feedback')
+                self.assertIs(failures[0]['hook_selftest_before_call']['passed'], False)
+                # counting and the limit state still work; the record is no turn and no delivery
+                self.assertEqual([r[0] for r in launch.turn_records(dest)], ['0001'])
+                self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 0)
+                self.assertTrue(launch.run_ledger(dest)['usage_complete'])
+                # the next attempt is a normal feedback turn (not a recovery) and takes the next free number
+                self.assertEqual(launch.next_turn_kind(manifest(3), dest, launch.turn_records(dest), True, 'feedback'),
+                                 ('feedback', 'feedback'))
+                with self.assertRaises(ValueError):
+                    launch.next_turn_kind(manifest(3), dest, launch.turn_records(dest), True, 'recovery')
+                with patch.object(launch.subprocess, 'run', side_effect=fake_run), \
+                     patch.object(launch, 'session_exists', return_value=True), \
+                     patch.object(launch, 'selftest', return_value=SELFTEST_OK), \
+                     patch.object(launch, 'volume_listing', return_value={}), self.assertRaises(RuntimeError):
+                    launch.turn(args)                                            # accepted; the fake docker then fails
+                invocation = json.loads((dest / 'turns/0002/invocation.json').read_text())
+                self.assertEqual((invocation['turn_kind'], invocation['counts_as']), ('feedback', 'feedback'))
+
     def test_feedback_cap_is_thirty_follow_up_prompts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

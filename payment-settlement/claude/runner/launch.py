@@ -1104,6 +1104,31 @@ def recovery_prompt_check(dest, records, prompt):
         raise ValueError('a recovery turn sends the prompt of the turn it continues (%s, sha256 %s); this prompt differs'
                          % (records[-1][0], expected))
 
+# Arm 3 hook self-tests that failed before a call. No turn directory exists for them (no call went out, the turn number
+# is not used) so they live beside turns/, one file each; scripts/freeze_readiness.run_isolation_check reads them.
+PRECALL_SELFTEST_FAILURES = 'selftest-failures-before-call'
+
+def record_precall_selftest_failure(dest, report, turn_kind, counts_as):
+    """Persist a pre-call hook self-test that did not pass (or could not run). It is not a turn: turn records, the
+    ledger and the next turn's kind are unaffected (the next attempt is a normal turn, not a recovery)."""
+    folder = dest / PRECALL_SELFTEST_FAILURES
+    folder.mkdir(exist_ok=True)
+    path = folder / ('%s-%s.json' % (utc().replace(':', '-'), uuid.uuid4().hex[:8]))
+    write_json(path, {'at': utc(), 'paid_call': False, 'turn_kind_attempted': turn_kind, 'counts_as': counts_as,
+                      'hook_selftest_before_call': report})
+    return path
+
+def precall_selftest_failures(dest):
+    """Every recorded pre-call self-test failure of the run (an unreadable record is still a failure)."""
+    folder = Path(dest) / PRECALL_SELFTEST_FAILURES
+    found = []
+    for path in sorted(folder.glob('*.json')) if folder.is_dir() else []:
+        try:
+            found.append(json.loads(path.read_text()))
+        except (OSError, ValueError):
+            found.append({'unreadable': str(path)})
+    return found
+
 def turn(args):
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
@@ -1149,9 +1174,16 @@ def turn(args):
         return
     if args.cache_policy != 'observed-cache':
         raise ValueError('explicit --cache-policy observed-cache required; strict cache control unavailable')
-    pre = selftest(manifest) if manifest.get('harness') else None
-    if pre and not pre['passed']:
-        raise RuntimeError('hook self-test failed before the call: ' + json.dumps(pre, ensure_ascii=False))
+    pre = None
+    if manifest.get('harness'):
+        try:
+            pre = selftest(manifest)
+        except Exception as exc:                        # the self-test could not run: recorded as a failure too
+            record_precall_selftest_failure(dest, {'passed': False, 'error': str(exc)[:2000]}, kind, counts_as)
+            raise
+        if not pre.get('passed'):
+            record_precall_selftest_failure(dest, pre, kind, counts_as)
+            raise RuntimeError('hook self-test failed before the call: ' + json.dumps(pre, ensure_ascii=False))
     if pre is not None:
         # the self-test took wall-clock time: gate again and reduce the call to what remains after it
         limits = limit_gate(dest, next_is_feedback=counts_as == 'feedback')

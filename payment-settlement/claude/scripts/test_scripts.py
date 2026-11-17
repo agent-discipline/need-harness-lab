@@ -783,6 +783,18 @@ class FinishRunTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 root, _, _ = finish_fixture(tmp, **kw)
                 self.assertIs(self.finish(root)[3]['isolation_verified'], False, kw)
+        with tempfile.TemporaryDirectory() as tmp:                              # a hook self-test failed before a turn
+            root, run, folder = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-opus-5-5')
+            finish_run.launch.record_precall_selftest_failure(run, {'passed': False}, 'feedback', 'feedback')
+            fields = self.finish(root, 'claude-arm3-core01')[3]
+            self.assertIs(fields['isolation_verified'], False)
+            checks = self.record(folder)['evidence_derivation']['isolation_verified']['checks']
+            self.assertEqual((checks['call_selftests_passed'], checks['no_selftest_failed_before_a_turn']), (True, False))
+        with tempfile.TemporaryDirectory() as tmp:                              # an unreadable failure record counts too
+            root, run, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-opus-5-5')
+            (run / finish_run.launch.PRECALL_SELFTEST_FAILURES).mkdir()
+            (run / finish_run.launch.PRECALL_SELFTEST_FAILURES / 'x.json').write_text('{')
+            self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['isolation_verified'], False)
         with tempfile.TemporaryDirectory() as tmp:                              # arm 3 role that was never observed
             root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01',
                                         models={'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5']})
