@@ -51,7 +51,7 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 |---|---|---|
 | `initial` | 첫 턴(`--resume` 없음, `--kind`를 주면 거부) | — |
 | `feedback` | 평가자 판정 결과 전달(`prompts/feedback.md`) | 30회 |
-| `answer` | 3번: 대리 사용자 답 전달. 1·2번은 거부. 아직 전달하지 않은 `consults/NNNN`이 있어야 한다(consult 수 > `answer` 턴 수) | 별도 기록 |
+| `answer` | 3번: 대리 사용자 답 전달. 1·2번은 거부. 아직 전달하지 않은 **완료된** `consults/NNNN`이 있어야 한다(완료 consult 수 > `answer` 턴 수). 완료 = 대리 사용자 호출이 exit 0·기록된 오류 없음·시크릿 누출 없음·응답 비어 있지 않음(`launch.consult_completed`, `usage.json`의 `completed`). 실패·빈 응답 consult는 answer 턴을 허용하지 않고 장부의 `consults_not_completed`에 남는다. `usage.json` 없는 consult 디렉터리는 장부의 `incomplete_calls`에 들어간다 | 별도 기록 |
 | `recovery` | 바로 앞 턴이 `ok`로 끝나지 않았을 때 그 턴을 이어 감. 앞 턴이 `ok`면 거부. **앞 턴이 `ok`가 아니면 재개 턴은 `recovery`만 허용**(`feedback`·`answer` 거부 — 실패한 턴도 모델에 닿았을 수 있으므로 그 턴의 종류로 센다) | 이어 가는 턴의 종류로 센다 |
 
 `--kind` 없는 재개 턴은 유료 호출 전에 거부된다. `turn_kind`가 없는(또는 `invocation.json`이 없는) 턴 디렉터리가 있으면 상한 계산이 실패하고(건너뛰지 않음) 그 run의 다음 호출은 막힌다. `limit_gate` 결과(`invocation.json`의 `limits_before_call`)와 `ledger.json`에 `turn_kinds`(`delivered`: 성공 전달 수 `initial`·`feedback`·`answer` / `declared`: 시도별 선언 종류 수)와 `answer_turns`(limit 상태)가 남는다. 실패한 `feedback` 턴은 세지 않고, 그 `recovery`가 성공하면 1회로 센다(종전 "성공 턴만 센다" 규칙 유지).

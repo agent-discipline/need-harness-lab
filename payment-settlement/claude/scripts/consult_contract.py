@@ -105,7 +105,7 @@ def main():
         (out / 'packet' / file).write_text(content)
     (out / 'prompt.txt').write_text(prompt)
     (out / 'invocation.json').write_text(json.dumps(invocation, indent=2, ensure_ascii=False) + '\n')
-    code, error = None, None
+    code, error, completed = None, None, False
     # written first so an interrupted call is visible to the run ledger as an incomplete (not a zero) consultation
     usage = {'run_id': a.run_id, 'role': 'user-proxy', 'requested_model': a.model, 'session_id': session_id,
              'usage': None, 'usage_unobserved': True, 'usage_complete': False, 'cost_usd': None}
@@ -152,13 +152,24 @@ def main():
         hits = launch.scrub(out, [token])
         if hits:
             (out / 'SECRET-LEAK.txt').write_text('credential found and redacted in: ' + ', '.join(hits) + '\nrotate the token now\n')
+        # the call's outcome is part of the record: only a completed consultation permits an answer turn
+        final = json.loads((out / 'usage.json').read_text())       # re-read after the scan (already redacted)
+        if error:
+            final['error'] = error
+        (out / 'usage.json').write_text(json.dumps(final, indent=2, ensure_ascii=False) + '\n')
+        completed = final['completed'] = launch.consult_completed(out)
+        (out / 'usage.json').write_text(json.dumps(final, indent=2, ensure_ascii=False) + '\n')
         launch.write_ledger(run)
         launch.record_overshoot(run)
     if error or hits:
         print('user proxy failed: ' + (error or 'credential leak redacted; rotate the token'), file=sys.stderr)
         return 1
+    if not completed:
+        print('user proxy consultation not completed (exit %s or empty response); it permits no answer turn' % code,
+              file=sys.stderr)
+        return code or 1
     print(out / 'response.txt')
-    return code
+    return 0
 
 
 if __name__ == '__main__':

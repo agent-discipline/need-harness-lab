@@ -873,9 +873,45 @@ class TurnKindTest(unittest.TestCase):
         for n in range(1, consults + 1):
             c = dest / 'consults' / ('%04d' % n)
             c.mkdir(parents=True)
-            (c / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0}))
+            (c / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0}))
+            (c / 'response.txt').write_text('답변 %d' % n)
         (root / 'prompt').write_text('next')
         return dest
+
+    def test_only_a_completed_consultation_permits_an_answer_turn(self):
+        broken = {'exit 124 (timeout)': ({'exit_code': 124}, '부분 답'), 'empty response': ({'exit_code': 0}, '  \n'),
+                  'recorded error': ({'exit_code': 0, 'error': 'docker cp failed'}, '답'),
+                  'no exit code (interrupted)': ({}, '답'), 'credential leak': ({'exit_code': 0}, '답')}
+        for name, (usage, response) in broken.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                dest = self.make(root, [('initial', 'ok')], consults=1)
+                c = dest / 'consults/0001'
+                (c / 'usage.json').write_text(json.dumps(dict(usage, usage_complete=False, cost_usd=None)))
+                (c / 'response.txt').write_text(response)
+                if name == 'credential leak':
+                    (c / 'SECRET-LEAK.txt').write_text('x')
+                self.assertFalse(launch.consult_completed(c))
+                error, run, _, _ = self.call(root, 'answer', dry_run=False)
+                self.assertIn('completed user-proxy consultation', str(error))
+                run.assert_not_called()
+                ledger = launch.run_ledger(dest)
+                self.assertEqual((ledger['consults'], ledger['consults_completed'], ledger['consults_not_completed']), (1, 0, ['0001']))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make(root, [('initial', 'ok')], consults=1)
+            self.assertTrue(launch.consult_completed(dest / 'consults/0001'))
+            self.assertIsNone(self.call(root, 'answer')[0])
+            self.assertEqual(launch.run_ledger(dest)['consults_completed'], 1)
+
+    def test_consultation_without_usage_json_is_an_incomplete_call_in_the_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = self.make(Path(tmp), [('initial', 'ok')], consults=1)
+            (dest / 'consults/0002').mkdir()                            # cut short before usage.json was written
+            ledger = launch.run_ledger(dest)
+            self.assertIn('consults/0002', ledger['incomplete_calls'])
+            self.assertFalse(ledger['usage_complete'])
+            self.assertEqual((ledger['consults'], ledger['consults_completed']), (2, 1))
 
     def call(self, root, kind, resume=True, dry_run=True):
         args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume, kind=kind,
@@ -914,7 +950,7 @@ class TurnKindTest(unittest.TestCase):
             root = Path(tmp)
             self.make(root, [('initial', 'ok'), ('answer', 'ok')], consults=1)   # the only consultation was delivered
             error, run, _, _ = self.call(root, 'answer', dry_run=False)
-            self.assertIn('undelivered user-proxy consultation', str(error))
+            self.assertIn('undelivered completed user-proxy consultation', str(error))
             run.assert_not_called()
 
     def test_answer_turns_do_not_count_and_are_reported_separately(self):

@@ -802,6 +802,22 @@ def turn_cost(stream_result, reviewer):
     return {'pinned_session_usd': pinned, 'reviewer_usd': reviewer_usd, 'reviewer_applicable': reviewer is not None,
             'cost_complete': pinned is not None and (reviewer is None or reviewer_usd is not None)}
 
+def consult_completed(folder):
+    """The single definition of a completed user-proxy consultation (consults/NNNN, scripts/consult_contract.py): the
+    proxy call exited 0, the call recorded no error, no credential leak was found, and the response is non-empty.
+    Only completed consultations permit an answer turn and count as consultations delivered by the proxy."""
+    folder = Path(folder)
+    try:
+        usage = json.loads((folder / 'usage.json').read_text())
+        response = (folder / 'response.txt').read_text()
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return (isinstance(usage, dict) and usage.get('exit_code') == 0 and not isinstance(usage.get('exit_code'), bool)
+            and not usage.get('error') and not (folder / 'SECRET-LEAK.txt').exists() and bool(response.strip()))
+
+def consult_folders(dest):
+    return sorted(p for p in (Path(dest) / 'consults').iterdir() if p.is_dir()) if (Path(dest) / 'consults').is_dir() else []
+
 def total_tokens(usage):
     return sum(usage[k] for k in USAGE_KEYS)           # input + cache read + cache creation + output (cached input counts)
 
@@ -822,6 +838,8 @@ def run_ledger(dest):
                 unreadable.append(str(path.relative_to(dest)))
     if (dest / 'turns').is_dir():                       # a turn directory without any result means the turn was cut short
         unreadable += [str(p.relative_to(dest)) for p in sorted((dest / 'turns').iterdir()) if p.is_dir() and not (p / 'result.json').exists()]
+    consults = consult_folders(dest)                    # likewise a consultation without usage.json: incomplete, not skipped
+    unreadable += [str(p.relative_to(dest)) for p in consults if not (p / 'usage.json').exists()]
     costs, cost_unobserved = [], []
     for kind, ident, data in calls:
         if kind == 'turn':
@@ -846,7 +864,8 @@ def run_ledger(dest):
         'incomplete_calls': ['%s/%s' % (k, i) for k, i, d in calls if d.get('usage_complete') is not True] + unreadable,
         'observed_tools_and_effort': observations(events, complete),
         'conflicts': conflicts, 'turns': sum(1 for k, _, _ in calls if k == 'turn'),
-        'consults': sum(1 for k, _, _ in calls if k == 'consult'),
+        'consults': len(consults), 'consults_completed': sum(1 for p in consults if consult_completed(p)),
+        'consults_not_completed': [p.name for p in consults if not consult_completed(p)],
         'cost_usd': None if cost_unobserved else round(sum(costs), 6), 'cost_unobserved': cost_unobserved,
         'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null); whether a resumed session reports '
                      'per-invocation or cumulative cost is not verified before the pilot',
@@ -918,11 +937,12 @@ def next_turn_kind(manifest, dest, records, resume, kind):
     if kind == 'answer':
         if manifest.get('arm') != 3:
             raise ValueError('answer turns exist only in arm 3 (user proxy); this run is arm %s' % manifest.get('arm'))
-        consults = len([p for p in (dest / 'consults').iterdir() if p.is_dir()]) if (dest / 'consults').is_dir() else 0
+        consults = sum(1 for p in consult_folders(dest) if consult_completed(p))
         answers = turn_counts(records)['declared']['answer']
         if consults <= answers:
-            raise ValueError('answer turn without an undelivered user-proxy consultation (%d consults, %d answer turns); '
-                             'a failed answer delivery is continued with --kind recovery' % (consults, answers))
+            raise ValueError('answer turn without an undelivered completed user-proxy consultation (%d completed consults, '
+                             '%d answer turns); a failed or empty consultation permits no answer turn; a failed answer '
+                             'delivery is continued with --kind recovery' % (consults, answers))
         return kind, kind
     if kind == 'recovery':
         if not records or records[-1][2] == 'ok':

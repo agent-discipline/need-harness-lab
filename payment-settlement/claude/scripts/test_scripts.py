@@ -429,16 +429,16 @@ class ConsultContractTest(unittest.TestCase):
                 code = exc.code
         return code, run, out.getvalue()
 
-    def fake(self, copy_ok=True):
+    def fake(self, copy_ok=True, reply='APPROVED', start_rc=0):
         state = {}
         def run(cmd, **kw):
             if cmd[:2] == ['docker', 'create']:
                 state['session'] = cmd[cmd.index('--session-id') + 1]
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'start']:
-                kw['stdout'].write(json.dumps({'type': 'result', 'result': 'APPROVED', 'session_id': state['session'],
+                kw['stdout'].write(json.dumps({'type': 'result', 'result': reply, 'session_id': state['session'],
                                                'usage': USAGE, 'total_cost_usd': 0.07}).encode() + b'\n')
-                return SimpleNamespace(returncode=0)
+                return SimpleNamespace(returncode=start_rc)
             if cmd[:2] == ['docker', 'cp']:
                 if not copy_ok:
                     return SimpleNamespace(returncode=1, stdout=b'', stderr=b'copy failed')
@@ -508,6 +508,22 @@ class ConsultContractTest(unittest.TestCase):
             ledger = json.loads((run_dir / 'ledger.json').read_text())
             self.assertFalse(ledger['usage_complete'])
             self.assertIn('consult/0002', ledger['incomplete_calls'])
+
+
+    def test_failed_or_empty_consultation_is_recorded_as_not_completed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake())
+            self.assertEqual(code, 0, out)
+            self.assertIs(json.loads((run_dir / 'consults/0001/usage.json').read_text())['completed'], True)
+            for n, fake in ((2, self.fake(reply='')), (3, self.fake(start_rc=1))):
+                code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], fake)
+                self.assertNotEqual(code, 0)
+                self.assertIn('not completed', out)
+                self.assertIs(json.loads((run_dir / ('consults/%04d/usage.json' % n)).read_text())['completed'], False)
+            ledger = json.loads((run_dir / 'ledger.json').read_text())
+            self.assertEqual((ledger['consults'], ledger['consults_completed'], ledger['consults_not_completed']),
+                             (3, 1, ['0002', '0003']))
 
 
 class LoadCheckTest(unittest.TestCase):
