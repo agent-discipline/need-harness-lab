@@ -1,6 +1,6 @@
 {
   "scope": "SETUP_ONLY",
-  "timestamp_utc": "2026-11-17T08:54:44.363250+00:00",
+  "timestamp_utc": "2026-11-17T09:23:43.867453+00:00",
   "starter_copies": 30,
   "all_starters_identical": true,
   "shared_input_parity": {
@@ -25,7 +25,7 @@
       "identical": true
     },
     "3": {
-      "claude_sha256": "87ef6b14cb06010b42dc4853777f80369f980287e3c43154f6b1e8f1feafc22c",
+      "claude_sha256": "0c56d21d5a357511fb8bbc9d1e386e10f61a1b3dd1ad33c7c684bf1cd15514fb",
       "codex_sha256": "bfc2119a779e036067ba9032266d99027d6ee9d8e9576a9ad7995900260115ac",
       "identical": false
     }

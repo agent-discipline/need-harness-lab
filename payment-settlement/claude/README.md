@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | 1 — minimal | `prompts/common.md` + `1-minimal.md` (Codex와 바이트 동일) | `claude-opus-5-5` · high | 금지(도구 allow-list `--tools`, self-test가 부분집합 단정) | 없음(빈 config volume) |
 | 2 — detailed | 동일 + `../docs/requirements.md`·`resources.md`·`slo.md` (Codex와 바이트 동일) | `claude-opus-5-5` · high | 금지 | 없음 |
-| 3 — harness-auto-native | 2와 동일 + `prompts/3-harness.md`(Claude 전용) | PM `claude-fable-5-2` · high, 워커 `claude-opus-5-5` · high, 두 번째 리뷰어 `claude-fable-5-2` | `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`·`CLAUDE_CODE_SUBAGENT_EFFORT=high` | **하네스 v4.3(7b0ef7b) 원본 훅 그대로 설치·강제** |
+| 3 — harness-auto-native | 2와 동일 + `prompts/3-harness.md`(Claude 전용) | PM `claude-fable-5-2` · high, 워커 `claude-opus-5-5` · high, 두 번째 리뷰어 `claude-fable-5-2` | `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`·`CLAUDE_CODE_SUBAGENT_EFFORT=high` | **하네스 v4.3(7b0ef7b) 원본 훅 그대로 설치·강제**. 도구는 1·2번 허용 목록 + `Task`(서브에이전트) |
 
 웹 도구(`WebSearch`·`WebFetch`)는 세 조건 모두 허용하고 사용을 기록한다.
 

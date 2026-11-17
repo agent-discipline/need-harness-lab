@@ -375,8 +375,9 @@ def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_
                '--mount', 'type=bind,src=' + manifest['workspace'] + ',dst=/workspace',
                '--mount', 'type=volume,src=' + manifest['config_volume'] + ',dst=' + CONFIG_DST]
     if manifest.get('requested_worker_model'):
-        # workers: agreed model and effort high (CLI 2.1.326 reads CLAUDE_CODE_SUBAGENT_EFFORT; propagation is
-        # confirmed only by the pilot's per-request transcript models, never assumed)
+        # workers: agreed model and effort high (CLI 2.1.326 reads CLAUDE_CODE_SUBAGENT_EFFORT). This is a setting, not
+        # evidence: the worker model is checked per request in the pilot, and effort only where transcripts record
+        # perTurnEffort (observed_tools_and_effort); otherwise effort propagation stays unverified.
         command += ['--env', 'CLAUDE_CODE_SUBAGENT_MODEL=' + manifest['requested_worker_model'],
                     '--env', 'CLAUDE_CODE_SUBAGENT_EFFORT=high']
     if manifest.get('arm') == 3:
