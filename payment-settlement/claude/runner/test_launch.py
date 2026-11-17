@@ -825,6 +825,37 @@ class RunLimitTest(unittest.TestCase):
             self.assertEqual(state['reached'], [])
             self.assertLessEqual(launch.LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'], 11)
 
+    def test_remaining_time_is_recomputed_after_the_arm3_selftest(self):
+        for selftest_seconds, expect_call in ((90, True), (200, False)):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                now = launch.datetime.now(launch.timezone.utc)
+                dest = self.make_run(root, started=now - timedelta(seconds=28800 - 120), arm=3)
+                first = dest / 'turns/0001/invocation.json'
+                def slow_selftest(m):                                    # the selftest consumes wall-clock time
+                    data = json.loads(first.read_text())
+                    data['started_at'] = (launch.datetime.fromisoformat(data['started_at']) - timedelta(seconds=selftest_seconds)).isoformat()
+                    first.write_text(json.dumps(data))
+                    return SELFTEST_OK
+                calls = []
+                def fake_run(cmd, **kw):
+                    calls.append((cmd[:2], kw.get('timeout')))
+                    return SimpleNamespace(returncode=125, stdout=b'', stderr=b'stop here')
+                args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                       dry_run=False, cache_policy='observed-cache', timeout_seconds=7200, max_turns=None, max_budget_usd=None)
+                with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                     patch.object(launch, 'selftest', side_effect=slow_selftest), patch.object(launch, 'volume_listing', return_value={}), \
+                     self.assertRaises(RuntimeError) as ctx:
+                    launch.turn(args)
+                if expect_call:
+                    invocation = json.loads((dest / 'turns/0002/invocation.json').read_text())
+                    self.assertLessEqual(invocation['effective_timeout_seconds'], 30)
+                    self.assertIn(['docker', 'create'], [c for c, _ in calls])
+                else:                                                    # the selftest ran past the cap: censored, no call
+                    self.assertIn('CENSORED_TIME', str(ctx.exception))
+                    self.assertNotIn(['docker', 'create'], [c for c, _ in calls])
+                    self.assertFalse((dest / 'turns/0002').exists())
+
     def test_feedback_cap_is_thirty_follow_up_prompts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

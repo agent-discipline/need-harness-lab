@@ -83,9 +83,10 @@ def main():
     try:
         run, out = consult_dir(a.runs, a.run_id)
         # the run's caps cover the proxy too (same gate as the runner's turns; a censored run gets no consultation)
-        launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run)
+        limits = launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run)
     except (OSError, ValueError, RuntimeError) as exc:
         p.error(str(exc))
+    timeout = launch.call_timeout(a.timeout_seconds, limits)      # never past the run's wall-clock cap
     image = ready['image_digests']['runner']
     env_file = a.env_file.resolve()
     token = launch.read_token(env_file)
@@ -95,7 +96,8 @@ def main():
     command = proxy_command(image, name, env_file, a.model, session_id)
     invocation = {'create': command, 'start': ['docker', 'start', '--attach', '--interactive', name],
                   'run_id': a.run_id, 'role': 'user-proxy', 'model': a.model, 'session_id': session_id,
-                  'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(), 'env_file': str(env_file)}
+                  'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(), 'env_file': str(env_file),
+                  'timeout_seconds': a.timeout_seconds, 'effective_timeout_seconds': timeout, 'limits_before_call': limits}
     if a.dry_run:
         print(json.dumps(dict(invocation, prompt_bytes=len(prompt.encode()), output=str(out)), indent=2, ensure_ascii=False))
         return 0
@@ -117,7 +119,7 @@ def main():
         with (out / 'stdout.jsonl').open('xb') as stdout, (out / 'stderr.txt').open('xb') as stderr:
             try:
                 code = subprocess.run(invocation['start'], input=prompt.encode(), stdout=stdout, stderr=stderr,
-                                      check=False, timeout=a.timeout_seconds).returncode
+                                      check=False, timeout=timeout).returncode
             except subprocess.TimeoutExpired:
                 subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
                 code = 124

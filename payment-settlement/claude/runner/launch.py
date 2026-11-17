@@ -993,6 +993,10 @@ def limit_gate(dest, next_is_feedback, write=True):
         raise RuntimeError('run cap reached before the call: %s %s' % (state['reached'][0], json.dumps(state['used'])))
     return state
 
+def call_timeout(requested, state):
+    """A single paid call never runs past the run's wall-clock cap: the requested timeout reduced to the remainder."""
+    return max(1, min(requested, int(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
+
 def record_overshoot(dest):
     """After a call: if the run went past a cap during it, censor the run and record by how much."""
     state = limit_state(dest)
@@ -1030,8 +1034,7 @@ def turn(args):
                          '(session transcript %s in the config volume; %d turn dirs, %d successful)'
                          % ('present' if exists else 'absent', len(turn_dirs), len(successes)))
     limits = limit_gate(dest, next_is_feedback=counts_as == 'feedback', write=not args.dry_run)
-    # a single call never runs past the run's wall-clock cap
-    timeout = max(1, min(args.timeout_seconds, int(LIMITS['time_limit_seconds'] - limits['used']['time_limit_seconds'])))
+    timeout = call_timeout(args.timeout_seconds, limits)
     seen = read_seen(dest)
     turn_id = f'{len(turn_dirs) + 1:04d}'   # failed turns keep their directory and number; retries get a new one
     name = 'payment-claude-call-' + uuid.uuid4().hex
@@ -1047,6 +1050,10 @@ def turn(args):
     pre = selftest(manifest) if manifest.get('harness') else None
     if pre and not pre['passed']:
         raise RuntimeError('hook self-test failed before the call: ' + json.dumps(pre, ensure_ascii=False))
+    if pre is not None:
+        # the self-test took wall-clock time: gate again and reduce the call to what remains after it
+        limits = limit_gate(dest, next_is_feedback=counts_as == 'feedback')
+        timeout = call_timeout(args.timeout_seconds, limits)
     output = dest / 'turns' / turn_id
     output.mkdir()
     (output / 'prompt.txt').write_bytes(prompt)

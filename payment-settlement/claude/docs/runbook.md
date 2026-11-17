@@ -41,7 +41,7 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 `launch.py turn`과 `scripts/consult_contract.py`는 유료 호출 직전에 같은 게이트(`limit_gate`)를 지난다. 집계 원천은 run의 단일 장부 `.runs/<run>/ledger.json`(turns의 pm·implementer·worker·reviewer + consults의 user-proxy, 요청 단위 중복 제거)이다.
 
 - 토큰: input + cache read + cache creation + output 합 ≥ 20,000,000 → `CENSORED_BUDGET`
-- 시간: 첫 턴 시작부터 벽시계 ≥ 28,800초 → `CENSORED_TIME`(턴 하나의 timeout도 남은 시간으로 줄인다)
+- 시간: 첫 턴 시작부터 벽시계 ≥ 28,800초 → `CENSORED_TIME`(턴 하나와 대리 사용자 호출 하나의 timeout도 남은 시간으로 줄인다. 3번은 훅 self-test 뒤 게이트를 다시 지나 남은 시간을 다시 계산한다 — `invocation.json`의 `effective_timeout_seconds`)
 - 피드백: 외부 피드백 = **평가자가 판정 결과를 전하는 턴만**(2026-11-17 결정, `docs/experiment-plan.md:51`). 성공(`status: ok`)한 `feedback` 턴(그 복구 포함) 수가 30이면 31번째 `feedback` 전달은 `CENSORED_TURNS`
 - 질의응답(3번만): 대리 사용자 답을 PM에게 전하는 `answer` 턴은 상한에 넣지 않고 따로 센다(`experiment-plan.md:25` "질문 횟수·답변 길이를 별도 기록"). 대리 사용자 호출(`consult_contract.py`) 자체는 세션 턴이 아니다
 

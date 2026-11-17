@@ -510,6 +510,29 @@ class ConsultContractTest(unittest.TestCase):
             self.assertIn('consult/0002', ledger['incomplete_calls'])
 
 
+    def test_proxy_timeout_is_reduced_to_the_remaining_run_time(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            t = run_dir / 'turns/0001'
+            write(t / 'invocation.json', {'turn_kind': 'initial',
+                                          'started_at': (datetime.now(timezone.utc) - timedelta(seconds=28800 - 100)).isoformat()})
+            write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'cost': {'pinned_session_usd': 0.0, 'reviewer_applicable': False}})
+            (t / 'events.jsonl').write_text('')
+            timeouts = []
+            inner = self.fake()
+            def fake(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    timeouts.append(kw.get('timeout'))
+                return inner(cmd, **kw)
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], fake)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(len(timeouts), 1)
+            self.assertLessEqual(timeouts[0], 100)
+            invocation = json.loads((run_dir / 'consults/0001/invocation.json').read_text())
+            self.assertEqual(invocation['timeout_seconds'], 1800)
+            self.assertLessEqual(invocation['effective_timeout_seconds'], 100)
+
     def test_failed_or_empty_consultation_is_recorded_as_not_completed(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv, run_dir = self.setup_run(tmp)
