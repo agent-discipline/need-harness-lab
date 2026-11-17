@@ -6,7 +6,8 @@ client that `fable-review` runs.
            the subscription token once from an inherited descriptor (--token-fd) and keeps it in memory only: neither
            its environment nor any file holds it. Per request it runs ONE fixed reviewer command: a fresh `claude -p`
            session on the reviewer model, effort high, read-only tools (Read, Grep, Glob), its own CLAUDE_CONFIG_DIR,
-           user settings only and no MCP servers; the token reaches that CLI through a pipe
+           user settings only and no MCP servers, without any capability (the helper keeps DAC_READ_SEARCH only to copy
+           the PM's 0700 mirror, and SETPCAP only to empty the CLI's bounding set); the token reaches that CLI through a pipe
            (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), never through its environment. Model, tools, effort and config dir
            are fixed at start; a request carries only the working directory and the prompt.
            The CLI does not run in the requested directory: the helper copies it into a snapshot it owns (regular files
@@ -183,8 +184,9 @@ def remove_tree(path):
 
 
 class Reviewer:
-    def __init__(self, model, config_dir, home, cli, token):
+    def __init__(self, model, config_dir, home, cli, token, setpriv='/usr/bin/setpriv'):
         self.model, self.dir, self.home, self.cli, self.token = model, Path(config_dir), home, cli, token
+        self.setpriv = setpriv
         self.lock = threading.Lock()
         self.count = 0
 
@@ -232,7 +234,9 @@ class Reviewer:
         os.close(write_end)
         env = {'PATH': CHILD_PATH, 'HOME': self.home, 'CLAUDE_CONFIG_DIR': str(self.dir), 'DISABLE_AUTOUPDATER': '1',
                TOKEN_ENV_FD: str(read_end), 'LANG': 'C.UTF-8'}
-        command = [self.cli, '-p', '--model', self.model, '--effort', 'high', '--session-id', sid,
+        # the CLI runs without any capability (bounding, inheritable and ambient emptied): only the helper needs
+        # DAC_READ_SEARCH, to copy the PM's mirror; the reviewer reads nothing but its snapshot
+        command = [self.setpriv, '--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all', self.cli, '-p', '--model', self.model, '--effort', 'high', '--session-id', sid,
                    '--tools', TOOLS, '--setting-sources', 'user', '--strict-mcp-config', '--output-format', 'json']
         err_path = os.path.join(os.path.dirname(cwd), 'stderr.txt')
         try:
@@ -331,7 +335,7 @@ def serve(args):
     if 'CLAUDE_CODE_OAUTH_TOKEN' in os.environ:
         log('a token in the helper environment is refused (it would be readable by the reviewer); not serving')
         return 90
-    reviewer = Reviewer(args.model, args.config_dir, args.home, args.cli, token)
+    reviewer = Reviewer(args.model, args.config_dir, args.home, args.cli, token, args.setpriv)
     roots = args.root
 
     class Handler(socketserver.BaseRequestHandler):
@@ -428,6 +432,7 @@ def main(argv=None):
     s.add_argument('--config-dir', required=True)
     s.add_argument('--home', required=True, help='the helper account home; snapshots live under <home>/snapshots')
     s.add_argument('--cli', default='/usr/local/bin/claude')
+    s.add_argument('--setpriv', default='/usr/bin/setpriv', help=argparse.SUPPRESS)   # tests only (a recording stand-in)
     s.add_argument('--root', action='append', required=True, help='allowed working-directory root (repeat)')
     s.add_argument('--peer-uid', type=int, help='accept requests only from this uid')
     s.add_argument('--token-fd', type=int, required=True, help='descriptor the token is read from once, then closed')

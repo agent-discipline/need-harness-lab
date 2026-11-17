@@ -27,7 +27,9 @@ ENV HOME=/home/node
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 # The reviewer's config dir (mount point of the run's reviewer volume) belongs to the reviewer account and is closed to
 # the PM's user: a new volume takes this owner and mode from the image.
-RUN mkdir -p /home/node/.claude /home/node/.fable-review && chown node:node /home/node/.claude \
+# The PM's config dir (transcripts, harness) is closed to other accounts, so the reviewer CLI (no capabilities) cannot
+# read the PM's session records; a new config volume takes this mode from the image.
+RUN mkdir -p /home/node/.claude /home/node/.fable-review && chown node:node /home/node/.claude && chmod 700 /home/node/.claude \
  && chown fablereview:fablereview /home/node/.fable-review && chmod 700 /home/node/.fable-review
 USER node
 WORKDIR /workspace

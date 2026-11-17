@@ -1591,6 +1591,11 @@ class FableReviewHelperTest(unittest.TestCase):
             (self.mirror / name).write_text(content)
         self.fake = self.base / 'claude'
         self.reply('{"type":"result","result":"REVIEW TEXT","total_cost_usd":0.2}')
+        # stand-in for setpriv (dropping capabilities needs SETPCAP, absent here): records its options, runs the rest
+        self.setpriv = self.base / 'setpriv'
+        self.setpriv.write_text('#!/bin/bash\nwhile [ "${1#--}" != "$1" ]; do echo "$1" >> "' + str(self.out) +
+                                '/setpriv"; shift; done\nexec "$@"\n')
+        os.chmod(self.setpriv, 0o755)
         self.procs = []
 
     def tearDown(self):
@@ -1627,7 +1632,8 @@ class FableReviewHelperTest(unittest.TestCase):
         os.close(write_end)
         proc = subprocess.Popen([sys.executable, str(self.HERE / 'fable_review.py'), 'serve', '--socket', str(sock),
                                  '--model', 'claude-fable-5-2', '--config-dir', str(config or self.cfg), '--home', str(self.home),
-                                 '--cli', str(self.fake), '--root', str(self.root), '--token-fd', str(read_end),
+                                 '--cli', str(self.fake), '--setpriv', str(self.setpriv), '--root', str(self.root),
+                                 '--token-fd', str(read_end),
                                  '--peer-uid', str(os.getuid() if peer_uid is None else peer_uid)] + list(extra),
                                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(read_end,))
         os.close(read_end)
@@ -1676,6 +1682,8 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Grep,Glob')
         self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user')       # no project/local settings
         self.assertIn('--strict-mcp-config', argv)                                 # no MCP server from anywhere
+        self.assertEqual((self.out / 'setpriv').read_text().split(),                # the CLI keeps no capability
+                         ['--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all'])
         self.assertNotIn('--dangerously-skip-permissions', argv)
         self.assertNotIn('--resume', argv)
         sid = argv[argv.index('--session-id') + 1]
@@ -1813,6 +1821,7 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertIn('unset CLAUDE_CODE_OAUTH_TOKEN LAB_REVIEWER_MODEL LAB_REVIEWER_CONFIG_DIR', start)
         self.assertIn('exec setpriv --reuid=node --regid=node --init-groups --bounding-set=-all --inh-caps=-all "$@"', start)
         self.assertIn('--token-fd 4', start)
+        self.assertIn('--ambient-caps=+dac_read_search,+setpcap', start)       # the helper only, not its reviewer CLI
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN="$TOKEN"', start)           # the helper's environment never gets it
 
 if __name__ == '__main__':
