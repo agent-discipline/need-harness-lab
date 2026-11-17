@@ -1,12 +1,12 @@
 {
   "scope": "SETUP_ONLY",
-  "timestamp_utc": "2026-09-23T14:16:36.640810+00:00",
+  "timestamp_utc": "2026-11-17T08:54:44.363250+00:00",
   "starter_copies": 30,
   "all_starters_identical": true,
   "shared_input_parity": {
     "template": true,
+    "harness-source@commit": true,
     "prompts": true,
-    "harness-source": true,
     "compose.yaml": true,
     "scripts/lab.py": true,
     "scripts/commit_run.py": true,
@@ -25,8 +25,8 @@
       "identical": true
     },
     "3": {
-      "claude_sha256": "7d1006752bf1ccccfdf6072f460ef0ab46d82f91d8125ca8a30ace893a20ecc6",
-      "codex_sha256": "756a93d7e491747cbf54a6ab46a4e7218b3bac01e4f1e3555953d96895f8eee4",
+      "claude_sha256": "87ef6b14cb06010b42dc4853777f80369f980287e3c43154f6b1e8f1feafc22c",
+      "codex_sha256": "bfc2119a779e036067ba9032266d99027d6ee9d8e9576a9ad7995900260115ac",
       "identical": false
     }
   },
@@ -40,6 +40,23 @@
     "codex_evidence_path": "payment-settlement/codex/docs/results/setup/verification.json",
     "codex_evidence_sha256": "b6511d78d3dd532cd5897ff936db1bd5187f23719e2feacfe04f81ad6b92f555",
     "basis": "compose.yaml byte-identical to codex/compose.yaml"
+  },
+  "harness": {
+    "commit": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
+    "repo": "/home/jun/project/agent-discipline/harness",
+    "paths": [
+      "src",
+      "hooks",
+      "playbooks",
+      "templates",
+      "agents",
+      "HISTORY.md",
+      "README.md",
+      "CLAUDE.md",
+      "settings.json"
+    ],
+    "codex_snapshot_commit": "1754f16e0e4f54ad1a81d05beff15b895a26a1d5",
+    "note": "differs from codex/harness-source by design (protocol v3-claude uses harness v4.3)"
   },
   "passed": true
 }

@@ -7,10 +7,10 @@
 ```bash
 python3 payment-settlement/claude/scripts/prepare.py
 python3 payment-settlement/claude/scripts/verify_setup.py
-docker build -t payment-claude-runner:2.1.280 payment-settlement/claude/runner
+docker build -t payment-claude-runner:2.1.326 payment-settlement/claude/runner
 ```
 
-인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 3번은 codex 리뷰를 위해 `~/.codex/auth.json`(0600, uid 1000)을 읽기 전용으로 추가 마운트한다.
+인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 3번의 두 번째 리뷰어(`fable-review`)도 같은 토큰을 컨테이너 환경에서 물려받는다. 추가 자격증명 파일은 없다.
 
 ## 시행 (한 번에 하나, schedule.json 순서)
 
@@ -27,7 +27,6 @@ python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env
 python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
 # 평가자가 판정·피드백을 쓴 뒤 같은 세션으로 재개
 python3 $L turn --run-id claude-arm1-core01 --resume --prompt /tmp/next-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
-# 3번은 --codex-auth ~/.codex/auth.json 추가
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
 
@@ -47,10 +46,12 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 - 네트워크: `--network`를 주지 않으면 기본 bridge라 다른 컨테이너에 IP로 닿을 수 있다. 격리 주장은 파일시스템·세션·상태 범위다(Codex 판과 동일한 정직 경계).
 - headless(`-p`)에서 git-guard의 `permissionDecision: ask`는 승인 UI가 없다. push는 금지 영역이므로 실험 영향은 작지만 관측 결과를 run 문서에 남긴다.
-- codex `--sandbox read-only`는 이 이미지(`cap-drop=ALL`)에서 bubblewrap 네임스페이스를 만들 수 없어 **도구를 쓰는 호출은 실패한다**(2026-09-23 실측: `bwrap: No permissions to create a new namespace`; 도구 없는 응답은 성공). 3번 PM은 프롬프트 각주대로 `--dangerously-bypass-approvals-and-sandbox`를 `user override`로 기록하고 쓴다 — 컨테이너 자체가 경계다. 호스트 codex도 같은 kernel에서 `bwrap: loopback` 오류로 샌드박스 실행이 불가했다.
-- codex `auth.json`은 읽기 전용이라 장시간 run에서 토큰 갱신이 필요하면 리뷰 호출이 실패할 수 있다. 실패는 `usage_complete=false` + "리뷰 2호 미관측"으로 기록하고 성공으로 위장하지 않는다.
+- 3번 두 번째 리뷰어(`fable-review`)는 PM의 Bash 호출이라 하네스의 `codex-scan` 훅(명령 문자열 시크릿 backstop)이 발화하지 않는다. playbook §5 ① 절차 보안 스캔이 유일한 보장이다. 리뷰어 호출이 실패하거나 사용량을 관측하지 못하면 `usage_complete=false`·`reviewer_usage_pending=true`로 남고 성공으로 위장하지 않는다.
+- v1(2026-09-23)의 codex 관련 경계(bubblewrap 샌드박스 실패, read-only auth 갱신)는 v3-claude에 해당하지 않는다.
 
 ## 실험 개시 체크리스트
+
+(v1 스모크 ①~④는 2026-09-23 Claude Code 2.1.280·v1 모델 기준이다. v3-claude는 새 모델 ID로 인증 스모크를 다시 한다.)
 
 - [x] 유료 스모크 ①: 1번형 1턴 `RUNNER_OK` — `result.usage` 4개 카운터·`session_id` 일치·`total_cost_usd`·`modelUsage` 확인 (2026-09-23, `docs/results/setup/claude/summary.json`)
 - [x] 유료 스모크 ②: 같은 run `--resume` → `RUNNER_OK_RESUMED`, transcript 파일 1개(fork 없음), request-ids 중복 0
@@ -58,11 +59,12 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 - [x] 스모크 ④: 컨테이너 안 `codex exec --sandbox read-only`가 read-only auth로 성공, 래퍼가 세션·usage 보존
 - [x] config volume에 `.credentials.json` 없음(`.claude.json`·policy-limits·remote-settings만) — 폐기 절차는 파일 목록 기록 후 `docker volume rm`
 - [x] `context_variant`: CLI가 두 모델 모두 `contextWindow 1000000`을 보고 — `[1m]` 접미 없이 1M 적용, `default` 유지
-- [ ] `result.usage`의 sidechain 포함 여부·`CLAUDE_CODE_SUBAGENT_MODEL`/effort 전파: 서브에이전트가 있는 arm 3 첫 run(파일럿)에서 확정 — 그 전까지 `usage_cross_check`는 관측치
+- [ ] `result.usage`의 sidechain 포함 여부·`CLAUDE_CODE_SUBAGENT_MODEL`/`CLAUDE_CODE_SUBAGENT_EFFORT` 전파: 서브에이전트가 있는 arm 3 첫 run(파일럿)에서 확정 — 그 전까지 `usage_cross_check`는 관측치
 - [ ] 본 실험 `--max-turns`/`--max-budget-usd` 값 고정(스모크는 3~4턴·1 USD)
-- [ ] **D5 웹 도구**: 1·2번 allow-list에 `WebSearch`/`WebFetch`가 포함되어 있고 Codex arm에는 없다. 끌지(allow-list에서 제거 = 패리티) / 열고 기록할지(arm 3 하네스는 높음 stakes에서 외부 검색 의무) 사용자 결정. 어느 쪽이든 `result.web_requests`와 manifest `observed_tools`로 실사용을 기록한다
-- [ ] arm 3 codex 리뷰 사용량: `codex-sessions/`(rollout JSONL)를 codex adapter로 정규화하는 절차 확정 전까지 해당 턴은 `reviewer_usage_pending=true`·`usage_complete=false`
+- [x] **D5 웹 도구**: 세 조건 모두 허용하고 기록(2026-11-17 결정). self-test가 모든 arm에 `WebSearch`/`WebFetch`가 노출되는지 단정한다(`docs/results/setup/v3/`)
+- [ ] arm 3 두 번째 리뷰어(`fable-review`) 사용량: 실행기가 요청 단위 `reviewer` 이벤트로 분리 집계한다(단위테스트). 실제 호출에서 관측되는지는 파일럿에서 확인
 - [ ] 본 실험 개시 전 토큰 재발급(최초 토큰은 채팅 경유 노출 — `docs/auth-token.md`)
 - [ ] C01..C20 판정기·DB adapter·장애 주입 완성(Codex 쪽 공유) 후 파일럿 1회
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
-- [ ] preflight 12항목 전부 boolean true (가짜 true 금지)
+- [ ] v3-claude 인증 스모크(새 토큰, arm 1·3) → `scripts/freeze_readiness.py --smoke-run ...`로 동결(플래그는 증거 파일에서만 도출)
+- [ ] preflight 전 항목 true (가짜 true 금지 — 프로토콜·상한 포함)
