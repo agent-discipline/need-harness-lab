@@ -199,6 +199,39 @@ class StartCycleTest(unittest.TestCase):
             self.assertEqual(plan['image'], 'sha256:1')
 
 
+class CycleOrderTest(unittest.TestCase):
+    def test_next_cycle_needs_terminal_committed_clean_and_discarded_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'claude'
+            for cycle in (1, 2):
+                for arm in (1, 2, 3):
+                    write(root / 'docs/experiments' / str(arm) / ('core%d' % cycle) / 'run.json',
+                          {'status': 'PASSED' if cycle == 1 else 'NOT_STARTED'})
+            state = {'subjects': ['experiment: claude-arm%d-core01 PASSED' % a for a in (1, 2, 3)], 'dirty': ''}
+            def fake_git(*args):
+                return '\n'.join(state['subjects']) + '\n' if args[0] == 'log' else state['dirty']
+            def discard(run_id, complete):
+                write(root / '.runs' / run_id / 'discard-2026.json', {'complete': complete})
+            with patch.object(start_cycle, 'ROOT', root), patch.object(start_cycle, 'git', side_effect=fake_git):
+                for arm in (1, 2, 3):
+                    discard('claude-arm%d-core01' % arm, True)
+                self.assertEqual(start_cycle.cycle_order_blockers(2), [])
+                state['subjects'] = state['subjects'][:2]
+                self.assertEqual(start_cycle.cycle_order_blockers(2), ['claude-arm3-core01: no run commit'])
+                state['subjects'] += ['experiment: claude-arm3-core01 PASSED']
+                state['dirty'] = ' M x'
+                self.assertEqual(len(start_cycle.cycle_order_blockers(2)), 3)
+                state['dirty'] = ''
+                discard('claude-arm2-core01', False)
+                self.assertEqual(start_cycle.cycle_order_blockers(2), ['claude-arm2-core01: volumes not removed (launch.py discard incomplete or missing)'])
+                discard('claude-arm2-core01', True)
+                write(root / 'docs/experiments/1/core1/run.json', {'status': 'RUNNING'})
+                self.assertEqual(start_cycle.cycle_order_blockers(2), ['claude-arm1-core01: status RUNNING is not terminal'])
+                write(root / 'docs/experiments/1/core1/run.json', {'status': 'CENSORED_TIME'})
+                (root / '.runs/claude-arm2-core02').mkdir(parents=True)          # this cycle already has a run
+                self.assertEqual(start_cycle.cycle_order_blockers(2), ['claude-arm2-core02: already started (status NOT_STARTED); recover its exact session instead'])
+
+
 class ContractDriftTest(unittest.TestCase):
     def test_cycle_refuses_inputs_that_changed_after_the_freeze(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,6 +16,7 @@ import lab
 import freeze_readiness
 import hashlib
 from preflight import blockers
+import commit_run
 
 
 def save(path, value):
@@ -58,6 +59,38 @@ def contract_drift(ready, frozen_list=None):
     return changed or ['contract_sha256 differs although frozen-inputs.json matches the current files']
 
 
+def git(*args):
+    return subprocess.run(['git', '-C', str(REPO), *args], capture_output=True, text=True, check=True).stdout
+
+
+def cycle_order_blockers(cycle):
+    """Evidence, not cycles.json: every run of each earlier cycle is terminal, committed by commit_run (subject
+    'experiment: <run_id> <status>'), has no uncommitted changes in its code or records, and had its volumes removed;
+    no run of this cycle exists yet."""
+    failures = []
+    subjects = git('log', '--format=%s').splitlines() if cycle > 1 else []
+    for c in range(1, cycle):
+        for arm in (1, 2, 3):
+            run_id = run_plan(c, arm)[0]
+            records = ROOT / 'docs/experiments' / str(arm) / f'core{c}'
+            status = json.loads((records / 'run.json').read_text()).get('status')
+            if status not in commit_run.TERMINAL:
+                failures.append(f'{run_id}: status {status} is not terminal')
+            if not any(line.startswith(f'experiment: {run_id} ') for line in subjects):
+                failures.append(f'{run_id}: no run commit')
+            dirty = git('status', '--porcelain', '--', str(records), str(ROOT / str(arm) / f'core{c}'))
+            if dirty.strip():
+                failures.append(f'{run_id}: uncommitted changes in its code or records')
+            if not freeze_readiness.launch.discard_complete(ROOT / '.runs' / run_id):
+                failures.append(f'{run_id}: volumes not removed (launch.py discard incomplete or missing)')
+    for arm in (1, 2, 3):
+        run_id = run_plan(cycle, arm)[0]
+        status = json.loads((ROOT / 'docs/experiments' / str(arm) / f'core{cycle}' / 'run.json').read_text()).get('status')
+        if status != 'NOT_STARTED' or (ROOT / '.runs' / run_id).exists():
+            failures.append(f'{run_id}: already started (status {status}); recover its exact session instead')
+    return failures
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cycle', type=int, choices=range(1, 11), required=True)
@@ -77,10 +110,9 @@ def main():
     cycles_path = ROOT / 'docs/results/cycles.json'
     cycles = json.loads(cycles_path.read_text())
     current = cycles[args.cycle - 1]
-    if current['status'] != 'NOT_STARTED':
-        p.error('cycle already started; recover its exact sessions instead')
-    if any(c['status'] != 'COMMITTED' for c in cycles[:args.cycle - 1]):
-        p.error('previous cycle not committed')
+    order = cycle_order_blockers(args.cycle)
+    if order:
+        p.error('; '.join(order))
     lab.verify(args.cycle)
     runner = ROOT / 'runner/launch.py'
     plan = [run_plan(args.cycle, arm) for arm in (1, 2, 3)]
