@@ -1219,5 +1219,48 @@ class LoadCheckTest(unittest.TestCase):
         self.assertIn('payment-claude-*', done.stderr)
 
 
+class ExportSetupEvidenceTest(unittest.TestCase):
+    TOKEN = 'sk-ant-oat01-EXPORTTEST-0123456789'
+
+    def run_dir(self, runs, run_id, status='ok', leak=False, token_in=None):
+        run = runs / run_id
+        write(run / 'manifest.json', {'run_id': run_id, 'selftest': {'passed': True, 'gate_l1_write_exit': '2'}})
+        turn = run / 'turns/0001'
+        write(turn / 'invocation.json', {'hook_selftest_before_call': {'passed': True}})
+        write(turn / 'result.json', {'status': status})
+        (turn / 'stdout.jsonl').write_text('{"type":"result"}\n')
+        if leak:
+            (turn / 'SECRET-LEAK.txt').write_text('x')
+        if token_in:
+            (run / token_in).write_text('leak ' + self.TOKEN)
+        return run
+
+    def test_exports_finalised_leak_free_runs_only_and_never_overwrites(self):
+        import export_setup_evidence as exporter
+        with tempfile.TemporaryDirectory() as tmp:
+            runs, dest = Path(tmp) / 'runs', Path(tmp) / 'v3'
+            self.run_dir(runs, 'smoke-a3')
+            written = exporter.export(runs, ['smoke-a3'], dest, self.TOKEN)
+            self.assertEqual(sorted(written), ['smoke-a3-manifest.json', 'smoke-a3-turn-0001-invocation.json',
+                                               'smoke-a3-turn-0001-result.json', 'smoke-a3-turn-0001-stdout.jsonl'])
+            for name, digest in written.items():
+                self.assertEqual(hashlib.sha256((dest / name).read_bytes()).hexdigest(), digest)
+            with self.assertRaises(ValueError):                       # already exported: never overwritten
+                exporter.export(runs, ['smoke-a3'], dest, self.TOKEN)
+            refused = {'collected': dict(status='collected'), 'leak': dict(leak=True),
+                       'token in stream': dict(token_in='turns/0001/stdout.jsonl'), 'token in manifest': dict(token_in='manifest.json')}
+            for name, options in refused.items():
+                with self.subTest(name):
+                    run_id = 'r-' + name.replace(' ', '-')
+                    self.run_dir(runs, run_id, **options)
+                    with self.assertRaises(ValueError):
+                        exporter.export(runs, ['smoke-a3', run_id], Path(tmp) / ('out-' + run_id), self.TOKEN)
+                    self.assertFalse((Path(tmp) / ('out-' + run_id)).exists())   # nothing written, not even the good run
+            (runs / 'empty').mkdir()
+            write(runs / 'empty/manifest.json', {})
+            with self.assertRaises(ValueError):                       # a run without a turn proves nothing
+                exporter.export(runs, ['empty'], Path(tmp) / 'out-empty', self.TOKEN)
+
+
 if __name__ == '__main__':
     unittest.main()

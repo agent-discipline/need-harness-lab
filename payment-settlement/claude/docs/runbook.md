@@ -185,6 +185,78 @@ python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judgi
 - 3번 두 번째 리뷰어(`fable-review`)는 PM의 Bash 호출이라 하네스의 `codex-scan` 훅(명령 문자열 시크릿 backstop)이 발화하지 않는다. playbook §5 ① 절차 보안 스캔이 유일한 보장이다. 리뷰어 호출이 실패하거나 사용량을 관측하지 못하면 `usage_complete=false`·`reviewer_usage_pending=true`로 남고 성공으로 위장하지 않는다.
 - v1(2026-09-23)의 codex 관련 경계(bubblewrap 샌드박스 실패, read-only auth 갱신)는 v3-claude에 해당하지 않는다.
 
+## v3 인증 스모크와 동결
+
+### 스모크 (진행자, 유료 — 승인된 뒤에만)
+
+프롬프트는 9월 증거의 파일을 그대로 쓴다(`docs/results/setup/claude/`). 조건마다 run 하나·턴 하나, 상한은 모두 `--max-budget-usd 1 --timeout-seconds 600`이고 `--max-turns`만 다르다(1·2번 3, 3번 4 — 2026-11-17 스모크에서 쓴 값). 이미지는 동결 전이므로 기본 태그 `payment-claude-runner:2.1.326`(이 절 앞의 `docker build`).
+
+```bash
+L=payment-settlement/claude/runner/launch.py
+P=payment-settlement/claude/docs/results/setup/claude
+E=~/.config/payment-lab/claude.env
+python3 $L init --run-id smoke-v3-arm1 --arm 1 --core 1
+python3 $L init --run-id smoke-v3-arm2 --arm 2 --core 1
+python3 $L init --run-id smoke-v3-arm3 --arm 3 --core 1 --harness payment-settlement/claude/harness-source
+# 1·2번: "RUNNER_OK" 한 줄만 답하게 하는 프롬프트
+python3 $L turn --run-id smoke-v3-arm1 --prompt $P/smoke-1-prompt.txt --env-file $E --cache-policy observed-cache --max-turns 3 --max-budget-usd 1 --timeout-seconds 600
+python3 $L turn --run-id smoke-v3-arm2 --prompt $P/smoke-1-prompt.txt --env-file $E --cache-policy observed-cache --max-turns 3 --max-budget-usd 1 --timeout-seconds 600
+# 3번: Write로 src/main/kotlin/lab/payment/Probe.kt를 만들게 하고 HOOK_BLOCKED/HOOK_PASSED로 답하게 하는 음성 프롬프트
+python3 $L turn --run-id smoke-v3-arm3 --prompt $P/smoke-3-arm3-negative-prompt.txt --env-file $E --cache-policy observed-cache --max-turns 4 --max-budget-usd 1 --timeout-seconds 600
+```
+
+확인(각 run의 `turns/0001/result.json`): `status: ok`·`usage_complete: true`·`session_id_confirmed: true`·`incomplete: []`, 1·2번 `transcript_models`가 `claude-opus-5-5`, 3번 `claude-fable-5-2`. 3번은 `stdout.jsonl`의 최종 응답이 `HOOK_BLOCKED: [gate-guard] …`이고 `workspace/src/main/kotlin/lab/payment/Probe.kt`가 없어야 한다(`HOOK_PASSED`나 파일 생성은 실패 — 메인에 보고). 3번 스모크는 리뷰어를 부르지 않으므로 `reviewer.log_absent`·`projects_absent`가 true, `reviewer_dir_rc`가 0이어야 한다(리뷰어 디렉터리를 읽지 못하면 `usage_complete=false`로 남는다 — 그대로 보고). 한 조건이라도 기준을 못 채우면 동결하지 않는다. 같은 run id로는 다시 `init`할 수 없으므로(덮어쓰기 거부) 다시 하는 조건은 새 id(예 `smoke-v3r2-arm3`)로 하고, 동결의 `--smoke-run`에도 그 id를 준다.
+
+### 증거 내보내기 (진행자, 무과금)
+
+`--attest`의 근거 파일은 저장소 안에 있어야 하는데(`freeze_readiness.attested`) `.runs/`는 추적되지 않는다. 진행자는 `discard` **전에** 3번 스모크의 증거를 `docs/results/setup/v3/`로 내보낸다:
+
+```bash
+python3 payment-settlement/claude/scripts/export_setup_evidence.py --run-id smoke-v3-arm3 --env-file ~/.config/payment-lab/claude.env
+```
+
+내보내는 파일: `<run>-manifest.json`(init self-test 보고 — `gate_l1_write_exit=2`·`gate_docs_write_exit=0`·`git_guard_push=ask`·`harness_hash_match=1`·`reviewer_on_path=1`), 턴마다 `<run>-turn-NNNN-invocation.json`(호출 전 훅 self-test `hook_selftest_before_call`)·`-result.json`·`-stdout.jsonl`(게이트 훅이 Write를 막은 그 턴의 CLI 원본 스트림). 마스킹 보장: 실행기는 턴이 끝날 때마다 run 디렉터리 전체에서 토큰 값을 치환하고(`launch.scrub`), 그 뒤 `result.json`을 확정한다. 도구는 확정된 턴(`result.json`의 `status`가 `ok`/`failed`)만, `SECRET-LEAK.txt`가 없는 run만 받고, 쓰기 전에 모든 파일을 `--env-file`의 토큰으로 다시 검사해 하나라도 걸리면 아무것도 쓰지 않는다. 이미 있는 파일은 덮지 않는다. 마스킹 대상은 토큰 값뿐이라 호스트 절대경로(manifest의 `workspace`·`harness`, invocation의 `env_file` 경로)는 남는다 — 비밀이 아니다.
+
+판정기 자체 테스트 출력(무과금, 같은 폴더, 덮어쓰기 금지 `set -C`):
+
+```bash
+( set -C; O=payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt; : > $O || exit 1
+  python3 -m unittest discover -s payment-settlement/evaluation -p 'test_*.py' -v >> $O 2>&1; echo "exit=$?" >> $O )
+```
+
+`exit=0`과 `OK`가 아니면 메인에 보고하고 멈춘다. 내보낸 파일은 진행자가 일반 docs 커밋으로 남긴다(근거 해시가 커밋된 바이트와 같아야 한다).
+
+### 증명 파일 (메인이 쓴다)
+
+`harness_adapter_verified`·`acceptance_suite_verified`는 실행기 산출물로 도출되지 않고 `freeze_readiness.py --attest <file>`로만 true가 된다(`attested`: 이 두 플래그만 받고, true에는 저장소 안 근거 파일이 1개 이상 필요하며 근거는 sha256으로 readiness에 들어간다). **증명 파일은 감독하는 메인 세션이 위 증거를 직접 읽고 쓴다 — 진행자는 쓰지 않는다.** 위치: `payment-settlement/claude/docs/results/setup/v3/attestation.json`(근거 경로는 저장소 루트 기준).
+
+```json
+{
+  "harness_adapter_verified": {"value": true, "evidence": [
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3-arm3-manifest.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3-arm3-turn-0001-invocation.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3-arm3-turn-0001-result.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3-arm3-turn-0001-stdout.jsonl"]},
+  "acceptance_suite_verified": {"value": true, "evidence": [
+    "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt",
+    "payment-settlement/codex/docs/pilots/detailed-01/acceptance-issues.md"]}
+}
+```
+
+- `harness_adapter_verified`의 근거 = 3번 스모크: init self-test 보고와 게이트 훅이 쓰기를 막은 턴(위 내보낸 파일). 3번을 새 id로 다시 했으면 그 id의 파일을 쓴다.
+- `acceptance_suite_verified`의 근거 = 판정기 자체 테스트 출력 + 9월 파일럿에서 판정기가 실제 결함을 잡은 기록(`codex/docs/pilots/detailed-01/acceptance-issues.md`, 읽기만).
+- 메인이 근거를 읽고 확인하지 못한 플래그는 `"value": false`로 쓰거나 빼며, 근거 없는 true는 동결이 거부한다.
+
+### 동결 명령
+
+```bash
+python3 payment-settlement/claude/scripts/freeze_readiness.py \
+  --smoke-run smoke-v3-arm1 --smoke-run smoke-v3-arm2 --smoke-run smoke-v3-arm3 \
+  --attest payment-settlement/claude/docs/results/setup/v3/attestation.json
+```
+
+(다시 한 조건은 그 새 id로.) 동결 입력(`FROZEN`)에 미커밋 변경이 있으면 거부된다. 스모크 run의 `discard`는 내보내기 뒤에 한다 — 동결은 run 디렉터리의 파일만 읽으므로 volume이 없어도 된다.
+
 ## 실험 개시 체크리스트
 
 (v1 스모크 ①~④는 2026-09-23 Claude Code 2.1.280·v1 모델 기준이다. v3-claude는 새 모델 ID로 인증 스모크를 다시 한다.)
@@ -204,7 +276,7 @@ python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judgi
 - [ ] 본 실험 개시 전 토큰 재발급(최초 토큰은 채팅 경유 노출 — `docs/auth-token.md`)
 - [ ] C01..C20 판정기·DB adapter·장애 주입 완성(Codex 쪽 공유) 후 파일럿 1회
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
-- [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴) → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3>`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 증거 파일에서만 도출)
+- [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴 — 명령은 위 "v3 인증 스모크와 동결") → 증거 내보내기 → 메인이 증명 파일 작성 → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3> --attest payment-settlement/claude/docs/results/setup/v3/attestation.json`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 스모크 산출물과 해시된 증명에서만 도출)
 - [ ] 파일럿 개시 전 게이트(파일럿 init 직전, 통과해야만 init): `python3 payment-settlement/claude/scripts/preflight.py --stage pilot --readiness payment-settlement/claude/docs/results/readiness.json --core 1` → `"ready": true`, exit 0. 이 명령은 readiness를 세 조건 각각의 run 기록(`docs/experiments/<arm>/core1/run.json` — 조건·모델·provider)과 합쳐(사이클 게이트 `start_cycle.gate`와 같은 함수 `preflight.merge`, 조건의 관측 모델 `actual_models[<arm>]`이 `actual_model`이 된다) 조건마다 검사한다. `pilot_passed`만 면제되고 나머지 플래그는 전부 리터럴 true여야 한다(가짜 true 금지 — 프로토콜·상한 포함). exit 2면 `blockers`를 메인에 보고하고 파일럿을 시작하지 않는다. (`--arm 3`으로 한 조건만 볼 수 있으나 개시 게이트는 세 조건 전부로 한다.) 이 게이트는 `init --pilot`에 내장돼 있지 않다 — 진행자가 반드시 먼저 실행하고 출력을 파일럿 기록에 남긴다
 - [ ] 파일럿 init: `python3 payment-settlement/claude/runner/launch.py init --pilot --run-id claude-pilot-01 --arm 3 --core 1 --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json` — 파일럿 run id는 `claude-pilot-NN`(그 밖의 id에 `--pilot`, 또는 `--pilot` 없이 이 접두는 거부), 기록은 `docs/pilots/<run id>/`. readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`로 확인한다
 - [ ] 파일럿 뒤: `freeze_readiness.py ... --pilot-run <id> --replace`로 `pilot_passed`를 파일럿 산출물에서 도출(파일럿 manifest가 init 때 기록한 `contract_sha256`·`image`가 지금 쓰는 동결값과 같을 때만 통과). `--replace`는 플래그만 다시 도출한다 — 동결 입력(`frozen-inputs.json`)이나 이미지 id가 바뀌었으면 거부된다(프로토콜 버전 변경·전 조건 재실행 대상) → 사이클 개시 게이트(`start_cycle.py`, 항상 `--stage cycle` 기준)
