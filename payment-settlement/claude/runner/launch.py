@@ -31,7 +31,8 @@ REVIEWER_DST = HOME_DST + '/.fable-review'
 REVIEWER_MODEL = 'claude-fable-5-2'
 REVIEWER_UID = 2001                                   # image user fablereview; owns the reviewer volume (mode 0700)
 ARM3_START = '/usr/local/bin/lab-arm3-start'
-ARM3_CAPS = ('SETUID', 'SETGID', 'DAC_READ_SEARCH')   # only for lab-arm3-start: switch users; reviewer reads the mirror
+# only for lab-arm3-start: switch users, empty the bounding sets (SETPCAP); the reviewer helper reads the mirror
+ARM3_CAPS = ('SETUID', 'SETGID', 'SETPCAP', 'DAC_READ_SEARCH')
 USER_PROXY_MODEL = 'claude-opus-5-5'                 # agreed 2026-11-17 (scripts/consult_contract.py, arm 3 only)
 # Harness v4.3 explorer subagent keeps the model of its own definition (agents/explorer.md: sonnet). Claude Code 2.1.326
 # resolves a subagent's model as: explicit model (call parameter, else agent definition) before CLAUDE_CODE_SUBAGENT_MODEL,
@@ -831,6 +832,8 @@ def write_role_files(output, events):
 
 CALL_STARTED = re.compile(r'(\S+) started session=([0-9a-f-]{36}) model=(\S+)')
 CALL_EXIT = re.compile(r'(\S+) exit=(-?\d+)')
+# the helper stopped the reviewer CLI because the caller disconnected (runner/fable_review.py): usage unobserved
+CALL_CANCELLED = re.compile(r'(\S+) cancelled session=([0-9a-f-]{36}) reason=(\S+)')
 
 def reviewer_dir_names(name, output):
     """Names directly inside the reviewer directory of the stopped container, or None when they cannot be established.
@@ -928,11 +931,13 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
     log_absent = log_rc != 0 and names is not None and 'reviewer-calls.log' not in names
     log_unknown = log_rc != 0 and not log_absent
     projects_absent = projects_rc != 0 and names is not None and 'projects' not in names
-    started, finished = {}, {}
+    started, finished, cancelled = {}, {}, {}
     for line in (log.read_text().splitlines() if log_rc == 0 else []):
         hit = CALL_STARTED.fullmatch(line)
         if hit:
             started[hit.group(1)] = hit.group(2)
+        elif CALL_CANCELLED.fullmatch(line):
+            cancelled[CALL_CANCELLED.fullmatch(line).group(1)] = CALL_CANCELLED.fullmatch(line).group(3)
         elif CALL_EXIT.fullmatch(line):
             finished[CALL_EXIT.fullmatch(line).group(1)] = int(CALL_EXIT.fullmatch(line).group(2))
     # The log is cumulative inside the run's reviewer volume; calls already accounted for in earlier turns are skipped.
@@ -945,8 +950,9 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
         for file in sorted(projects.rglob('*.jsonl')):
             transcripts.setdefault(file.stem, []).append(file)
     # attempts (this turn or earlier: the transcript tree is cumulative) that failed before any API request
-    zero = {sid for sid in set(started.values()) if failed_without_requests(output / 'reviewer-raw' / (sid + '.json'),
-                                                                            transcripts.get(sid))}
+    # (a cancelled call is never one of them: it was stopped, its requests may have gone out)
+    zero = {sid for call, sid in started.items() if call not in cancelled
+            and failed_without_requests(output / 'reviewer-raw' / (sid + '.json'), transcripts.get(sid))}
     if projects_rc == 0:
         events, new_ids, found, stats = build_events(projects, seen, run_id, turn_id, arm, role='reviewer')
         incomplete += found
@@ -962,6 +968,10 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
     elif transcripts and not started:
         incomplete.append({'reason': 'reviewer transcripts exist without any logged reviewer call'})
     for call in new_calls:
+        if call in cancelled:
+            incomplete.append({'reason': 'reviewer call cancelled (%s); usage unobserved' % cancelled[call], 'call': call,
+                               'session': started[call]})
+            continue
         if call not in finished:
             incomplete.append({'reason': 'reviewer call did not finish', 'call': call, 'session': started[call]})
         if started[call] not in transcripts:
@@ -972,7 +982,9 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
                'calls_total': len(started), 'calls_this_turn': len(new_calls),
                'calls_finished_total': len(set(finished) & set(started)),
                'calls_succeeded_this_turn': sum(1 for c in new_calls if finished.get(c) == 0),
-               'calls_failed_this_turn': len(failed),        # exit != 0 or no exit line
+               'calls_failed_this_turn': len(failed),        # exit != 0, cancelled or no exit line
+               'calls_cancelled_this_turn': [{'call': c, 'session': started[c], 'reason': cancelled[c]}
+                                             for c in new_calls if c in cancelled],
                'failed_attempts_without_requests': [{'call': c, 'session': started[c]} for c in failed if started[c] in zero],
                'transcript_files': sum(len(v) for v in transcripts.values()),
                'projects_rc': projects_rc, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
@@ -1004,18 +1016,24 @@ def number(value):
 # How the CLI reports cost (measured in pilot 01, 2.1.326): with --resume, total_cost_usd (and modelUsage) of a result
 # event is CUMULATIVE over the session, not per invocation (turn 1 reported 1.9925, turn 2 reported 7.8483 including
 # turn 1). Reviewer and user-proxy calls are fresh sessions, so their value is the call's own cost.
-COST_SEMANTICS = ('pinned session: total_cost_usd of the turn\'s last result event is cumulative over the session; a '
-                  'turn\'s cost is its increase over the previous turn of the same session and the run\'s pinned-session '
+COST_SEMANTICS = ('pinned session: total_cost_usd of the turn\'s last result event is cumulative over the session (observed '
+                  'only when every result event of the turn is the pinned session\'s); a turn\'s cost is its increase over '
+                  'the previous observed turn; after an unobserved turn the next increase is an unassigned interval, not '
+                  'that turn\'s cost; the run\'s pinned-session '
                   'cost is the last cumulative value. Reviewer calls and user-proxy consultations are fresh sessions '
                   '(their total_cost_usd is the call\'s cost). Unobserved values stay null, never 0.')
 
-def turn_cost(stream_result, reviewer):
+def turn_cost(stream_result, reviewer, session_id=None):
     """CLI cost estimates of one turn: the pinned session's cumulative total_cost_usd at the end of the turn (the run
-    ledger derives the turn's increase) and (arm 3) the reviewer calls' sum. Unobserved parts stay None and make
-    cost_complete false."""
-    pinned = number(stream_result.get('total_cost_usd'))
+    ledger derives the turn's increase) and (arm 3) the reviewer calls' sum. The value counts as observed only when
+    every result event of the turn belongs to the pinned session (a forked or new session's total is another
+    cumulative series). Unobserved parts stay None and make cost_complete false."""
+    sessions = stream_result.get('session_ids')
+    own = session_id is None or sessions == [session_id]
+    pinned = number(stream_result.get('total_cost_usd')) if own else None
     reviewer_usd = None if reviewer is None else reviewer.get('cost_usd')
     return {'pinned_session_usd': pinned, 'pinned_session_usd_semantics': 'cumulative',
+            **({} if own else {'pinned_session_unobserved': 'result events of other sessions: %s' % sessions}),
             'reviewer_usd': reviewer_usd, 'reviewer_applicable': reviewer is not None,
             'cost_complete': pinned is not None and (reviewer is None or reviewer_usd is not None)}
 
@@ -1062,7 +1080,7 @@ def account_turn(output, manifest, run_id, turn_id, seen, exit_code, copied_rc, 
         'session_id_confirmed': stream_result.get('session_id') == manifest['session_id'],
         'request_ids': new_ids, 'event_count': len(events), 'incomplete': incomplete, 'transcript_stats': stats,
         'reviewer': reviewer,
-        'cost': turn_cost(stream_result, reviewer),
+        'cost': turn_cost(stream_result, reviewer, manifest['session_id']),
         'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
         'web_requests': reported.get('server_tool_use') if reported else None,
         'observed_tools_and_effort': observations(events, not incomplete and copied_rc == 0),
@@ -1131,7 +1149,7 @@ def run_ledger(dest):
         unreadable += [str(p.relative_to(dest)) for p in sorted((dest / 'turns').iterdir()) if p.is_dir() and not (p / 'result.json').exists()]
     consults = consult_folders(dest)                    # likewise a consultation without usage.json: incomplete, not skipped
     unreadable += [str(p.relative_to(dest)) for p in consults if not (p / 'usage.json').exists()]
-    costs, cost_unobserved, cost_by_call, cumulative, failed_attempts = [], [], [], 0.0, 0
+    costs, cost_unobserved, cost_by_call, cumulative, failed_attempts, gap = [], [], [], 0.0, 0, None
     for kind, ident, data in calls:
         row = {'call': '%s/%s' % (kind, ident)}
         if kind == 'turn':
@@ -1142,12 +1160,19 @@ def run_ledger(dest):
             if increase is not None and increase < -1e-9:
                 row['anomaly'] = 'cumulative session cost decreased (%s after %s)' % (reported, cumulative)
                 increase = None
+            parts = [increase, reviewer_usd]
+            if reported is None or increase is None:
+                gap = gap or row['call']                  # the session's cost from here on is not attributable per turn
+            elif gap:
+                # after an unobserved turn the increase spans that turn and this one: an unassigned interval, never
+                # this turn's cost (the run total stays null because the gap turn is unobserved)
+                row['unassigned_interval'] = {'from_after': gap, 'usd': round(increase, 6)}
+                increase, parts, gap = None, [reviewer_usd], None
+            if reported is not None and 'anomaly' not in row:
+                cumulative = reported
             row.update(pinned_session_cumulative_usd=reported,
                        pinned_session_increase_usd=None if increase is None else round(increase, 6),
                        reviewer_usd=number(reviewer_usd) if cost.get('reviewer_applicable') else None)
-            parts = [increase, reviewer_usd]
-            if reported is not None and increase is not None:
-                cumulative = reported
             failed_attempts += len(((data.get('reviewer') or {}).get('failed_attempts_without_requests')) or [])
         else:
             parts = [data.get('cost_usd')]

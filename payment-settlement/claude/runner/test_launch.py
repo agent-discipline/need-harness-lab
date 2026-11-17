@@ -723,6 +723,51 @@ class RunnerTest(unittest.TestCase):
                 self.assertIn('reviewer transcript lines without parseable usage or requestId', [i['reason'] for i in result['incomplete']])
                 self.assertEqual(result['reviewer']['failed_attempts_without_requests'], [])
 
+    def test_a_cancelled_reviewer_call_keeps_the_turn_incomplete_and_is_never_a_zero_attempt(self):
+        sid = 'f0f0f0f0-0000-4000-8000-000000000031'
+        zero = {k: 0 for k in launch.USAGE_KEYS}
+        synthetic = [{'type': 'assistant', 'sessionId': sid, 'message': {'model': '<synthetic>', 'usage': zero}}]
+        raw = {'is_error': True, 'result': 'x', 'total_cost_usd': 0, 'usage': zero}   # even a zero-looking raw result
+        log = 'T1 started session=%s model=claude-fable-5-2\nT1 cancelled session=%s reason=client-disconnected\n' % (sid, sid)
+        pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.arm3_dest(root)
+            result, _ = self.arm3_turn(root, False, pm, log, {sid: synthetic}, reviewer_raw={sid: raw})
+            self.assertFalse(result['usage_complete'])
+            self.assertTrue(result['reviewer_usage_pending'])
+            self.assertIn('reviewer call cancelled (client-disconnected); usage unobserved',
+                          [i['reason'] for i in result['incomplete']])
+            self.assertNotIn('reviewer call did not finish', [i['reason'] for i in result['incomplete']])
+            self.assertEqual(result['reviewer']['failed_attempts_without_requests'], [])
+            self.assertEqual(result['reviewer']['calls_cancelled_this_turn'],
+                             [{'call': 'T1', 'session': sid, 'reason': 'client-disconnected'}])
+            self.assertEqual(result['reviewer']['calls_failed_this_turn'], 1)
+            self.assertFalse(json.loads((dest / 'ledger.json').read_text())['usage_complete'])
+
+    def test_cost_of_another_session_or_after_a_gap_is_not_attributed(self):
+        reported = {'total_cost_usd': 3.0, 'session_ids': ['other']}
+        cost = launch.turn_cost(reported, None, 'pinned')
+        self.assertIsNone(cost['pinned_session_usd'])                         # another cumulative series
+        self.assertIn('other', cost['pinned_session_unobserved'])
+        self.assertEqual(launch.turn_cost({'total_cost_usd': 3.0, 'session_ids': ['pinned']}, None, 'pinned')['pinned_session_usd'], 3.0)
+        self.assertIsNone(launch.turn_cost({'total_cost_usd': 3.0, 'session_ids': ['pinned', 'other']}, None, 'pinned')['pinned_session_usd'])
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'a'
+            for n, cumulative in ((1, 1.0), (2, None), (3, 4.0), (4, 4.5)):
+                t = dest / 'turns' / ('%04d' % n)
+                t.mkdir(parents=True)
+                (t / 'result.json').write_text(json.dumps({'status': 'ok', 'usage_complete': True,
+                                                           'cost': {'pinned_session_usd': cumulative, 'reviewer_applicable': False}}))
+                (t / 'invocation.json').write_text(json.dumps({'turn_kind': 'initial' if n == 1 else 'feedback'}))
+            ledger = launch.run_ledger(dest)
+            rows = ledger['cost_by_call']
+            self.assertEqual([r['pinned_session_increase_usd'] for r in rows], [1.0, None, None, 0.5])
+            self.assertEqual(rows[2]['unassigned_interval'], {'from_after': 'turn/0002', 'usd': 3.0})   # turns 2+3 together
+            self.assertNotIn('unassigned_interval', rows[3])
+            self.assertIsNone(ledger['cost_usd'])
+            self.assertEqual(ledger['cost_unobserved'], ['turn/0002'])
+
     def test_unrecovered_reviewer_cost_is_flagged_not_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1524,16 +1569,26 @@ class FableReviewHelperTest(unittest.TestCase):
     `claude` (no model call). The helper runs as this user here; the separate account is checked in a real container."""
     HERE = Path(__file__).resolve().parent
     WRAPPER = HERE / 'fable-review.sh'
+    TOKEN = 'secret-value-123'
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         self.cfg = self.base / 'reviewer-cfg'
         self.cfg.mkdir()
+        self.home = self.base / 'home'
+        self.home.mkdir()
         self.out = self.base / 'fake-out'
         self.out.mkdir()
-        self.mirror = self.base / 'mirror'
-        self.mirror.mkdir()
+        self.root = self.base / 'root'                                        # stands for /tmp and /workspace
+        self.mirror = self.root / 'mirror'
+        (self.mirror / '_packet').mkdir(parents=True)
+        (self.mirror / 'a.txt').write_text('hello\n')
+        (self.mirror / '_packet' / 'spec.md').write_text('spec\n')
+        for name, content in (('.git/config', '[core]\n\tfsmonitor = touch MARK\n'), ('.claude/settings.json', '{}'),
+                              ('.mcp.json', '{}')):
+            (self.mirror / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.mirror / name).write_text(content)
         self.fake = self.base / 'claude'
         self.reply('{"type":"result","result":"REVIEW TEXT","total_cost_usd":0.2}')
         self.procs = []
@@ -1545,26 +1600,37 @@ class FableReviewHelperTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def reply(self, text, rc=0):
+        o = str(self.out)
         self.fake.write_text('#!/bin/bash\n'
-                             'printf "%s\\n" "$@" > "' + str(self.out) + '/args"\n'
-                             'printf "%s" "$CLAUDE_CONFIG_DIR" > "' + str(self.out) + '/config"\n'
-                             'printf "%s" "${CLAUDE_CODE_OAUTH_TOKEN:-absent}" > "' + str(self.out) + '/token"\n'
-                             'pwd > "' + str(self.out) + '/cwd"\n'
-                             'cat > "' + str(self.out) + '/stdin"\n'
+                             'printf "%s\\n" "$@" > "' + o + '/args"\n'
+                             'printf "%s" "$CLAUDE_CONFIG_DIR" > "' + o + '/config"\n'
+                             'printf "%s" "${CLAUDE_CODE_OAUTH_TOKEN:-absent}" > "' + o + '/token-env"\n'
+                             'IFS= read -r tok < "/proc/self/fd/$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"; printf "%s" "$tok" > "' + o + '/token-fd"\n'
+                             'pwd > "' + o + '/cwd"\n'
+                             '(cd . && find . | sort) > "' + o + '/listing"\n'
+                             'cat a.txt > "' + o + '/a.txt" 2>/dev/null\n'
+                             '(touch ./written 2>/dev/null && echo yes || echo no) > "' + o + '/writable"\n'
+                             'echo $$ > "' + o + '/pid"\n'
+                             'cat > "' + o + '/stdin"\n'
+                             'grep -q SLEEP "' + o + '/stdin" && sleep 60\n'
                              "echo '" + text + "'\n"
                              'exit ' + str(rc) + '\n')
         os.chmod(self.fake, 0o755)
 
-    def serve(self, token='secret-value', peer_uid=None, config=None, name='s'):
+    def serve(self, token=TOKEN, peer_uid=None, config=None, name='s', env_token=None, extra=()):
         sock = self.base / name
         env = {'PATH': os.environ['PATH']}
-        if token:
-            env['CLAUDE_CODE_OAUTH_TOKEN'] = token
+        if env_token:
+            env['CLAUDE_CODE_OAUTH_TOKEN'] = env_token
+        read_end, write_end = os.pipe()
+        os.write(write_end, (token + '\n').encode())
+        os.close(write_end)
         proc = subprocess.Popen([sys.executable, str(self.HERE / 'fable_review.py'), 'serve', '--socket', str(sock),
-                                 '--model', 'claude-fable-5-2', '--config-dir', str(config or self.cfg), '--home', str(self.base),
-                                 '--cli', str(self.fake), '--root', str(self.mirror),
-                                 '--peer-uid', str(os.getuid() if peer_uid is None else peer_uid)],
-                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                 '--model', 'claude-fable-5-2', '--config-dir', str(config or self.cfg), '--home', str(self.home),
+                                 '--cli', str(self.fake), '--root', str(self.root), '--token-fd', str(read_end),
+                                 '--peer-uid', str(os.getuid() if peer_uid is None else peer_uid)] + list(extra),
+                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(read_end,))
+        os.close(read_end)
         self.procs.append(proc)
         for _ in range(100):
             if sock.exists() or proc.poll() is not None:
@@ -1572,17 +1638,33 @@ class FableReviewHelperTest(unittest.TestCase):
             time.sleep(0.05)
         return sock, proc
 
-    def call(self, sock, cwd=None, args=(), prompt='review this'):
+    def call(self, sock, cwd=None, args=(), prompt='review this', wait=True):
         env = {'PATH': os.environ['PATH'], 'HOME': str(self.base), 'FABLE_REVIEW_SOCKET': str(sock),
                'FABLE_REVIEW_LIB': str(self.HERE)}
-        return subprocess.run(['bash', str(self.WRAPPER)] + list(args), input=prompt, env=env, cwd=str(cwd or self.mirror),
+        command = ['bash', str(self.WRAPPER)] + list(args)
+        if not wait:
+            proc = subprocess.Popen(command, stdin=subprocess.PIPE, env=env, cwd=str(cwd or self.mirror),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc.stdin.write(prompt.encode())
+            proc.stdin.close()
+            return proc
+        return subprocess.run(command, input=prompt, env=env, cwd=str(cwd or self.mirror),
                               capture_output=True, text=True, timeout=60)
+
+    def raw_request(self, sock, request):
+        import socket as socketlib
+        import struct
+        with socketlib.socket(socketlib.AF_UNIX) as conn:
+            conn.connect(str(sock))
+            body = json.dumps(request).encode()
+            conn.sendall(struct.pack('>Q', len(body)) + body)
+            return json.loads(conn.makefile('rb').read())
 
     def log_lines(self):
         path = self.cfg / 'reviewer-calls.log'
         return path.read_text().splitlines() if path.exists() else []
 
-    def test_logs_attempt_runs_fixed_readonly_reviewer_and_returns_text(self):
+    def test_fixed_reviewer_runs_on_a_snapshot_with_the_token_on_a_pipe_only(self):
         sock, _ = self.serve()
         done = self.call(sock)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1592,17 +1674,24 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-2')
         self.assertEqual(argv[argv.index('--effort') + 1], 'high')
         self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Grep,Glob')
+        self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user')       # no project/local settings
+        self.assertIn('--strict-mcp-config', argv)                                 # no MCP server from anywhere
         self.assertNotIn('--dangerously-skip-permissions', argv)
         self.assertNotIn('--resume', argv)
         sid = argv[argv.index('--session-id') + 1]
-        self.assertEqual((self.out / 'config').read_text(), str(self.cfg))     # never the PM's harness config dir
-        self.assertEqual((self.out / 'token').read_text(), 'secret-value')     # the token reaches the reviewer CLI only
-        self.assertEqual((self.out / 'cwd').read_text().strip(), str(self.mirror))
+        self.assertEqual((self.out / 'config').read_text(), str(self.cfg))         # never the PM's harness config dir
+        self.assertEqual((self.out / 'token-env').read_text(), 'absent')           # not in the CLI's environment
+        self.assertEqual((self.out / 'token-fd').read_text(), self.TOKEN)          # only on the descriptor
+        cwd = (self.out / 'cwd').read_text().strip()
+        self.assertTrue(cwd.startswith(str(self.home / 'snapshots') + '/'), cwd)   # a snapshot, not the PM's directory
+        self.assertEqual((self.out / 'listing').read_text().split(), ['.', './_packet', './_packet/spec.md', './a.txt'])
+        self.assertEqual((self.out / 'a.txt').read_text(), 'hello\n')              # same content as the mirror
+        self.assertEqual((self.out / 'writable').read_text().strip(), 'no')        # read-only like the mirror
+        self.assertFalse(Path(cwd).exists())                                       # removed after the call
         self.assertEqual((self.out / 'stdin').read_text(), 'review this')
         lines = self.log_lines()
         self.assertEqual(len(lines), 2)
         started = launch.CALL_STARTED.fullmatch(lines[0])
-        self.assertIsNotNone(started)
         self.assertEqual(started.group(2), sid)
         self.assertEqual(launch.CALL_EXIT.fullmatch(lines[1]).groups(), (started.group(1), '0'))
         self.assertEqual(json.loads((self.cfg / 'raw' / (sid + '.json')).read_text())['total_cost_usd'], 0.2)
@@ -1610,8 +1699,7 @@ class FableReviewHelperTest(unittest.TestCase):
     def test_failure_exit_code_propagates_and_is_logged(self):
         self.reply('{"type":"result","result":"x"}', rc=3)
         sock, _ = self.serve()
-        done = self.call(sock)
-        self.assertEqual(done.returncode, 3)
+        self.assertEqual(self.call(sock).returncode, 3)
         self.assertTrue(self.log_lines()[-1].endswith(' exit=3'))
 
     def test_empty_or_error_review_is_a_failure(self):
@@ -1632,17 +1720,68 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertEqual(self.call(sock, cwd=outside).returncode, 94)          # cwd outside the allowed roots
         self.assertEqual(self.call(sock, prompt='  \n').returncode, 94)       # nothing to review
         self.assertEqual(self.call(sock, args=['--model', 'claude-opus-5-5']).returncode, 2)
-        import socket as socketlib
         for request in ({'cwd': str(self.mirror), 'prompt': 'x', 'model': 'claude-opus-5-5'},
-                        {'cwd': str(self.mirror), 'prompt': 'x', 'argv': ['id']}, ['id'], {'cwd': 'mirror', 'prompt': 'x'}):
-            with self.subTest(request=request), socketlib.socket(socketlib.AF_UNIX) as conn:
-                conn.connect(str(sock))
-                conn.sendall(json.dumps(request).encode())
-                conn.shutdown(socketlib.SHUT_WR)
-                reply = json.loads(conn.makefile('rb').read())
-                self.assertEqual(reply['exit'], 94)
+                        {'cwd': str(self.mirror), 'prompt': 'x', 'argv': ['id']}, ['id'], {'cwd': 'mirror', 'prompt': 'x'},
+                        {'cwd': str(self.mirror) + '/../mirror', 'prompt': 'x'}, {'cwd': str(self.root) + '/', 'prompt': 'x'}):
+            with self.subTest(request=request):
+                self.assertEqual(self.raw_request(sock, request)['exit'], 94)
         self.assertFalse((self.out / 'args').exists())                         # the CLI never started
         self.assertEqual(self.log_lines(), [])                                 # a refused request is not an attempt
+
+    def test_links_special_files_and_oversized_directories_are_refused(self):
+        sock, _ = self.serve(extra=['--max-files', '3', '--max-bytes', '100'])
+        cases = {}
+        linked = self.root / 'linked'                      # a symbolic link inside the directory
+        shutil.copytree(self.mirror, linked)
+        (linked / 'escape').symlink_to('/')
+        cases['symbolic link inside'] = (linked, 'symbolic link')
+        (self.root / 'via-link').symlink_to(self.mirror)   # the requested path itself goes through a link (a raw
+        reply = self.raw_request(sock, {'cwd': str(self.root / 'via-link'), 'prompt': 'x'})   # request: getcwd resolves)
+        self.assertEqual(reply['exit'], 94)
+        self.assertIn('without following links', reply['stderr'])
+        fifo = self.root / 'fifo'
+        shutil.copytree(self.mirror, fifo)
+        os.mkfifo(fifo / 'pipe')
+        cases['special file'] = (fifo, 'special file')
+        many = self.root / 'many'
+        many.mkdir()
+        for i in range(5):
+            (many / ('f%d' % i)).write_text('x')
+        cases['too many files'] = (many, 'more than 3 files')
+        big = self.root / 'big'
+        big.mkdir()
+        (big / 'f').write_text('x' * 200)
+        cases['too many bytes'] = (big, 'more than 100 bytes')
+        for name, (cwd, reason) in cases.items():
+            with self.subTest(name):
+                done = self.call(sock, cwd=cwd)
+                self.assertEqual(done.returncode, 94, done.stderr)
+                self.assertIn(reason, done.stderr)
+        self.assertFalse((self.out / 'args').exists())
+        self.assertEqual(list((self.home / 'snapshots').iterdir()), [])        # refused snapshots are removed too
+
+    def test_a_disconnected_caller_cancels_the_call_and_leaves_it_unobserved(self):
+        sock, _ = self.serve()
+        client = self.call(sock, prompt='SLEEP please', wait=False)
+        for _ in range(100):
+            if (self.out / 'pid').exists() and (self.out / 'stdin').exists():
+                break
+            time.sleep(0.05)
+        cli_pid = int((self.out / 'pid').read_text())
+        client.kill()                                      # e.g. the PM's Bash timed out
+        client.wait()
+        for _ in range(200):
+            if any(' cancelled ' in line for line in self.log_lines()) and not Path('/proc/%d' % cli_pid).exists():
+                break
+            time.sleep(0.05)
+        self.assertFalse(Path('/proc/%d' % cli_pid).exists())                  # the reviewer CLI was stopped
+        lines = self.log_lines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(launch.CALL_STARTED.fullmatch(lines[0]))
+        hit = launch.CALL_CANCELLED.fullmatch(lines[1])
+        self.assertEqual(hit.groups(), (launch.CALL_STARTED.fullmatch(lines[0]).group(1),
+                                        launch.CALL_STARTED.fullmatch(lines[0]).group(2), 'client-disconnected'))
+        self.assertIsNone(launch.CALL_EXIT.fullmatch(lines[1]))
 
     def test_refuses_without_helper_or_logging_and_from_another_uid(self):
         done = self.call(self.base / 'no-socket')                              # arms 1/2: no helper in the container
@@ -1657,6 +1796,8 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertFalse((self.out / 'args').exists())
         _, proc = self.serve(token='', name='s4')                              # a helper without token does not serve
         self.assertEqual(proc.wait(timeout=30), 90)
+        _, proc = self.serve(env_token=self.TOKEN, name='s5')                  # nor one with the token in its environment
+        self.assertEqual(proc.wait(timeout=30), 90)
 
     def test_container_start_scripts_parse(self):
         for script in ('fable-review.sh', 'lab-arm3-start.sh'):
@@ -1670,7 +1811,9 @@ class FableReviewHelperTest(unittest.TestCase):
         start = (self.HERE / 'lab-arm3-start.sh').read_text()
         self.assertIn('CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=3', start)
         self.assertIn('unset CLAUDE_CODE_OAUTH_TOKEN LAB_REVIEWER_MODEL LAB_REVIEWER_CONFIG_DIR', start)
-        self.assertIn('exec setpriv --reuid=node --regid=node --init-groups --inh-caps=-all "$@"', start)
+        self.assertIn('exec setpriv --reuid=node --regid=node --init-groups --bounding-set=-all --inh-caps=-all "$@"', start)
+        self.assertIn('--token-fd 4', start)
+        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN="$TOKEN"', start)           # the helper's environment never gets it
 
 if __name__ == '__main__':
     unittest.main()

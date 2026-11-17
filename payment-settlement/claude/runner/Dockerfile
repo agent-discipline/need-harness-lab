@@ -7,9 +7,10 @@ ENV PATH="/opt/java/openjdk/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends git python3 curl ca-certificates bash unzip jq util-linux procps && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code@2.1.326 && claude --version
 # v3-claude: no Codex. Arm 3's second reviewer is a fresh Claude session on the reviewer model. It runs inside a helper
-# under its own account (fablereview, uid 2001) that alone holds the token; the PM's `fable-review` only sends the
-# working directory and the prompt over /run/fable-review/socket. lab-arm3-start (arm 3 container start, as root with
-# SETUID/SETGID/DAC_READ_SEARCH only) starts the helper and then the PM as node. Arms 1/2 start as node directly.
+# under its own account (fablereview, uid 2001) that alone holds the token (in memory; its reviewer CLI gets it on a
+# pipe) and reviews a snapshot it copies; the PM's `fable-review` only sends the working directory and the prompt over
+# /run/fable-review/socket. lab-arm3-start (arm 3 container start, as root with SETUID/SETGID/SETPCAP/DAC_READ_SEARCH
+# only) starts the helper and then the PM as node with an empty bounding set. Arms 1/2 start as node directly.
 RUN useradd --uid 2001 --user-group --no-create-home --home-dir /home/fablereview --shell /usr/sbin/nologin fablereview \
  && mkdir -p /home/fablereview /run/fable-review /usr/local/lib/fable-review \
  && chown fablereview:fablereview /home/fablereview /run/fable-review && chmod 700 /home/fablereview && chmod 755 /run/fable-review

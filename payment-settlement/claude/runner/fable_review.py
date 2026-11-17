@@ -2,11 +2,20 @@
 """Arm 3 second reviewer (protocol payment-settlement-v3-claude): a helper under its own user account and the PM-side
 client that `fable-review` runs.
 
-  serve    started once per container by lab-arm3-start (as root, before the PM) under the reviewer account. It alone
-           holds the subscription token (in its own environment; another uid cannot read /proc/<pid>/environ). It
-           listens on a local socket and, per request, runs ONE fixed reviewer command: a fresh `claude -p` session on
-           the reviewer model, effort high, read-only tools (Read, Grep, Glob), its own CLAUDE_CONFIG_DIR. Model, tools,
-           effort and config dir are fixed at start; a request carries only the working directory and the prompt.
+  serve    started once per container by lab-arm3-start (as root, before the PM) under the reviewer account. It reads
+           the subscription token once from an inherited descriptor (--token-fd) and keeps it in memory only: neither
+           its environment nor any file holds it. Per request it runs ONE fixed reviewer command: a fresh `claude -p`
+           session on the reviewer model, effort high, read-only tools (Read, Grep, Glob), its own CLAUDE_CONFIG_DIR,
+           user settings only and no MCP servers; the token reaches that CLI through a pipe
+           (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), never through its environment. Model, tools, effort and config dir
+           are fixed at start; a request carries only the working directory and the prompt.
+           The CLI does not run in the requested directory: the helper copies it into a snapshot it owns (regular files
+           and directories only, opened without following symbolic links; .git, .claude and .mcp.json left out; a
+           symbolic link or special file, or more than MAX_FILES files / MAX_BYTES bytes, refuses the request) and
+           runs the CLI there, read-only. The snapshot is removed after the call. So nothing the PM placed in the
+           directory (project settings, hooks, MCP servers, git configuration) is executed with the token's account.
+           If the caller disconnects before the review is done (e.g. the PM's Bash timed out), the CLI is stopped and
+           the call is logged as cancelled: its usage is unobserved (requests may have gone out), never zero.
   request  the PM side (fable-review): prompt on stdin, the request's working directory = the caller's cwd, review text
            on stdout, the helper's diagnostics on stderr, exit code of the call.
 
@@ -16,14 +25,20 @@ a silent success; the raw result of every session is kept in <config dir>/raw/<s
 transcripts live in its own config dir so the runner attributes their usage to the reviewer role.
 Exit codes of the client: 2 arguments / unusable prompt, 94 request refused by the helper, 95 helper unreachable or
 broken reply, 98 no reviewer in this run (no socket: arms 1/2).
+Wire format: 8-byte big-endian length + UTF-8 JSON request; the client keeps the connection open until the reply
+(JSON, until EOF) arrives — closing it earlier cancels the call.
 """
 import argparse
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import select
+import shutil
+import signal
 import socket
 import socketserver
+import stat
 import struct
 import subprocess
 import sys
@@ -33,23 +48,32 @@ import uuid
 SOCKET = '/run/fable-review/socket'
 TOOLS = 'Read,Grep,Glob'
 MAX_REQUEST = 32 * 1024 * 1024                 # bytes of one JSON request (prompt included)
+MAX_FILES = 20000                              # snapshot limits (a review mirror is a worktree copy)
+MAX_BYTES = 256 * 1024 * 1024
+EXCLUDED = ('.git', '.claude', '.mcp.json')    # project configuration a CLI or git would act on
 CHILD_PATH = '/usr/local/bin:/usr/bin:/bin'
+TOKEN_ENV_FD = 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR'
 
 
 def log(message):
     print('[fable-review-helper] %s %s' % (datetime.now(timezone.utc).isoformat(), message), file=sys.stderr, flush=True)
 
 
-def read_all(conn, limit):
-    chunks, size = [], 0
-    while True:
-        chunk = conn.recv(1 << 16)
+def recv_exact(conn, size):
+    data = b''
+    while len(data) < size:
+        chunk = conn.recv(min(1 << 16, size - len(data)))
         if not chunk:
-            return b''.join(chunks)
-        size += len(chunk)
-        if size > limit:
-            raise ValueError('request larger than %d bytes' % limit)
-        chunks.append(chunk)
+            raise ValueError('connection closed before the request was complete')
+        data += chunk
+    return data
+
+
+def read_request(conn):
+    size = struct.unpack('>Q', recv_exact(conn, 8))[0]
+    if size > MAX_REQUEST:
+        raise ValueError('request larger than %d bytes' % MAX_REQUEST)
+    return recv_exact(conn, size)
 
 
 def peer_uid(conn):
@@ -58,8 +82,9 @@ def peer_uid(conn):
 
 
 def validate(raw, roots):
-    """The only accepted request: {"cwd": <existing directory under an allowed root>, "prompt": <non-empty text>}.
-    Returns (cwd, prompt bytes) or raises ValueError naming the refusal."""
+    """The only accepted request: {"cwd": <absolute, normalized path under an allowed root>, "prompt": <non-empty
+    text>}. Returns (cwd, prompt bytes) or raises ValueError naming the refusal. Whether the path holds symbolic links is
+    decided when it is opened (open_dir), not here."""
     try:
         request = json.loads(raw.decode('utf-8'))
     except (UnicodeDecodeError, ValueError):
@@ -69,14 +94,92 @@ def validate(raw, roots):
     cwd, prompt = request['cwd'], request['prompt']
     if not isinstance(cwd, str) or not cwd.startswith('/') or '\0' in cwd:
         raise ValueError('cwd must be an absolute path')
-    real = os.path.realpath(cwd)
-    if not any(real == root or real.startswith(root.rstrip('/') + '/') for root in roots):
-        raise ValueError('cwd %s is outside %s' % (real, ', '.join(roots)))
-    if not os.path.isdir(real):
-        raise ValueError('cwd %s is not a directory' % real)
+    if os.path.normpath(cwd) != cwd or '..' in cwd.split('/'):
+        raise ValueError('cwd %s is not a normalized path (no "..", "." or "//")' % cwd)
+    if not any(cwd.startswith(root.rstrip('/') + '/') or cwd == root for root in roots):
+        raise ValueError('cwd %s is outside %s' % (cwd, ', '.join(roots)))
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError('prompt must be non-empty text')
-    return real, prompt.encode('utf-8')
+    return cwd, prompt.encode('utf-8')
+
+
+def open_dir(path):
+    """Open path component by component from / without following any symbolic link; returns a directory fd."""
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in [p for p in path.split('/') if p]:
+            try:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                raise ValueError('cwd %s cannot be opened without following links (%s at %r)' % (path, exc.strerror, part))
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def snapshot(src_fd, dest):
+    """Copy the directory open at src_fd into dest (created, owned by this account): regular files and directories
+    only, never through a symbolic link, EXCLUDED names left out. Raises ValueError naming the first refusal (a link, a
+    special file, a limit). Returns {'files', 'bytes', 'excluded'}."""
+    totals = {'files': 0, 'bytes': 0, 'excluded': []}
+
+    def walk(fd, target, rel):
+        os.mkdir(target, 0o700)
+        with os.scandir(fd) as entries:
+            names = sorted(e.name for e in entries)
+        for name in names:
+            path = rel + '/' + name if rel else name
+            if name in EXCLUDED:
+                totals['excluded'].append(path)
+                continue
+            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISLNK(st.st_mode):
+                raise ValueError('symbolic link in the review directory: %s' % path)
+            if stat.S_ISDIR(st.st_mode):
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    walk(child, os.path.join(target, name), path)
+                finally:
+                    os.close(child)
+            elif stat.S_ISREG(st.st_mode):
+                totals['files'] += 1
+                if totals['files'] > MAX_FILES:
+                    raise ValueError('review directory holds more than %d files' % MAX_FILES)
+                src = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                try:
+                    if not stat.S_ISREG(os.fstat(src).st_mode):
+                        raise ValueError('not a regular file when opened: %s' % path)
+                    with open(src, 'rb', closefd=False) as reader, open(os.path.join(target, name), 'xb') as writer:
+                        while True:
+                            chunk = reader.read(1 << 20)
+                            if not chunk:
+                                break
+                            totals['bytes'] += len(chunk)
+                            if totals['bytes'] > MAX_BYTES:
+                                raise ValueError('review directory holds more than %d bytes' % MAX_BYTES)
+                            writer.write(chunk)
+                finally:
+                    os.close(src)
+            else:
+                raise ValueError('special file in the review directory: %s' % path)
+
+    walk(src_fd, dest, '')
+    for root, dirs, files in os.walk(dest, topdown=False):           # read-only like the PM's mirror
+        for name in files:
+            os.chmod(os.path.join(root, name), 0o444)
+        os.chmod(root, 0o555)
+    return totals
+
+
+def remove_tree(path):
+    if not os.path.lexists(path):
+        return
+    for root, dirs, files in os.walk(path):
+        os.chmod(root, 0o700)
+    shutil.rmtree(path)
 
 
 class Reviewer:
@@ -94,9 +197,29 @@ class Reviewer:
         with self.lock, (self.dir / 'reviewer-calls.log').open('a') as stream:
             stream.write(line + '\n')
 
-    def run(self, cwd, prompt):
-        """One reviewer attempt. Returns (exit code, stdout text, stderr text)."""
-        sid, call = str(uuid.uuid4()), self.call_id()
+    def run(self, src_fd, prompt, cancelled):
+        """One reviewer attempt on a snapshot of the directory open at src_fd. Returns (exit code, stdout, stderr), or
+        None when cancelled() became true before the CLI finished (the CLI is stopped and the call logged as cancelled)."""
+        sid = str(uuid.uuid4())
+        work = os.path.join(self.home, 'snapshots', sid)
+        os.makedirs(os.path.dirname(work), mode=0o700, exist_ok=True)
+        try:
+            os.mkdir(work, 0o700)
+            cwd = os.path.join(work, 'review')
+            try:
+                copied = snapshot(src_fd, cwd)
+            except (ValueError, OSError) as exc:
+                return 94, '', '[fable-review] request refused: the review directory cannot be snapshotted: %s\n' % exc
+            log('snapshot %s files=%d bytes=%d excluded=%s' % (sid, copied['files'], copied['bytes'], copied['excluded']))
+            return self.call(sid, cwd, prompt, cancelled)
+        finally:
+            try:
+                remove_tree(work)
+            except OSError as exc:
+                log('snapshot %s not removed: %s' % (sid, exc))
+
+    def call(self, sid, cwd, prompt, cancelled):
+        call = self.call_id()
         try:
             (self.dir / 'raw').mkdir(parents=True, exist_ok=True)
             self.append('%s started session=%s model=%s' % (call, sid, self.model))
@@ -104,18 +227,40 @@ class Reviewer:
             return 97, '', ('[fable-review] cannot record the attempt in %s/reviewer-calls.log; refusing to launch (usage '
                             'would be unobservable): %s\n' % (self.dir, exc))
         raw = self.dir / 'raw' / (sid + '.json')
+        read_end, write_end = os.pipe()                 # the token travels through a pipe the CLI reads once
+        os.write(write_end, self.token.encode() + b'\n')
+        os.close(write_end)
         env = {'PATH': CHILD_PATH, 'HOME': self.home, 'CLAUDE_CONFIG_DIR': str(self.dir), 'DISABLE_AUTOUPDATER': '1',
-               'CLAUDE_CODE_OAUTH_TOKEN': self.token, 'LANG': 'C.UTF-8',
-               # the reviewed files belong to the PM's user: let git inside the reviewer read them without ownership errors
-               'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'safe.directory', 'GIT_CONFIG_VALUE_0': '*'}
+               TOKEN_ENV_FD: str(read_end), 'LANG': 'C.UTF-8'}
         command = [self.cli, '-p', '--model', self.model, '--effort', 'high', '--session-id', sid,
-                   '--tools', TOOLS, '--output-format', 'json']
+                   '--tools', TOOLS, '--setting-sources', 'user', '--strict-mcp-config', '--output-format', 'json']
+        err_path = os.path.join(os.path.dirname(cwd), 'stderr.txt')
         try:
-            with raw.open('wb') as out:
-                done = subprocess.run(command, input=prompt, stdout=out, stderr=subprocess.PIPE, cwd=cwd, env=env, check=False)
-            rc, err = done.returncode, done.stderr.decode('utf-8', 'replace')
+            with raw.open('wb') as out, open(err_path, 'wb') as err:
+                proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=out, stderr=err, cwd=cwd, env=env,
+                                        pass_fds=(read_end,), start_new_session=True)
+                os.close(read_end)
+                read_end = None
+                feeder = threading.Thread(target=self.feed, args=(proc, prompt), daemon=True)
+                feeder.start()
+                while proc.poll() is None:
+                    if cancelled():
+                        self.stop(proc)
+                        self.append('%s cancelled session=%s reason=client-disconnected' % (call, sid))
+                        log('call %s cancelled: client disconnected; CLI stopped' % call)
+                        return None
+                    try:
+                        proc.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                rc = proc.returncode
+            with open(err_path, 'rb') as stream:
+                err_text = stream.read().decode('utf-8', 'replace')
         except OSError as exc:
-            rc, err = 127, '[fable-review] reviewer CLI could not be started: %s\n' % exc
+            rc, err_text = 127, '[fable-review] reviewer CLI could not be started: %s\n' % exc
+        finally:
+            if read_end is not None:
+                os.close(read_end)
         try:
             data = raw.read_bytes()
         except OSError:
@@ -128,21 +273,63 @@ class Reviewer:
         except ValueError:
             pass
         if rc == 0 and (not readable or not (text or '').strip()):
-            err += ('[fable-review] the reviewer returned no review text (empty, error or unreadable result); raw output '
-                    'follows\n' + data.decode('utf-8', 'replace'))
+            err_text += ('[fable-review] the reviewer returned no review text (empty, error or unreadable result); raw '
+                         'output follows\n' + data.decode('utf-8', 'replace'))
             rc = 96
         try:
             self.append('%s exit=%s' % (call, rc))
         except OSError as exc:
             log('cannot record the exit of %s: %s' % (call, exc))
-        out_text = (text + '\n') if readable else data.decode('utf-8', 'replace')
-        return rc, out_text, err
+        return rc, ((text + '\n') if readable else data.decode('utf-8', 'replace')), err_text
+
+    @staticmethod
+    def feed(proc, prompt):
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    @staticmethod
+    def stop(proc):
+        for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, 5)):
+            try:
+                os.killpg(proc.pid, sig)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=wait)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
+
+def read_token(fd):
+    chunks = []
+    while True:
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        if b'\n' in chunk:
+            break
+    os.close(fd)
+    return b''.join(chunks).split(b'\n')[0].decode().strip()
 
 
 def serve(args):
-    token = os.environ.pop('CLAUDE_CODE_OAUTH_TOKEN', '')
+    global MAX_FILES, MAX_BYTES
+    MAX_FILES, MAX_BYTES = args.max_files, args.max_bytes
+    try:
+        token = read_token(args.token_fd)
+    except OSError as exc:
+        log('token descriptor %s unreadable (%s); not serving' % (args.token_fd, exc))
+        return 90
     if not token:
-        log('no token in the helper environment; not serving')
+        log('no token on the descriptor; not serving')
+        return 90
+    if 'CLAUDE_CODE_OAUTH_TOKEN' in os.environ:
+        log('a token in the helper environment is refused (it would be readable by the reviewer); not serving')
         return 90
     reviewer = Reviewer(args.model, args.config_dir, args.home, args.cli, token)
     roots = args.root
@@ -150,17 +337,25 @@ def serve(args):
     class Handler(socketserver.BaseRequestHandler):
         def handle(self):
             conn = self.request
+            src_fd = None
             try:
-                raw = read_all(conn, MAX_REQUEST)
+                raw = read_request(conn)
                 uid = peer_uid(conn)
                 if args.peer_uid is not None and uid != args.peer_uid:
                     raise ValueError('requests are accepted only from uid %d (got %d)' % (args.peer_uid, uid))
                 cwd, prompt = validate(raw, roots)
-            except (ValueError, OSError) as exc:
+                src_fd = open_dir(cwd)
+            except (ValueError, OSError, struct.error) as exc:
                 log('refused: %s' % exc)
                 reply = {'exit': 94, 'stdout': '', 'stderr': '[fable-review] request refused: %s\n' % exc}
             else:
-                rc, out, err = reviewer.run(cwd, prompt)
+                try:
+                    done = reviewer.run(src_fd, prompt, lambda: disconnected(conn))
+                finally:
+                    os.close(src_fd)
+                if done is None:
+                    return
+                rc, out, err = done
                 log('call in %s exit=%s' % (cwd, rc))
                 reply = {'exit': rc, 'stdout': out, 'stderr': err}
             try:
@@ -171,14 +366,23 @@ def serve(args):
     class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         daemon_threads = True
 
-    path = Path(args.socket)
-    if path.exists():
-        path.unlink()
-    server = Server(str(path), Handler)
-    os.chmod(path, 0o666)
+    final = Path(args.socket)
+    staging = final.with_name('.%s.%d' % (final.name, os.getpid()))
+    for path in (staging, final):
+        if path.exists():
+            path.unlink()
+    server = Server(str(staging), Handler)            # bind and open permissions under a private name, then publish
+    os.chmod(staging, 0o666)
+    os.rename(staging, final)
     log('ready model=%s config_dir=%s roots=%s' % (args.model, args.config_dir, ','.join(roots)))
     server.serve_forever()
     return 0
+
+
+def disconnected(conn):
+    """The client keeps its end open until the reply; any readability (EOF, reset or extra bytes) means it went away."""
+    ready, _, _ = select.select([conn], [], [], 0)
+    return bool(ready)
 
 
 def request(args):
@@ -194,9 +398,15 @@ def request(args):
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
             conn.connect(path)
-            conn.sendall(json.dumps({'cwd': os.getcwd(), 'prompt': prompt}).encode('utf-8'))
-            conn.shutdown(socket.SHUT_WR)
-            reply = json.loads(read_all(conn, 1 << 30).decode('utf-8'))
+            body = json.dumps({'cwd': os.getcwd(), 'prompt': prompt}).encode('utf-8')
+            conn.sendall(struct.pack('>Q', len(body)) + body)
+            chunks = []
+            while True:
+                chunk = conn.recv(1 << 16)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            reply = json.loads(b''.join(chunks).decode('utf-8'))
         code, out, err = reply['exit'], reply['stdout'], reply['stderr']
         if not isinstance(code, int) or not isinstance(out, str) or not isinstance(err, str):
             raise ValueError('malformed reply')
@@ -216,10 +426,13 @@ def main(argv=None):
     s.add_argument('--socket', default=SOCKET)
     s.add_argument('--model', required=True)
     s.add_argument('--config-dir', required=True)
-    s.add_argument('--home', required=True)
+    s.add_argument('--home', required=True, help='the helper account home; snapshots live under <home>/snapshots')
     s.add_argument('--cli', default='/usr/local/bin/claude')
     s.add_argument('--root', action='append', required=True, help='allowed working-directory root (repeat)')
     s.add_argument('--peer-uid', type=int, help='accept requests only from this uid')
+    s.add_argument('--token-fd', type=int, required=True, help='descriptor the token is read from once, then closed')
+    s.add_argument('--max-files', type=int, default=MAX_FILES, help=argparse.SUPPRESS)    # tests only; the start
+    s.add_argument('--max-bytes', type=int, default=MAX_BYTES, help=argparse.SUPPRESS)    # script never sets them
     sub.add_parser('request')
     args = p.parse_args(argv)
     return serve(args) if args.mode == 'serve' else request(args)
