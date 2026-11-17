@@ -1247,7 +1247,23 @@ class ExportSetupEvidenceTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((dest / name).read_bytes()).hexdigest(), digest)
             with self.assertRaises(ValueError):                       # already exported: never overwritten
                 exporter.export(runs, ['smoke-a3'], dest, self.TOKEN)
-            refused = {'collected': dict(status='collected'), 'leak': dict(leak=True),
+            # credential patterns of the harness secret guard: refused by file and pattern name, never echoing the value
+            patterns = {'sk- key': 'sk-ant-api03-' + 'A' * 24, 'GitHub token': 'ghp_' + 'b' * 30,
+                        'AWS access key (AKIA)': 'AKIA' + 'C' * 16, 'private key PEM block': '-----BEGIN RSA PRIVATE KEY-----',
+                        'Authorization: Bearer': 'Authorization: Bearer abcdefgh12345678',
+                        'credential assignment': 'PASSWORD=hunter2hunter2', 'JWT': 'eyJ' + 'a' * 12 + '.' + 'b' * 12 + '.' + 'c' * 12}
+            for number, (label, value) in enumerate(patterns.items()):
+                with self.subTest(label):
+                    run_id = 'p-%d' % number
+                    run = self.run_dir(runs, run_id)
+                    (run / 'turns/0001/stdout.jsonl').write_text('{"text": "%s"}\n' % value)
+                    with self.assertRaises(ValueError) as ctx:
+                        exporter.export(runs, [run_id], Path(tmp) / ('out-' + run_id), None)
+                    self.assertIn(label, str(ctx.exception))
+                    self.assertIn('stdout.jsonl', str(ctx.exception))
+                    self.assertNotIn(value, str(ctx.exception))
+                    self.assertFalse((Path(tmp) / ('out-' + run_id)).exists())
+            refused = {'collected': dict(status='collected'), 'failed': dict(status='failed'), 'leak': dict(leak=True),
                        'token in stream': dict(token_in='turns/0001/stdout.jsonl'), 'token in manifest': dict(token_in='manifest.json')}
             for name, options in refused.items():
                 with self.subTest(name):
