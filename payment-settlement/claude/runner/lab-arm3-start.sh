@@ -42,6 +42,13 @@ if [ ! -S "$SOCK" ]; then
   exit 91
 fi
 say "reviewer helper ready"
+# The PM's work folder (its spec, log and other harness records) is closed to other accounts, so the reviewer CLI (no
+# capabilities) cannot read it; the helper still copies a requested directory into its snapshot (DAC_READ_SEARCH). The
+# owner (node, = the host user of the bind mount) changes the mode; root here has no CAP_FOWNER. Fail closed.
+if ! setpriv --reuid=node --regid=node --init-groups --inh-caps=-all chmod o-rwx /workspace; then
+  say "cannot close /workspace to other accounts; the PM is not started"
+  exit 92
+fi
 exec 3< <(printf '%s\n' "$TOKEN")
 unset TOKEN
 export CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=3

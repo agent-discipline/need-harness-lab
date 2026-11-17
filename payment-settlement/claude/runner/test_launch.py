@@ -1821,6 +1821,8 @@ class FableReviewHelperTest(unittest.TestCase):
         self.assertIn('unset CLAUDE_CODE_OAUTH_TOKEN LAB_REVIEWER_MODEL LAB_REVIEWER_CONFIG_DIR', start)
         self.assertIn('exec setpriv --reuid=node --regid=node --init-groups --bounding-set=-all --inh-caps=-all "$@"', start)
         self.assertIn('--token-fd 4', start)
+        self.assertIn('chmod o-rwx /workspace', start)                         # the reviewer CLI cannot enter the work folder
+        self.assertLess(start.index('chmod o-rwx /workspace'), start.index('exec setpriv --reuid=node'))
         self.assertIn('--ambient-caps=+dac_read_search,+setpcap', start)       # the helper only, not its reviewer CLI
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN="$TOKEN"', start)           # the helper's environment never gets it
 
