@@ -958,6 +958,38 @@ class TurnKindTest(unittest.TestCase):
             run.assert_not_called()
             self.assertIn('CENSORED_TURNS', str(self.call(root, 'feedback', dry_run=False)[0]))
 
+    def test_after_a_turn_that_did_not_end_ok_only_recovery_is_accepted(self):
+        for last in ('failed', None):                                    # None: cut short, no result.json
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                dest = self.make(root, [('initial', 'ok'), ('feedback', last)], consults=1)
+                for kind in ('feedback', 'answer'):
+                    error, run, _, _ = self.call(root, kind, dry_run=False)
+                    self.assertIn('must be --kind recovery', str(error), (last, kind))
+                    run.assert_not_called()
+                error, _, _, printed = self.call(root, 'recovery')
+                self.assertIsNone(error)
+                self.assertEqual(json.loads(printed)['counts_as'], 'feedback')   # the failed feedback is counted once recovered
+                self.assertFalse((dest / 'censored.json').exists())
+
+    def test_failed_first_turn_restarts_without_session_or_recovers_with_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make(root, [('initial', 'failed')], arm=1)
+            error, _, _, printed = self.call(root, None, resume=False)   # no session left: a new first turn
+            self.assertIsNone(error)
+            self.assertEqual(json.loads(printed)['turn_kind'], 'initial')
+            self.assertIn('must be --kind recovery', str(self.call(root, 'feedback', dry_run=False)[0]))
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True,
+                                   kind='recovery', dry_run=False, cache_policy='observed-cache', timeout_seconds=60,
+                                   max_turns=None, max_budget_usd=None)
+            no_image = lambda cmd, **kw: SimpleNamespace(returncode=125, stdout=b'', stderr=b'no image')
+            with patch.object(launch.subprocess, 'run', side_effect=no_image), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), self.assertRaises(RuntimeError):   # accepted, then docker fails
+                launch.turn(args)                                           # session left: resume as a recovery
+            invocation = json.loads((dest / 'turns/0002/invocation.json').read_text())
+            self.assertEqual((invocation['turn_kind'], invocation['counts_as']), ('recovery', 'initial'))
+
     def test_turn_record_without_kind_fails_loudly(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

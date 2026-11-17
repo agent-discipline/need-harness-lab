@@ -909,6 +909,12 @@ def next_turn_kind(manifest, dest, records, resume, kind):
     if kind not in TURN_KINDS:
         raise ValueError('a --resume turn must declare --kind %s (feedback = evaluator judging result; answer = arm 3 '
                          'proxy answers; recovery = continue the preceding turn that did not end ok)' % '|'.join(TURN_KINDS))
+    # A turn that did not end ok may still have reached the model (timeout, CLI failure, failed secret scan). The next
+    # turn continues it as a recovery, which counts as that turn's kind: a failed feedback is never left uncounted.
+    # (A failed first turn that left no session is restarted without --resume and never reaches this check.)
+    if records and records[-1][2] != 'ok' and kind != 'recovery':
+        raise ValueError('the last turn %s did not end ok (status %s); the next --resume turn must be --kind recovery '
+                         '(it counts as the kind of the turn it continues)' % (records[-1][0], records[-1][2]))
     if kind == 'answer':
         if manifest.get('arm') != 3:
             raise ValueError('answer turns exist only in arm 3 (user proxy); this run is arm %s' % manifest.get('arm'))
