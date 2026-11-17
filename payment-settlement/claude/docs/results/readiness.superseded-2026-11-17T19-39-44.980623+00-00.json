@@ -1,0 +1,149 @@
+{
+  "protocol": "payment-settlement-v3-claude",
+  "provider": "claude-code",
+  "auth": "subscription-oauth-token",
+  "cli_version": "2.1.326",
+  "requested_models": {
+    "1": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "2": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "3": {
+      "model": "claude-fable-5-2",
+      "worker_model": "claude-opus-5-5"
+    }
+  },
+  "requested_reviewer_model": "claude-fable-5-2",
+  "user_proxy_model": "claude-opus-5-5",
+  "actual_models": {
+    "1": "claude-opus-5-5",
+    "2": "claude-opus-5-5",
+    "3": "claude-fable-5-2"
+  },
+  "reasoning_effort": "high",
+  "cache_policy": "observed-cache",
+  "billed_cost": null,
+  "baseline_sha": "909e3c7081dfdf457e2ecb0e5e338aa361957503",
+  "harness_sha": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
+  "contract_sha256": "de0e95980328db685da0e57f98c52d9331d7bce2f358cc29dc50d058cc533804",
+  "image_digests": {
+    "payment-claude-runner:2.1.326": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1",
+    "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+    "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+    "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+    "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+    "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+    "runner": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1"
+  },
+  "token_limit": 20000000,
+  "time_limit_seconds": 28800,
+  "feedback_limit": 30,
+  "isolation_verified": true,
+  "hook_enforcement_verified": true,
+  "oauth_token_source_verified": true,
+  "cache_observation_verified": true,
+  "usage_collector_verified": true,
+  "role_models_verified": true,
+  "acceptance_suite_verified": true,
+  "harness_adapter_verified": true,
+  "pilot_passed": false,
+  "evidence": {
+    "smoke_runs": {
+      "smoke-v3r2-arm1": {
+        "arm": 1,
+        "manifest_sha256": "7b2a347a2c9aeb635a2ea11556af3685c637f0381ed02da4c92679d8eef7ef1f",
+        "ok_turns": 1,
+        "observed_role_models": {
+          "implementer": [
+            "claude-opus-5-5"
+          ]
+        },
+        "role_model_check": {
+          "implementer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ]
+      },
+      "smoke-v3r2-arm2": {
+        "arm": 2,
+        "manifest_sha256": "4f02482b9d6a0f9163a9297f9fbf28f2d682d8a175e45f38f4d93b17c0e726d9",
+        "ok_turns": 1,
+        "observed_role_models": {
+          "implementer": [
+            "claude-opus-5-5"
+          ]
+        },
+        "role_model_check": {
+          "implementer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ]
+      },
+      "smoke-v3r2-arm3": {
+        "arm": 3,
+        "manifest_sha256": "53c1b01586f5a848d567ca6911ad3049e7e514eec74562c6ab8d47faf21e10fc",
+        "ok_turns": 1,
+        "observed_role_models": {
+          "pm": [
+            "claude-fable-5-2"
+          ]
+        },
+        "role_model_check": {
+          "pm": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "Task",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ]
+      }
+    },
+    "attested": {
+      "harness_adapter_verified": {
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-manifest.json": "53c1b01586f5a848d567ca6911ad3049e7e514eec74562c6ab8d47faf21e10fc",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-invocation.json": "246e49c9645e4fa17de4c25329b966822b2979ad3064e0e72305c2fb249afa11",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-result.json": "e42a01735259b693bdfb67c772bc6675ea949ffe420be93c80acf1c221830872",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-stdout.jsonl": "b23b83f50ee0a7bb7fd413a7d8127094c07ae3a010a343cefb02662fa90b1740"
+      },
+      "acceptance_suite_verified": {
+        "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt": "843c136ffa5d39bfcd37e6fa4cb7214e22bf99d42244e32e7060718ba1a71c46",
+        "payment-settlement/codex/docs/pilots/detailed-01/acceptance-issues.md": "5cad7b1b0f78b80101f2da36a636d773550c858266b430ddb30b1fc4a93cf88b"
+      }
+    },
+    "pilot": null
+  },
+  "frozen_at": "2026-11-17T16:34:07.387710+00:00",
+  "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed"
+}

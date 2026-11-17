@@ -27,17 +27,17 @@
   "reasoning_effort": "high",
   "cache_policy": "observed-cache",
   "billed_cost": null,
-  "baseline_sha": "909e3c7081dfdf457e2ecb0e5e338aa361957503",
+  "baseline_sha": "aa4c6756c4e3d0e485165b6649ce1306f2c2cd94",
   "harness_sha": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
-  "contract_sha256": "de0e95980328db685da0e57f98c52d9331d7bce2f358cc29dc50d058cc533804",
+  "contract_sha256": "7a658125ba1835cf69c286e46543fc14e04b1c600ef6e4180f37d076a3099709",
   "image_digests": {
-    "payment-claude-runner:2.1.326": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1",
+    "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
     "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
     "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
     "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
     "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
     "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
-    "runner": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1"
+    "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
   },
   "token_limit": 20000000,
   "time_limit_seconds": 28800,
@@ -53,10 +53,12 @@
   "pilot_passed": false,
   "evidence": {
     "smoke_runs": {
-      "smoke-v3r2-arm1": {
+      "smoke-v3r3-arm1": {
         "arm": 1,
-        "manifest_sha256": "7b2a347a2c9aeb635a2ea11556af3685c637f0381ed02da4c92679d8eef7ef1f",
+        "manifest_sha256": "e21fe14d93e704a569ff61cd4b43376cb12507f495d6d70791bdc001a59e2c5a",
         "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
         "observed_role_models": {
           "implementer": [
             "claude-opus-5-5"
@@ -76,12 +78,20 @@
           "WebFetch",
           "WebSearch",
           "Write"
-        ]
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
       },
-      "smoke-v3r2-arm2": {
+      "smoke-v3r3-arm2": {
         "arm": 2,
-        "manifest_sha256": "4f02482b9d6a0f9163a9297f9fbf28f2d682d8a175e45f38f4d93b17c0e726d9",
+        "manifest_sha256": "d2a80f6049545896a98d8d2682b1186cea23471a7d6febe1915e0757d19d9526",
         "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
         "observed_role_models": {
           "implementer": [
             "claude-opus-5-5"
@@ -101,12 +111,20 @@
           "WebFetch",
           "WebSearch",
           "Write"
-        ]
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
       },
-      "smoke-v3r2-arm3": {
+      "smoke-v3r3-arm3": {
         "arm": 3,
-        "manifest_sha256": "53c1b01586f5a848d567ca6911ad3049e7e514eec74562c6ab8d47faf21e10fc",
+        "manifest_sha256": "9b3b938e75754c6f65a5fa10e1d723d25678e365a3387d8d7754dd5523e2f1a7",
         "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
         "observed_role_models": {
           "pm": [
             "claude-fable-5-2"
@@ -127,15 +145,61 @@
           "WebFetch",
           "WebSearch",
           "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
+      },
+      "smoke-v3r3-arm3-reviewer": {
+        "arm": 3,
+        "manifest_sha256": "9016b8198e2d2549de3692d2cfafeb24728d3d91835645dcf0fd76621e39d56e",
+        "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
+        "observed_role_models": {
+          "pm": [
+            "claude-fable-5-2"
+          ],
+          "reviewer": [
+            "claude-fable-5-2"
+          ]
+        },
+        "role_model_check": {
+          "pm": true,
+          "reviewer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "Task",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": [
+          "smoke-v3r3-arm3-reviewer/0001"
         ]
       }
     },
     "attested": {
       "harness_adapter_verified": {
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-manifest.json": "53c1b01586f5a848d567ca6911ad3049e7e514eec74562c6ab8d47faf21e10fc",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-invocation.json": "246e49c9645e4fa17de4c25329b966822b2979ad3064e0e72305c2fb249afa11",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-result.json": "e42a01735259b693bdfb67c772bc6675ea949ffe420be93c80acf1c221830872",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r2-arm3-turn-0001-stdout.jsonl": "b23b83f50ee0a7bb7fd413a7d8127094c07ae3a010a343cefb02662fa90b1740"
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-manifest.json": "9b3b938e75754c6f65a5fa10e1d723d25678e365a3387d8d7754dd5523e2f1a7",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-invocation.json": "5d982c5e833d374cc1e9930f0df441ee4d7116db6ea53249c44a263e695df666",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-result.json": "32f1ab59c432dc2bfd87f8b0e22329c963bd8c1e42378cb8d45b14e74b1c872b",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-stdout.jsonl": "c49bfd720cb87f2413b6420c4b93bff0e2bde088db39d6251fe4853b01174492"
       },
       "acceptance_suite_verified": {
         "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt": "843c136ffa5d39bfcd37e6fa4cb7214e22bf99d42244e32e7060718ba1a71c46",
@@ -144,6 +208,47 @@
     },
     "pilot": null
   },
-  "frozen_at": "2026-11-17T16:34:07.387710+00:00",
-  "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed"
+  "frozen_at": "2026-11-17T19:39:44.980623+00:00",
+  "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed",
+  "supersedes": {
+    "reason": "파일럿 01에서 3번 조건의 두 번째 리뷰어가 인증되지 않음(Claude Code 2.1.326이 Bash 자식 환경에서 토큰을 뺌) — 리뷰어 도우미·비용 장부·동결 근거 조건을 고치고 실행기 이미지를 다시 빌드",
+    "at": "2026-11-17T19:39:44.980623+00:00",
+    "previous_contract_sha256": "de0e95980328db685da0e57f98c52d9331d7bce2f358cc29dc50d058cc533804",
+    "previous_image_digests": {
+      "payment-claude-runner:2.1.326": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1",
+      "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+      "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+      "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+      "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+      "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+      "runner": "sha256:e9f242602eacd62310d0d2523b2ce897c2c23c19fc726b5d81724e3469f987d1"
+    },
+    "previous_frozen_at": "2026-11-17T16:34:07.387710+00:00",
+    "archived": {
+      "readiness.json": {
+        "archived_as": "readiness.superseded-2026-11-17T19-39-44.980623+00-00.json",
+        "sha256": "890f2afcbb5d46a3922b38e33b493af57e87777a07d4b7278c26a14d1222a88b"
+      },
+      "frozen-inputs.json": {
+        "archived_as": "frozen-inputs.superseded-2026-11-17T19-39-44.980623+00-00.json",
+        "sha256": "1d7f0bcef0f3ce49ffb92245aacb2a5fc3d6e3696eeca9f52a8485830fef4341"
+      }
+    },
+    "pilot_passed_reset": true,
+    "changed_inputs": [
+      "claude/runner/Dockerfile",
+      "claude/runner/README.md",
+      "claude/runner/fable-review.sh",
+      "claude/runner/fable_review.py",
+      "claude/runner/lab-arm3-start.sh",
+      "claude/runner/launch.py",
+      "claude/runner/test_launch.py",
+      "claude/runner/test_spec_invariants.py",
+      "claude/scripts/freeze_readiness.py",
+      "claude/scripts/start_cycle.py",
+      "claude/scripts/test_scripts.py",
+      "claude/scripts/test_spec_invariants.py"
+    ],
+    "rule": "replaced before any measured run started (freeze_readiness.experiment_started was empty); only inputs under claude/ changed"
+  }
 }

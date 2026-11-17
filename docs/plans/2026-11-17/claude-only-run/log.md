@@ -99,6 +99,8 @@
 | 11-18 04:21 | 메인 재실행: runner 260 OK · scripts 104 OK · `verify_setup` setup_passed true → 명세 테스트 커밋 → **파일럿 뒤 수정의 리뷰 마감**(ledger 7건 fixed, 한계 2건 기록) | 다음: 파일럿 01 종료 기록(INVALID_INFRA)·정리 → 세 조건 스모크 + 3번 리뷰어 스모크(새 이미지) → 메인 확인서 → `--supersede-before-runs` 재동결 → 파일럿 02 |
 | 11-18 04:21~04:27 | Fable 진행자(127k 토큰, task `P-close01-smoke-r3`) — 파일럿 01 종료와 스모크 | A 완료: `finish_run.py --invalid-infra` exit 0 → `INVALID_INFRA`(근거 3개 해시), compose down·discard로 컨테이너 2·볼륨 4·네트워크 1 정리. B는 init 전에 중단(유료 0): 이전 동결이 기본 위치에 있으면 `runner_image`가 새 run을 이전 이미지로 고정하고 다른 `--image`를 거부 → 재동결 대체 경로가 요구하는 "새 이미지의 스모크"를 만들 길이 없음. 진행자는 동결 파일을 옮기지 않고 보고(우회 없음) |
 | 11-18 04:28~04:34 | 수정 워커(누적 646k 토큰) — `init --refreeze-smoke`(`affa54c`·`79bc632`) | 조건: `smoke-*` id · `--pilot`/`--readiness`와 배타 · 본 실험 미시작(`experiment_started` 재사용) · manifest `refreeze_smoke`, 종료·커밋 경로가 거부. 플래그 없는 init 불변. 무과금 실제 init 확인. 메인이 diff를 읽고 재실행: runner 261 OK · scripts 104 OK. 원인 = 메인이 재동결 경로를 설계할 때 init의 이미지 고정과의 맞물림을 빠뜨림. 진행자 재개(B2~B6) |
+| 11-18 04:34~04:38 | Fable 진행자(누적 164k 토큰) — 재동결 스모크 4건(`smoke-v3r3-arm1`·`-arm2`·`-arm3`·`-arm3-reviewer`, 이미지 `sha256:cc570701…`) | 전부 ok·usage_complete. 리뷰어 스모크: 호출 1 성공 1(exit 0, 리뷰 텍스트 반환), reviewer 역할 요청 2건 13,634토큰 수집, 모델 `claude-fable-5-2`. 3번 훅 스모크: gate-guard 차단. 유료 호출 합 127,735토큰 · CLI 추정 0.7406 USD. 미관측(파일럿 02에서 확인): PM 실행 사용자·Bash 자식 환경의 토큰 부재(직접), 재개 턴의 비용 증가분 |
+| 11-18 04:39 | 메인: 내보낸 증거 8개를 읽음(result·manifest·stdout의 fable-review 호출) → 확인서 근거를 새 run 파일로 교체 → 커밋 `aa4c675` → `freeze_readiness.py --supersede-before-runs` exit 0 | 새 계약 `7a658125…`, runner `sha256:cc570701…`, 플래그 8개 true · `pilot_passed` false. 이전 동결은 `*.superseded-2026-11-17T19-39-44…json`으로 보관(이전 계약 `de0e9598…`) |
 
 ## 리뷰 ledger (中↑ — 듀얼 리뷰가 돈 작업 필수)
 
