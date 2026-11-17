@@ -9,7 +9,7 @@
 ## 명령
 
 ```bash
-python3 payment-settlement/claude/runner/launch.py init --run-id <id> --arm <1|2|3> --core <1..10> [--harness payment-settlement/claude/harness-source] [--network <compose_default>] [--readiness <file>] [--pilot]
+python3 payment-settlement/claude/runner/launch.py init --run-id <id> --arm <1|2|3> --core <1..10> [--harness payment-settlement/claude/harness-source] [--network <compose_default>] [--readiness <file>] [--pilot | --refreeze-smoke]
 python3 payment-settlement/claude/runner/launch.py turn --run-id <id> --prompt <file> --env-file <0600 file outside repo> [--resume --kind feedback|answer|recovery] [--max-turns N] [--max-budget-usd X] [--timeout-seconds N (기본 28800 = run 상한, 남은 시간으로 줄임)] --cache-policy observed-cache [--dry-run]
 python3 payment-settlement/claude/runner/launch.py normalize --run-id <id>
 python3 -m unittest discover -s payment-settlement/claude/runner -v

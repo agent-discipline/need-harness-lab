@@ -227,6 +227,18 @@ python3 $L turn --run-id smoke-v3r3-arm3-reviewer --prompt $P/smoke-3-arm3-revie
 
 확인(`turns/0001/result.json`): `status: ok`·`usage_complete: true`·`incomplete: []`, `roles`에 `reviewer`, `reviewer.calls_succeeded_this_turn` ≥ 1·`reviewer.event_count` ≥ 1·`reviewer_usage_pending: false`, `reviewer.cost_usd`가 숫자, 최종 응답 `REVIEWER_OK: …`. `stderr.txt`에 `[lab-arm3-start] reviewer helper ready`. 이 조건을 채운 3번 스모크 턴이 하나도 없으면 동결의 `usage_collector_verified`는 false다(`freeze_readiness.reviewer_smoke_turn`, readiness의 `evidence.smoke_runs.<id>.reviewer_smoke_turns`). `REVIEWER_FAILED`·`Not logged in`·exit 95/97이면 동결하지 않고 메인에 보고한다. 이미지가 바뀐 뒤에는 세 조건 스모크를 모두 새 이미지로 다시 한다: 동결은 채택한 모든 스모크 run의 모든 턴이 동결하는 runner 이미지 id에서 돌았을 때만 스모크 근거를 인정하고, 하나라도 다르거나(또는 `container-inspect.json`이 없어 알 수 없으면) 스모크에서 도출하는 플래그 6개가 모두 false가 되며 어느 run이 어떤 이미지였는지 stderr와 `evidence.smoke_runs.<id>.image_ids`·`image_matches_runner`에 남는다. 또 스모크 run은 통째로 센다 — 실패하거나 사용량이 미완전인 턴이 하나라도 있는 run은 사용량 수집 검증의 근거가 되지 못하고(`all_turns_ok_and_complete`), 도구 표면은 run마다 그 조건의 허용 목록과 같아야 한다(`tools_equal_arm_allow_list`, 여러 run의 합집합으로 맞추지 않는다). 다시 하는 스모크는 새 id로 하고 실패한 run은 `--smoke-run`에 넣지 않는다.
 
+**이전 동결이 있을 때(재동결 — 아래 "본 실험 전 동결 대체").** 기본 위치에 `readiness.json`이 있으면 플래그 없는 `init`은 그 동결의 runner digest만 쓰고 다른 `--image`를 거부한다(그대로). 새 이미지로 스모크를 다시 하려면 `init --refreeze-smoke`를 쓴다: run id가 `smoke-`로 시작해야 하고, `--pilot`·`--readiness`와 함께 쓸 수 없으며, 본 실험 run이 하나도 시작되지 않았을 때만 된다(동결 대체와 같은 판정 `freeze_readiness.experiment_started`). 이미지는 `--image` 또는 기본 태그 `payment-claude-runner:2.1.326`(이 절 앞의 `docker build`로 새로 만든 이미지)이고, manifest에 `image_frozen: false`·`refreeze_smoke: true`가 남으며 동결 계약에 묶이지 않는다(`readiness`·`contract_sha256` 없음). 이 run은 기록 폴더가 없어 `capture_turn`·`finish_run`이 거부하고 본 실험·파일럿으로 커밋될 수 없다. 턴 명령·확인 기준은 위와 같다:
+
+```bash
+python3 $L init --refreeze-smoke --run-id smoke-v3r3-arm1 --arm 1 --core 1
+python3 $L init --refreeze-smoke --run-id smoke-v3r3-arm2 --arm 2 --core 1
+python3 $L init --refreeze-smoke --run-id smoke-v3r3-arm3 --arm 3 --core 1 --harness payment-settlement/claude/harness-source
+python3 $L init --refreeze-smoke --run-id smoke-v3r3-arm3-reviewer --arm 3 --core 1 --harness payment-settlement/claude/harness-source
+# 이어서 turn은 위 스모크·리뷰어 스모크 명령과 같다(run id만 이 id들)
+```
+
+동결 대체는 이 run들을 `--smoke-run`으로 받는다(`--supersede-before-runs`). 모든 턴이 동결하려는 runner 이미지 id에서 돌았어야 근거가 된다(`image_matches_runner`) — `--refreeze-smoke`는 그 이미지를 쓰게 할 뿐 동결 조건을 낮추지 않는다.
+
 ### 증거 내보내기 (진행자, 무과금)
 
 `--attest`의 근거 파일은 저장소 안에 있어야 하는데(`freeze_readiness.attested`) `.runs/`는 추적되지 않는다. 진행자는 `discard` **전에** 3번 스모크의 증거를 `docs/results/setup/v3/`로 내보낸다:
