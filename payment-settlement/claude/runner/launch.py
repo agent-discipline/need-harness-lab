@@ -323,6 +323,28 @@ def selftest(manifest):
 def default_readiness():
     return ROOT / 'docs/results/readiness.json'
 
+REFREEZE_SMOKE_PREFIX = 'smoke-'
+
+def refreeze_smoke_check(args):
+    """init --refreeze-smoke: a smoke run for replacing a freeze (scripts/freeze_readiness.py --supersede-before-runs)
+    while the previous freeze is still in place. Allowed only for a smoke-* run id, not with --pilot or --readiness, and
+    only while no measured run has started — the same judgement the supersede path uses (one function,
+    freeze_readiness.experiment_started, on this runner's root). Raises ValueError otherwise."""
+    if not args.run_id.startswith(REFREEZE_SMOKE_PREFIX):
+        raise ValueError('--refreeze-smoke needs a %s* run id, not %s' % (REFREEZE_SMOKE_PREFIX, args.run_id))
+    if getattr(args, 'pilot', False):
+        raise ValueError('--refreeze-smoke and --pilot exclude each other (a pilot runs under the freeze)')
+    if getattr(args, 'readiness', None):
+        raise ValueError('--refreeze-smoke runs outside any freeze; --readiness does not apply')
+    scripts = str(Path(__file__).resolve().parents[1] / 'scripts')
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import freeze_readiness                              # imported here: freeze_readiness imports this module
+    started = freeze_readiness.experiment_started(ROOT)
+    if started:
+        raise ValueError('a measured run has started (%s): no refreeze smoke, a change now needs a new protocol version'
+                         % '; '.join(started[:5]))
+
 def runner_image(args):
     """The image a new run uses. Before the freeze (smoke runs): --image or the CLI-version tag. Once readiness exists
     (pilot and cycles): the frozen runner digest, and any other --image is refused. Returns (image, readiness or None).
@@ -331,6 +353,8 @@ def runner_image(args):
     explicit = getattr(args, 'readiness', None)
     path = Path(explicit or default_readiness())
     requested = getattr(args, 'image', None)
+    if getattr(args, 'refreeze_smoke', False):          # checked by refreeze_smoke_check: not bound to the freeze
+        return requested or 'payment-claude-runner:' + CLI_VERSION, None
     if not path.exists():
         if explicit:
             raise ValueError('readiness %s does not exist; omit --readiness only for a run before the freeze' % path)
@@ -366,6 +390,9 @@ def open_record(manifest, run_id, root=None):
     created on first use; a measured run's run.json must already exist (scripts/prepare.py)."""
     if manifest.get('run_id') != run_id:
         raise ValueError('manifest belongs to %s, not %s' % (manifest.get('run_id'), run_id))
+    if manifest.get('refreeze_smoke') is True:
+        raise ValueError('%s is a refreeze smoke (init --refreeze-smoke): it has no record folder and is never finished '
+                         'or committed as a measured run or pilot' % run_id)
     folder = record_folder(manifest, root)
     plan = folder / 'run.json'
     if not plan.exists() and manifest.get('pilot') is True:
@@ -384,6 +411,9 @@ def open_record(manifest, run_id, root=None):
 def initialize(args):
     dest = location(args)
     pilot_run_id(args.run_id, bool(getattr(args, 'pilot', False)))
+    refreeze = bool(getattr(args, 'refreeze_smoke', False))
+    if refreeze:
+        refreeze_smoke_check(args)
     harness = Path(args.harness) if getattr(args, 'harness', None) else None
     args.harness = harness
     if harness and (args.arm != 3 or harness.resolve() != ROOT / 'harness-source' or not harness.is_dir()):
@@ -420,6 +450,8 @@ def initialize(args):
             'actual_model': None, 'effort': 'high', 'session_id': str(uuid.uuid4()),
             'cache_policy': 'observed-cache', 'strict_zero_cache_supported': False,
             'image': image, 'image_frozen': frozen is not None,
+            # a smoke for a refreeze (init --refreeze-smoke): outside the freeze in place, never a measured run or pilot
+            'refreeze_smoke': refreeze,
             'readiness': str(frozen['path']) if frozen else None,
             # the frozen contract this run is measured under (None before the freeze); freeze_readiness ties pilot evidence to it
             'contract_sha256': frozen.get('contract_sha256') if frozen else None, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
@@ -1633,6 +1665,9 @@ def main():
     init.add_argument('--readiness', type=Path, help='default: claude/docs/results/readiness.json (a run before the freeze '
                       'only when that default is absent; a named readiness that does not exist is refused)')
     init.add_argument('--pilot', action='store_true', help='pilot run: id claude-pilot-NN, records under docs/pilots/<run id>/')
+    init.add_argument('--refreeze-smoke', action='store_true', help='smoke-* run for replacing the freeze in place '
+                      '(freeze_readiness.py --supersede-before-runs): uses --image or the CLI-version tag instead of the '
+                      'frozen digest; only while no measured run has started; never a pilot or measured run')
     run = sub.add_parser('turn')
     run.add_argument('--run-id', required=True)
     run.add_argument('--prompt', type=Path, required=True)

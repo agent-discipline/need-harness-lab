@@ -168,6 +168,52 @@ class RunnerTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 init('y')
 
+    def test_refreeze_smoke_runs_outside_the_freeze_only_while_nothing_started(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '1/core1').mkdir(parents=True)
+            (root / '1/core1/starter.kt').write_text('starter')
+            for arm in (1, 2, 3):                                 # the evidence experiment_started reads: nothing started
+                for core in range(1, 11):
+                    rec = root / 'docs/experiments' / str(arm) / ('core%d' % core)
+                    rec.mkdir(parents=True)
+                    (rec / 'run.json').write_text(json.dumps({'status': 'NOT_STARTED'}))
+            (root / 'docs/results').mkdir(parents=True, exist_ok=True)
+            (root / 'docs/results/cycles.json').write_text(json.dumps([{'cycle': c, 'status': 'NOT_STARTED'} for c in range(1, 11)]))
+            git = ['git', '-C', str(root), '-c', 'user.email=a@b', '-c', 'user.name=a']
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(git + ['commit', '-q', '--allow-empty', '-m', 'setup'], check=True)
+            readiness = root / 'docs/results/readiness.json'
+            readiness.write_text(json.dumps({'image_digests': {'runner': 'sha256:frozen'}, 'contract_sha256': 'c' * 64}))
+            def init(run_id, image=None, refreeze=True, pilot=False, explicit=None):
+                args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=1, core=1, image=image, harness=None,
+                                       network=None, readiness=explicit, pilot=pilot, refreeze_smoke=refreeze)
+                with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
+                     patch.object(launch, 'selftest', return_value=SELFTEST_OK), contextlib.redirect_stdout(io.StringIO()):
+                    launch.initialize(args)
+                return json.loads((root / '.runs' / run_id / 'manifest.json').read_text())
+            new = init('smoke-v3r3-arm1', image='sha256:new')     # a previous freeze is in place: the new image anyway
+            self.assertEqual((new['image'], new['image_frozen'], new['readiness'], new['contract_sha256'], new['refreeze_smoke']),
+                             ('sha256:new', False, None, None, True))
+            self.assertEqual(init('smoke-v3r3-arm2')['image'], 'payment-claude-runner:' + launch.CLI_VERSION)
+            plain = init('plain', refreeze=False)                 # without the flag nothing changes: the frozen digest
+            self.assertEqual((plain['image'], plain['image_frozen'], plain['refreeze_smoke']), ('sha256:frozen', True, False))
+            with self.assertRaisesRegex(ValueError, 'frozen runner digest'):
+                init('plain2', image='sha256:new', refreeze=False)
+            refusals = {'not a smoke id': dict(run_id='claude-arm1-core01'), 'pilot': dict(run_id='smoke-p', pilot=True),
+                        'with --readiness': dict(run_id='smoke-r', explicit=readiness)}
+            for name, kw in refusals.items():
+                with self.subTest(name), self.assertRaises(ValueError):
+                    init(**kw)
+            with self.assertRaises(ValueError):                    # a pilot id is refused by its own rule as well
+                init('claude-pilot-09', pilot=True)
+            (root / 'docs/experiments/2/core1/run.json').write_text(json.dumps({'status': 'RUNNING'}))   # a measured run started
+            with self.assertRaisesRegex(ValueError, 'measured run has started'):
+                init('smoke-late')
+            self.assertFalse((root / '.runs/smoke-late').exists())
+            with self.assertRaisesRegex(ValueError, 'refreeze smoke'):  # never finished or committed as a run or pilot
+                launch.open_record(new, 'smoke-v3r3-arm1', root)
+
     def test_arm3_seeds_harness_and_records_hashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
