@@ -10,9 +10,15 @@ FLAGS = ("isolation_verified", "usage_collector_verified", "harness_adapter_veri
          "acceptance_suite_verified", "pilot_passed", "oauth_token_source_verified",
          "role_models_verified", "cache_observation_verified")
 AUTH = ("subscription-oauth-token",)
+# Agreed protocol v3-claude (2026-11-17): a ledger or readiness from another protocol or with other limits never passes.
+PROTOCOL = "payment-settlement-v3-claude"
+LIMITS = {"token_limit": 20000000, "time_limit_seconds": 28800, "feedback_limit": 30}
 
 def blockers(manifest):
     failures = [f"{key}: missing/unverified" for key in REQUIRED if not manifest.get(key)]
+    if manifest.get("protocol") != PROTOCOL:
+        failures.append(f"protocol must be {PROTOCOL}")
+    failures += [f"{key} must be {value}" for key, value in LIMITS.items() if manifest.get(key) != value]
     if manifest.get("arm") not in (1, 2, 3) or isinstance(manifest.get("arm"), bool):
         failures.append("arm must be the integer 1, 2 or 3")
     if manifest.get("cache_policy") != "observed-cache":
