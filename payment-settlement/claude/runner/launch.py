@@ -879,12 +879,18 @@ def turn(args):
         stream_result = result['result'] or {}
         reported = stream_result.get('usage') if isinstance(stream_result.get('usage'), dict) else None
         # The stream result covers the pinned session only: reviewer sessions are separate CLI processes and never part of it.
-        main_sum = sum_usage([e for e in events if e['role'] not in ('worker', 'reviewer')])
-        all_sum = sum_usage([e for e in events if e['role'] != 'reviewer'])
+        # A sum over transcripts that could not be read is unknown, not zero (None); with incomplete requests the
+        # sums cover only the observed requests (sums_are_lower_bounds).
+        main_seen = copied.returncode == 0 and (output / 'projects').exists()
+        reviewer_seen = reviewer is not None and not reviewer['log_unknown'] and (reviewer['projects_rc'] == 0 or reviewer['projects_absent'])
+        main_sum = sum_usage([e for e in events if e['role'] not in ('worker', 'reviewer')]) if main_seen else None
+        all_sum = sum_usage([e for e in events if e['role'] != 'reviewer']) if main_seen else None
         cross = {'reported': reported, 'main_sum': main_sum, 'all_sum': all_sum, 'main_delta': None, 'all_delta': None,
-                 'reviewer_sum': sum_usage([e for e in events if e['role'] == 'reviewer']),
-                 'note': 'observation only until the smoke fixes whether result.usage includes sidechains; reviewer_sum is outside reported'}
-        if reported and all(isinstance(reported.get(k), int) for k in USAGE_KEYS):
+                 'reviewer_sum': sum_usage([e for e in events if e['role'] == 'reviewer']) if reviewer_seen else None,
+                 'sums_are_lower_bounds': bool(incomplete),
+                 'note': 'observation only until the smoke fixes whether result.usage includes sidechains; reviewer_sum is '
+                         'outside reported (None in arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)'}
+        if main_seen and reported and all(isinstance(reported.get(k), int) for k in USAGE_KEYS):
             cross['main_delta'] = {k: reported[k] - main_sum[k] for k in USAGE_KEYS}
             cross['all_delta'] = {k: reported[k] - all_sum[k] for k in USAGE_KEYS}
         result.update({

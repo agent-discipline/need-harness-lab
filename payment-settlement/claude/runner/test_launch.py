@@ -319,6 +319,11 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(result['secret_redactions'], ['turns/0001/stderr.txt'])
             self.assertTrue(result['session_id_confirmed'])
             self.assertIn('transcript copy failed', result['incomplete'][0]['reason'])
+            cross = result['usage_cross_check']                     # unread transcripts give unknown sums, not zeros
+            self.assertIsNone(cross['main_sum'])
+            self.assertIsNone(cross['all_sum'])
+            self.assertIsNone(cross['reviewer_sum'])
+            self.assertTrue(cross['sums_are_lower_bounds'])
             self.assertFalse((dest / 'request-ids.txt').exists() and (dest / 'request-ids.txt').read_text().strip())
 
     def test_failed_turn_leaves_stub_and_next_turn_gets_new_number(self):
@@ -379,6 +384,8 @@ class RunnerTest(unittest.TestCase):
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/reviewer-calls.log'):
                 if reviewer_log is None:
                     return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                if reviewer_log == 'UNREADABLE':
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'permission denied')
                 Path(cmd[-1]).write_text(reviewer_log)
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/projects'):
@@ -516,7 +523,13 @@ class RunnerTest(unittest.TestCase):
             rev = [{'type': 'assistant', 'requestId': 'req-rev', 'sessionId': sid, 'message': {'model': 'reviewer-model', 'usage': USAGE}}]
             result, _ = self.arm3_turn(root, False, pm1, None, {sid: rev})         # transcript but no call log at all
             self.assertIn('reviewer transcripts exist without any logged reviewer call', [i['reason'] for i in result['incomplete']])
+            self.assertEqual(result['usage_cross_check']['reviewer_sum'], {k: USAGE[k] for k in launch.USAGE_KEYS})
             self.assertFalse(result['usage_complete'])
+            # an unreadable call log: reviewer usage is unknown, so its sum is None rather than zero
+            result_u, _ = self.arm3_turn(root, True, pm1 + [dict(pm1[0], requestId='req-pmu')], 'UNREADABLE', {})
+            self.assertIsNone(result_u['usage_cross_check']['reviewer_sum'])
+            self.assertFalse(result_u['usage_complete'])
+            pm1 = pm1 + [dict(pm1[0], requestId='req-pmu')]
             # no reviewer activity at all: nothing to account for, the turn can be complete
             result2, _ = self.arm3_turn(root, True, pm1 + [dict(pm1[0], requestId='req-pm2')], None, {})
             self.assertEqual(result2['incomplete'], [])
