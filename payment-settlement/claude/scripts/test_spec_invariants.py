@@ -449,7 +449,8 @@ def smoke_run(runs, run_id, arm, tools, observed=None):
         config_volume=dict(credentials_file_in_volume=False), usage_cross_check=dict(reported=U1)))
 
 
-BASE_TOOLS = {'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'}
+# spec 11 보강 5-a: 그 조건의 기대 목록 = the runner's allow-list of arms 1/2 (arm 3: that list + subagent tool)
+BASE_TOOLS = set(launch.ALLOWED_TOOLS_ARM12)
 
 
 class SameToolsEvidence(unittest.TestCase):
@@ -677,6 +678,333 @@ class ReFreezeRefusesChangedInputs(unittest.TestCase):
         code, out = readiness_cli(self.argv, self.IMAGES)
         self.assertNotEqual(code, 0)
         self.assertEqual(self.output.read_bytes(), self.frozen)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Spec 11 (2026-11-18): 재동결 → "본 실험 전 대체 경로를 도구에 추가". 본 실험 run이 하나도 시작되지 않았을 때만, 사유를 적고 이전
+# 동결을 보관한 뒤 다시 동결한다. 프로토콜 이름은 유지한다. (+ §2 동결 후 바꾸지 않는다; runbook "본 실험 전 동결 대체")
+# ---------------------------------------------------------------------------------------------------------------------
+
+def git(root, *args):
+    import subprocess
+    subprocess.run(['git', '-C', str(root), '-c', 'user.name=spec', '-c', 'user.email=spec@example.invalid',
+                    '-c', 'commit.gpgsign=false'] + list(args), check=True, capture_output=True)
+
+
+def unstarted_world(base):
+    """A claude/ tree where no measured run has started: 30 NOT_STARTED records, 10 NOT_STARTED cycles, no run folder,
+    a git history without any `experiment: claude-arm…` commit."""
+    root = Path(base) / 'world'
+    for core in range(1, 11):
+        for arm in (1, 2, 3):
+            write(root / 'docs/experiments' / str(arm) / ('core%d' % core) / 'run.json',
+                  dict(ledger(arm), run_id=start_cycle.run_plan(core, arm)[0], core=core, status='NOT_STARTED'))
+    write(root / 'docs/results/cycles.json',
+          [dict(cycle=c, status='NOT_STARTED', runs=[start_cycle.run_plan(c, a)[0] for a in (1, 2, 3)]) for c in range(1, 11)])
+    (root / '.runs').mkdir()
+    git(root.parent, 'init', '-q', str(root))
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'setup: claude arm records')
+    return root
+
+
+def started_by(kind, root):
+    """Make one kind of "a measured run has started" evidence true in the world."""
+    run_id = start_cycle.run_plan(4, 2)[0]
+    if kind == 'run record not NOT_STARTED':
+        path = root / 'docs/experiments/2/core4/run.json'
+        write(path, dict(json.loads(path.read_text()), status='RUNNING'))
+    elif kind == 'run record unreadable':
+        (root / 'docs/experiments/2/core4/run.json').write_text('{broken')
+    elif kind == 'run folder exists':
+        (root / '.runs' / run_id).mkdir()
+    elif kind == 'cycle not NOT_STARTED':
+        cycles = json.loads((root / 'docs/results/cycles.json').read_text())
+        cycles[3]['status'] = 'RUNNING'
+        write(root / 'docs/results/cycles.json', cycles)
+    elif kind == 'cycle table unreadable':
+        (root / 'docs/results/cycles.json').write_text('[')
+    elif kind == 'experiment commit':
+        git(root, 'commit', '-q', '--allow-empty', '-m', 'experiment: %s FAILED' % run_id)
+    else:
+        raise AssertionError(kind)
+
+
+STARTED_KINDS = ('run record not NOT_STARTED', 'run record unreadable', 'run folder exists', 'cycle not NOT_STARTED',
+                 'cycle table unreadable', 'experiment commit')
+
+
+class ExperimentStartedEvidence(unittest.TestCase):
+    def test_nothing_started_in_an_untouched_world(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = unstarted_world(tmp)
+            self.assertFalse(freeze_readiness.experiment_started(root=root))
+
+    def test_every_kind_of_start_evidence_counts_as_started(self):
+        for kind in STARTED_KINDS:
+            with self.subTest(kind), tempfile.TemporaryDirectory() as tmp:
+                root = unstarted_world(tmp)
+                started_by(kind, root)
+                self.assertTrue(freeze_readiness.experiment_started(root=root), kind)
+
+
+class SupersedeBeforeRuns(unittest.TestCase):
+    """freeze_readiness.py --supersede-before-runs --reason (runbook): only while no measured run has started, needs a
+    reason, keeps the previous readiness.json and frozen-inputs.json, records the supersession, resets pilot_passed, keeps
+    the protocol name; afterwards the ordinary --replace still refuses changed inputs."""
+
+    IMAGES = ReFreezeRefusesChangedInputs.IMAGES
+    NEW_IMAGES = dict(IMAGES, **{'payment-claude-runner:2.1.326': 'sha256:' + 'd' * 64})
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.world = unstarted_world(base)
+        runs = base / 'runs'
+        smokes = ModelsPerSpec('test_requested_models_per_arm')
+        smokes.smoke(runs, 'a1', 1, {'main': OPUS}, {'implementer': [OPUS]})
+        smokes.smoke(runs, 'a2', 2, {'main': OPUS}, {'implementer': [OPUS]})
+        smokes.smoke(runs, 'a3', 3, {'main': FABLE, 'worker': OPUS, 'reviewer': FABLE},
+                     {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})
+        self.runs = runs
+        self.output = base / 'results' / 'readiness.json'
+        self.output.parent.mkdir()
+        self.argv = ['--runs', str(runs), '--smoke-run', 'a1', '--smoke-run', 'a2', '--smoke-run', 'a3', '--output', str(self.output)]
+        code, out = self.cli(self.argv, self.IMAGES)
+        self.assertEqual(code, 0, out)
+        # the freeze being replaced had a passed pilot (set on the file: the pilot itself is outside this test)
+        previous = json.loads(self.output.read_text())
+        previous['pilot_passed'] = True
+        self.output.write_text(json.dumps(previous))
+        self.before = self.files()
+        self.changed = dict(freeze_readiness.inventory())
+        self.changed['claude/prompts/feedback.md'] = '0' * 64
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def cli(self, argv, images, inventory=None):
+        with patch.object(freeze_readiness, 'ROOT', self.world):
+            return readiness_cli(argv, images, inventory)
+
+    def files(self):
+        return {p.name: p.read_bytes() for p in self.output.parent.iterdir() if p.is_file()}
+
+    def supersede(self, *extra, images=None, inventory='changed'):
+        argv = self.argv + ['--supersede-before-runs'] + list(extra)
+        return self.cli(argv, images or self.NEW_IMAGES, self.changed if inventory == 'changed' else inventory)
+
+    def test_supersede_before_any_run_keeps_the_previous_freeze_and_records_why(self):
+        code, out = self.supersede('--reason', 'reviewer helper (spec 11)')
+        self.assertEqual(code, 0, out)
+        new = json.loads(self.output.read_text())
+        self.assertEqual(new['protocol'], PROTOCOL)                                     # 프로토콜 이름은 유지한다
+        self.assertIs(new['pilot_passed'], False)
+        self.assertIn('reviewer helper (spec 11)', json.dumps(new.get('supersedes')))
+        after = self.files()
+        for name, content in self.before.items():                                     # 이전 동결을 보관한 뒤
+            kept = [n for n, c in after.items() if c == content]
+            self.assertTrue(kept, '%s of the previous freeze was not kept' % name)
+        self.assertIn('readiness.json', self.before)
+        self.assertNotEqual(after['readiness.json'], self.before['readiness.json'])
+
+    def test_supersede_needs_a_reason(self):
+        for extra in ((), ('--reason', ''), ('--reason', '   ')):
+            with self.subTest(extra=extra):
+                code, _ = self.supersede(*extra)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(self.files(), self.before)
+
+    def restore(self):
+        for p in list(self.output.parent.iterdir()):
+            p.unlink()
+        for name, content in self.before.items():
+            (self.output.parent / name).write_bytes(content)
+
+    def test_supersede_is_refused_once_any_measured_run_has_started(self):
+        # spec 11 보강: "시작되지 않았음"은 고정된 본 실험 실행 폴더(claude/.runs)·30건 기록·사이클 기록·모든 로컬 브랜치의
+        # 실험 커밋으로 판정한다(인자로 받은 경로가 아님). Here the fixed tree is the world (ROOT); --runs is the smoke folder.
+        for kind in STARTED_KINDS:
+            with self.subTest(kind):
+                self.world = unstarted_world(Path(tempfile.mkdtemp(dir=self.tmp.name)))
+                started_by(kind, self.world)
+                try:
+                    code, _ = self.supersede('--reason', 'too late')
+                    self.assertNotEqual(code, 0, '%s did not stop the supersession' % kind)
+                    self.assertEqual(self.files(), self.before)
+                finally:
+                    self.restore()
+
+    def test_an_empty_given_runs_folder_does_not_hide_a_started_run_in_the_fixed_folder(self):
+        # spec 11 보강: 고정된 본 실험 실행 폴더 … (인자로 받은 경로가 아님) — --runs holds only the smokes
+        (self.world / '.runs' / start_cycle.run_plan(1, 1)[0]).mkdir()
+        self.assertFalse([p for p in self.runs.iterdir() if p.name.startswith('claude-arm')])
+        code, _ = self.supersede('--reason', 'too late')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.files(), self.before)
+
+    def test_an_experiment_commit_on_another_local_branch_refuses_it(self):
+        # spec 11 보강: 모든 로컬 브랜치의 실험 커밋
+        git(self.world, 'checkout', '-q', '-b', 'other')
+        git(self.world, 'commit', '-q', '--allow-empty', '-m', 'experiment: %s PASSED' % start_cycle.run_plan(2, 1)[0])
+        git(self.world, 'checkout', '-q', '-')
+        code, _ = self.supersede('--reason', 'too late')
+        self.assertNotEqual(code, 0, 'an experiment commit on another local branch did not stop the supersession')
+        self.assertEqual(self.files(), self.before)
+
+    def test_a_changed_shared_contract_refuses_it(self):
+        # spec 11 보강: 공유 계약(docs의 요구사항·판정 기준·답변 정책·자원 문서, evaluation/)이 이전 동결과 다르면 대체를 거부
+        inventory = dict(freeze_readiness.inventory())
+        targets = ['docs/requirements.md', 'docs/acceptance.md', 'docs/answer-policy.md', 'docs/resources.md',
+                   sorted(k for k in inventory if k.startswith('evaluation/'))[0]]
+        for rel in targets:
+            with self.subTest(rel):
+                changed = dict(inventory)
+                self.assertIn(rel, changed)
+                changed[rel] = '0' * 64
+                try:
+                    code, _ = self.supersede('--reason', 'contract edit', inventory=changed)
+                    self.assertNotEqual(code, 0, 'changed %s superseded the freeze' % rel)
+                    self.assertEqual(self.files(), self.before)
+                finally:
+                    self.restore()
+
+    def test_a_supersession_that_fails_midway_leaves_the_freeze_files_in_place(self):
+        # spec 11 보강: 대체는 원자적이어야 하고 중간 실패로 동결 파일이 사라지지 않는다.
+        # The failure is injected where the new readiness is derived (after the gates, before anything is written).
+        failures = {'deriving the new evidence': patch.object(freeze_readiness, 'smoke_evidence', side_effect=OSError('disk full')),
+                    'replacing the file': patch.object(os, 'replace', side_effect=OSError('disk full')),
+                    'renaming the file': patch.object(os, 'rename', side_effect=OSError('disk full'))}
+        for target, failure in failures.items():
+            with self.subTest(target):
+                with failure:
+                    try:
+                        self.supersede('--reason', 'midway failure')
+                    except OSError:
+                        pass
+                after = self.files()
+                try:
+                    self.assertIn('readiness.json', after, 'readiness.json vanished after a failed supersession')
+                    self.assertIn('frozen-inputs.json', after, 'frozen-inputs.json vanished after a failed supersession')
+                    self.assertEqual(after['readiness.json'], self.before['readiness.json'])
+                finally:
+                    self.restore()
+
+    def test_supersede_does_not_combine_with_replace_or_a_pilot(self):
+        for extra in (('--reason', 'x', '--replace'), ('--reason', 'x', '--pilot-run', 'a3')):
+            with self.subTest(extra=extra):
+                code, _ = self.supersede(*extra)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(self.files(), self.before)
+
+    def test_after_a_supersession_replace_still_refuses_changed_inputs(self):
+        code, out = self.supersede('--reason', 'reviewer helper')
+        self.assertEqual(code, 0, out)
+        frozen = self.files()
+        changed_again = dict(self.changed)
+        changed_again['docs/acceptance.md'] = '1' * 64
+        code, _ = self.cli(self.argv + ['--replace'], self.NEW_IMAGES, changed_again)
+        self.assertNotEqual(code, 0)
+        code, _ = self.cli(self.argv + ['--replace'], dict(self.NEW_IMAGES, **{'payment-claude-runner:2.1.326': 'sha256:' + 'e' * 64}),
+                           self.changed)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.files(), frozen)
+        code, out = self.cli(self.argv + ['--replace'], self.NEW_IMAGES, self.changed)        # control: unchanged inputs
+        self.assertEqual(code, 0, out)
+
+
+class CycleTurnsHaveNoPerTurnTimeout(unittest.TestCase):
+    """Spec 11 턴 제한 시간 → "턴 제한 없음, run 8시간만" (runbook: start_cycle.py의 --timeout-seconds 기본값은 28,800초)."""
+
+    def test_cycle_first_turns_get_the_run_cap_when_no_timeout_is_given(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'claude'
+            for arm in (1, 2, 3):
+                write(root / 'docs/experiments' / str(arm) / 'core1' / 'run.json',
+                      dict(ledger(arm), run_id='claude-arm%d-core01' % arm, core=1, status='NOT_STARTED'))
+            write(root / 'docs/results/cycles.json', [dict(cycle=c, status='NOT_STARTED') for c in range(1, 11)])
+            readiness = Path(tmp) / 'readiness.json'
+            write(readiness, ready(contract_sha256=current_contract_sha()))
+            env = Path(tmp) / 'claude.env'
+            env.write_text('CLAUDE_CODE_OAUTH_TOKEN=' + TOKEN + '\n')
+            os.chmod(env, 0o600)
+            calls = []
+
+            def fake_run(cmd, **kw):
+                calls.append([str(c) for c in cmd])
+                return SimpleNamespace(returncode=0)
+            argv = ['start_cycle.py', '--cycle', '1', '--readiness', str(readiness), '--env-file', str(env)]
+            with patch.object(start_cycle, 'ROOT', root), patch.object(sys, 'argv', argv), \
+                 patch.object(start_cycle.subprocess, 'run', side_effect=fake_run), \
+                 patch.object(start_cycle.lab, 'verify'), patch.object(start_cycle.lab, 'prompt', side_effect=lambda arm: 'p%d' % arm), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(start_cycle.main(), 0)
+            turns = [c for c in calls if 'turn' in c]
+            self.assertEqual(len(turns), 3)
+            for c in turns:
+                value = c[c.index('--timeout-seconds') + 1] if '--timeout-seconds' in c else None
+                self.assertIn(value, (None, '28800'), 'a per-turn limit below the run cap: %s' % value)
+
+
+
+class SmokeEvidenceIsPerRun(unittest.TestCase):
+    """Spec 11 보강 5-a: 스모크 근거는 이번에 동결하는 runner 이미지에서 돈 run만 인정한다. 도구 표면은 스모크 run 각각이 그
+    조건의 기대 목록과 같아야 한다. (failed-turn part: runner/test_spec_invariants.py SmokeEvidenceIsPerRun)"""
+
+    IMAGES = ReFreezeRefusesChangedInputs.IMAGES
+    RUNNER = IMAGES['payment-claude-runner:2.1.326']
+    OTHER = 'sha256:' + '9' * 64
+
+    def freeze(self, images_by_run):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp) / 'runs'
+            smokes = ModelsPerSpec('test_requested_models_per_arm')
+            specs = {'a1': (1, {'main': OPUS}, {'implementer': [OPUS]}), 'a2': (2, {'main': OPUS}, {'implementer': [OPUS]}),
+                     'a3': (3, {'main': FABLE, 'worker': OPUS, 'reviewer': FABLE}, {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})}
+            for run_id, (arm, req, obs) in specs.items():
+                smokes.smoke(runs, run_id, arm, req, obs)
+                image = images_by_run.get(run_id, self.RUNNER)
+                manifest = json.loads((runs / run_id / 'manifest.json').read_text())
+                manifest['image'] = image
+                write(runs / run_id / 'manifest.json', manifest)
+                write(runs / run_id / 'turns/0001/container-inspect.json', [{'Image': image, 'Config': {'Image': image}}])
+            output = Path(tmp) / 'results' / 'readiness.json'
+            output.parent.mkdir()
+            code, out = readiness_cli(['--runs', str(runs), '--smoke-run', 'a1', '--smoke-run', 'a2', '--smoke-run', 'a3',
+                                       '--output', str(output)], self.IMAGES)
+            return code, (json.loads(output.read_text()) if output.exists() else None), out
+
+    def test_control_smokes_on_the_frozen_image_count(self):
+        code, readiness, out = self.freeze({})
+        self.assertEqual(code, 0, out)
+        self.assertIs(readiness['role_models_verified'], True)
+
+    def test_a_smoke_run_on_another_image_is_no_evidence(self):
+        for run_id in ('a1', 'a3'):
+            with self.subTest(run_id):
+                code, readiness, out = self.freeze({run_id: self.OTHER})
+                if code == 0:
+                    self.assertIs(readiness['role_models_verified'], False,
+                                  'a smoke run on another image backed role_models_verified')
+
+    def isolation(self, tools_by_run):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            for run_id, (arm, tools) in tools_by_run.items():
+                smoke_run(runs, run_id, arm, tools)
+            return freeze_readiness.smoke_evidence(runs, list(tools_by_run))[0]['isolation_verified']
+
+    def test_every_smoke_run_must_show_its_arms_tool_surface(self):
+        good = {'a1': (1, BASE_TOOLS), 'a2': (2, BASE_TOOLS), 'a3': (3, BASE_TOOLS | {'Task'})}
+        self.assertTrue(self.isolation(good))
+        cases = {
+            'second arm 1 run with an extra tool': dict(good, b1=(1, BASE_TOOLS | {'Skill'})),
+            'second arm 3 run without subagents': dict(good, b3=(3, BASE_TOOLS)),
+            'second arm 2 run without a web tool': dict(good, b2=(2, BASE_TOOLS - {'WebSearch'})),
+        }
+        for name, runs in cases.items():
+            with self.subTest(name):
+                self.assertFalse(self.isolation(runs), name)
 
 
 if __name__ == '__main__':
