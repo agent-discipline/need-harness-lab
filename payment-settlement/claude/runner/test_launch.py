@@ -7,7 +7,9 @@ from pathlib import Path
 import contextlib
 from datetime import timedelta
 import io
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -85,8 +87,20 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(set(tools) - set(launch.SUBAGENT_TOOLS), set(launch.ALLOWED_TOOLS_ARM12))
         self.assertEqual(set(tools) & set(launch.SUBAGENT_TOOLS), set(launch.SUBAGENT_TOOLS))
         self.assertNotIn('docker.sock', ' '.join(cmd))
-        # arms 1/2 never receive the reviewer switch, so fable-review refuses there
-        self.assertNotIn('LAB_REVIEWER', ' '.join(launch.docker_command(manifest(), Path('/e'), 'n', resume=False)))
+        # arm 3 starts as root with three capabilities only, through lab-arm3-start (helper first, then the PM as node)
+        self.assertEqual(cmd[cmd.index('--user') + 1], '0:0')
+        self.assertEqual([cmd[i + 1] for i, a in enumerate(cmd) if a == '--cap-add'], list(launch.ARM3_CAPS))
+        self.assertLess(cmd.index('--cap-drop=ALL'), cmd.index('--cap-add'))
+        self.assertIn('--security-opt=no-new-privileges', cmd)
+        image = cmd.index('runner:test')
+        self.assertEqual(cmd[image + 1:image + 3], [launch.ARM3_START, 'claude'])
+        # arms 1/2 never receive the reviewer switch, run as the image user and start claude directly (unchanged)
+        for arm in (1, 2):
+            plain = launch.docker_command(manifest(arm), Path('/e'), 'n', resume=False)
+            self.assertNotIn('LAB_REVIEWER', ' '.join(plain))
+            self.assertNotIn('--user', plain)
+            self.assertNotIn('--cap-add', plain)
+            self.assertEqual(plain[plain.index('runner:test') + 1], 'claude')
 
     def test_initialization_distinct_no_overwrite_git_init_atomic(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -440,7 +454,7 @@ class RunnerTest(unittest.TestCase):
             self.assertFalse((dest / 'request-ids.txt').exists())
 
     def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1, kind='feedback',
-                  wording=None, reviewer_dir_readable=True):
+                  wording=None, reviewer_dir_readable=True, pm_results=None):
         """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts.
         wording: docker's stderr for a missing path (default: the Docker 29 text); reviewer_dir_readable=False makes the
         copy of the reviewer directory itself fail, so absence cannot be established."""
@@ -465,8 +479,9 @@ class RunnerTest(unittest.TestCase):
             if cmd[:2] == ['docker', 'create']:
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'start']:
-                kw['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'session_id': manifest()['session_id'],
-                                               'usage': {k: reported[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': pm_cost}).encode() + b'\n')
+                for usage in pm_results or [reported]:           # pm_results: several result events in one turn
+                    kw['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'session_id': manifest()['session_id'],
+                                                   'usage': {k: usage[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': pm_cost}).encode() + b'\n')
                 return SimpleNamespace(returncode=0)
             if cmd[:2] == ['docker', 'inspect']:
                 return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
@@ -570,7 +585,8 @@ class RunnerTest(unittest.TestCase):
             log = 'T1-1 started session=%s model=reviewer-z\nT1-1 exit=0\n' % sid
             result, _ = self.arm3_turn(root, False, pm, log, {sid: rev}, reviewer_raw={sid: {'result': 'x', 'total_cost_usd': 0.25}})
             self.assertEqual(result['reviewer']['cost_usd'], 0.25)
-            self.assertEqual(result['cost'], {'pinned_session_usd': 0.1, 'reviewer_usd': 0.25, 'reviewer_applicable': True, 'cost_complete': True})
+            self.assertEqual(result['cost'], {'pinned_session_usd': 0.1, 'pinned_session_usd_semantics': 'cumulative',
+                                              'reviewer_usd': 0.25, 'reviewer_applicable': True, 'cost_complete': True})
             # a user-proxy consultation of the same run lands in the same ledger
             consult = dest / 'consults/0001'
             consult.mkdir(parents=True)
@@ -583,6 +599,129 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(ledger['cost_usd'], 0.4)
             self.assertTrue(ledger['usage_complete'])
             self.assertEqual(json.loads((dest / 'ledger.json').read_text())['roles']['user-proxy']['requests'], 1)
+
+    def test_several_result_events_in_one_turn_are_combined_for_the_cross_check(self):
+        # pilot 01 turn 0002: the session resumed after a background worker and reported a second result event
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / 'stdout.jsonl'
+            u1 = {'input_tokens': 22, 'cache_creation_input_tokens': 5, 'cache_read_input_tokens': 7, 'output_tokens': 9,
+                  'server_tool_use': {'web_search_requests': 1, 'web_fetch_requests': 0}}
+            u2 = {'input_tokens': 8, 'cache_creation_input_tokens': 1, 'cache_read_input_tokens': 2, 'output_tokens': 3,
+                  'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 2}}
+            raw.write_text(''.join(json.dumps(e) + '\n' for e in (
+                {'type': 'result', 'session_id': 's', 'total_cost_usd': 7.8, 'usage': u1, 'modelUsage': {'m': {'costUSD': 7.8}}},
+                {'type': 'result', 'session_id': 's', 'total_cost_usd': 7.8, 'usage': u2, 'modelUsage': {'m': {'costUSD': 7.8}}})))
+            summary = launch.collect(raw)
+            self.assertEqual(summary['result_count'], 2)
+            self.assertEqual(len(summary['results']), 2)
+            combined = summary['result']
+            self.assertEqual({k: combined['usage'][k] for k in launch.USAGE_KEYS},
+                             {'input_tokens': 30, 'cache_creation_input_tokens': 6, 'cache_read_input_tokens': 9, 'output_tokens': 12})
+            self.assertEqual(combined['usage']['server_tool_use'], {'web_fetch_requests': 2, 'web_search_requests': 1})
+            self.assertEqual(combined['total_cost_usd'], 7.8)                    # cumulative: the last value, never added
+            self.assertEqual(combined['session_ids'], ['s'])
+            # one event without the four counters: the combined usage is unknown, not a partial sum
+            raw.write_text(json.dumps({'type': 'result', 'session_id': 's', 'usage': u1}) + '\n' +
+                           json.dumps({'type': 'result', 'session_id': 's', 'usage': {}}) + '\n')
+            self.assertIsNone(launch.collect(raw)['result']['usage'])
+            # results of two different sessions never stand for the pinned one
+            raw.write_text(json.dumps({'type': 'result', 'session_id': 's', 'usage': u1}) + '\n' +
+                           json.dumps({'type': 'result', 'session_id': 't', 'usage': u2}) + '\n')
+            self.assertIsNone(launch.collect(raw)['result']['session_id'])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.arm3_dest(root)
+            first = dict(USAGE, input_tokens=5)
+            pm = [{'type': 'assistant', 'requestId': 'req-1', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': first}},
+                  {'type': 'assistant', 'requestId': 'req-2', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+            result, _ = self.arm3_turn(root, False, pm, None, {}, pm_results=[first, USAGE])
+            cross = result['usage_cross_check']
+            self.assertEqual(cross['result_events'], 2)
+            self.assertEqual(cross['main_delta'], {k: 0 for k in launch.USAGE_KEYS})
+            self.assertTrue(result['usage_complete'])
+            self.assertTrue(result['session_id_confirmed'])
+            # the former behaviour (last event only) would have left a delta equal to the first event's usage
+            self.assertNotEqual(cross['reported']['input_tokens'], USAGE['input_tokens'])
+
+    def test_run_ledger_cost_follows_the_cumulative_session_value(self):
+        # pilot 01: turn 1 reported 1.9925, turn 2 reported 7.8483 (cumulative); the ledger must not add them
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'a'
+            def turn_result(n, cumulative, reviewer=0.0, failed=()):
+                t = dest / 'turns' / ('%04d' % n)
+                t.mkdir(parents=True, exist_ok=True)
+                (t / 'result.json').write_text(json.dumps({
+                    'status': 'ok', 'usage_complete': True,
+                    'reviewer': {'calls_failed_this_turn': len(failed), 'failed_attempts_without_requests': list(failed)},
+                    'cost': {'pinned_session_usd': cumulative, 'reviewer_usd': reviewer, 'reviewer_applicable': True}}))
+                (t / 'invocation.json').write_text(json.dumps({'turn_kind': 'initial' if n == 1 else 'answer'}))
+            turn_result(1, 1.9925464)
+            turn_result(2, 7.8483476, reviewer=0.25, failed=[{'call': 'c1', 'session': 's1'}, {'call': 'c2', 'session': 's2'}])
+            consult = dest / 'consults/0001'
+            consult.mkdir(parents=True)
+            (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.5}))
+            ledger = launch.run_ledger(dest)
+            self.assertEqual(ledger['cost_usd'], round(7.8483476 + 0.25 + 0.5, 6))
+            self.assertEqual([r.get('pinned_session_increase_usd') for r in ledger['cost_by_call']], [1.992546, 5.855801, None])
+            self.assertIn('cumulative', ledger['cost_semantics'])
+            self.assertEqual(ledger['reviewer_calls_failed'], 2)
+            self.assertEqual(ledger['reviewer_failed_attempts_without_requests'], 2)
+            # an unobserved cumulative value: the run cost is unknown (null), never a partial number
+            turn_result(3, None)
+            ledger = launch.run_ledger(dest)
+            self.assertIsNone(ledger['cost_usd'])
+            self.assertEqual(ledger['cost_unobserved'], ['turn/0003'])
+            # a cumulative value that went down breaks the semantics: flagged and unobserved, not a negative cost
+            turn_result(3, 1.0)
+            ledger = launch.run_ledger(dest)
+            self.assertIsNone(ledger['cost_usd'])
+            self.assertIn('decreased', ledger['cost_by_call'][2]['anomaly'])
+
+    def test_reviewer_attempt_failed_before_any_request_is_usage_zero_not_incomplete(self):
+        # pilot 01 turn 0002: two "Not logged in" attempts left transcripts with synthetic assistant lines only
+        sids = ('e3e55516-d389-4a9c-9949-3d21f7cdcad2', '5846a3e0-94da-4ba4-a798-452809d5cb06')
+        zero = {k: 0 for k in launch.USAGE_KEYS}
+        def synthetic(sid):
+            return [{'type': 'api-request', 'sessionId': sid, 'params': {'model': 'claude-fable-5-2'}},
+                    {'type': 'assistant', 'sessionId': sid, 'message': {'model': '<synthetic>', 'usage': zero,
+                                                                         'content': [{'type': 'text', 'text': 'Not logged in'}]}}]
+        failed_raw = {'is_error': True, 'result': 'Not logged in', 'total_cost_usd': 0, 'usage': dict(zero, service_tier='standard')}
+        log = ''.join('T%d started session=%s model=claude-fable-5-2\nT%d exit=1\n' % (i, sid, i) for i, sid in enumerate(sids))
+        pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.arm3_dest(root)
+            result, _ = self.arm3_turn(root, False, pm, log, {sid: synthetic(sid) for sid in sids},
+                                       reviewer_raw={sid: failed_raw for sid in sids})
+            self.assertEqual(result['incomplete'], [])
+            self.assertTrue(result['usage_complete'])
+            self.assertFalse(result['reviewer_usage_pending'])
+            self.assertEqual(result['reviewer']['calls_failed_this_turn'], 2)
+            self.assertEqual(result['reviewer']['calls_succeeded_this_turn'], 0)
+            self.assertEqual([a['session'] for a in result['reviewer']['failed_attempts_without_requests']], list(sids))
+            self.assertEqual(result['reviewer']['cost_usd'], 0)
+            ledger = json.loads((dest / 'ledger.json').read_text())
+            self.assertEqual(ledger['reviewer_failed_attempts_without_requests'], 2)
+            self.assertEqual(ledger['reviewer_calls_failed'], 2)
+            # the next turn: the excused transcripts are still in the cumulative tree and still excused
+            result2, _ = self.arm3_turn(root, True, pm + [dict(pm[0], requestId='req-pm2')], log,
+                                        {sid: synthetic(sid) for sid in sids}, reviewer_raw={sid: failed_raw for sid in sids})
+            self.assertEqual(result2['incomplete'], [])
+            self.assertEqual(result2['reviewer']['calls_this_turn'], 0)
+        # not excused: no raw result, a raw result with usage, or a transcript with a real (uncollected) request
+        real_line = {'type': 'assistant', 'sessionId': sids[0], 'message': {'model': 'claude-fable-5-2', 'usage': USAGE}}
+        cases = {'raw missing': (None, synthetic(sids[0])),
+                 'raw with usage': ({sids[0]: dict(failed_raw, usage=dict(zero, output_tokens=5))}, synthetic(sids[0])),
+                 'real request without requestId': ({sids[0]: failed_raw}, synthetic(sids[0]) + [real_line])}
+        for name, (raw, lines) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.arm3_dest(root)
+                one = 'T0 started session=%s model=claude-fable-5-2\nT0 exit=1\n' % sids[0]
+                result, _ = self.arm3_turn(root, False, pm, one, {sids[0]: lines}, reviewer_raw=raw)
+                self.assertFalse(result['usage_complete'])
+                self.assertIn('reviewer transcript lines without parseable usage or requestId', [i['reason'] for i in result['incomplete']])
+                self.assertEqual(result['reviewer']['failed_attempts_without_requests'], [])
 
     def test_unrecovered_reviewer_cost_is_flagged_not_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1333,6 +1472,16 @@ class CloseoutRunnerTest(unittest.TestCase):
                 launch.main()
             turn.assert_not_called()
 
+class TurnTimeoutDefaultTest(unittest.TestCase):
+    def test_turn_timeout_defaults_to_the_run_cap(self):
+        # decision 2026-11-18: no per-turn limit, only the 8-hour run cap (the runner reduces it to what is left)
+        argv = ['launch.py', 'turn', '--run-id', 'a', '--prompt', '/p', '--env-file', '/e']
+        with patch.object(launch.sys, 'argv', argv), patch.object(launch, 'turn') as turn:
+            launch.main()
+        self.assertEqual(turn.call_args[0][0].timeout_seconds, 28800)
+        self.assertEqual(launch.LIMITS['time_limit_seconds'], 28800)
+        self.assertEqual(launch.call_timeout(28800, {'used': {'time_limit_seconds': 28000}}), 800)
+
 class DiscardTest(unittest.TestCase):
     def run_discard(self, dest, reviewer_entries, rm_rc=0):
         def fake_helper(m, script, mounts, network_none=True):
@@ -1370,84 +1519,158 @@ class DiscardTest(unittest.TestCase):
             self.assertEqual(run.call_count, 2)                        # config + reviewer volume
             self.assertTrue(launch.discard_complete(dest))
 
-class FableReviewWrapperTest(unittest.TestCase):
-    """runner/fable-review.sh with a fake `claude` on PATH (no model call)."""
-    WRAPPER = Path(__file__).with_name('fable-review.sh')
+class FableReviewHelperTest(unittest.TestCase):
+    """runner/fable-review.sh (PM-side client) against runner/fable_review.py serve (reviewer helper) with a fake
+    `claude` (no model call). The helper runs as this user here; the separate account is checked in a real container."""
+    HERE = Path(__file__).resolve().parent
+    WRAPPER = HERE / 'fable-review.sh'
 
-    def run_wrapper(self, tmp, env_extra, args=(), fake_rc=0, reply='{"type":"result","result":"REVIEW TEXT"}'):
-        bin_dir = Path(tmp) / 'bin'
-        bin_dir.mkdir(exist_ok=True)
-        fake = bin_dir / 'claude'
-        fake.write_text('#!/bin/bash\n'
-                        'printf "%s\\n" "$@" > "$FAKE_OUT/args"\n'
-                        'printf "%s" "$CLAUDE_CONFIG_DIR" > "$FAKE_OUT/config"\n'
-                        'cat > "$FAKE_OUT/stdin"\n'
-                        "echo '" + reply + "'\n"
-                        'exit ' + str(fake_rc) + '\n')
-        os.chmod(fake, 0o755)
-        out = Path(tmp) / 'fake-out'
-        out.mkdir(exist_ok=True)
-        env = {'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'FAKE_OUT': str(out), 'HOME': tmp}
-        env.update(env_extra)
-        done = subprocess.run(['bash', str(self.WRAPPER)] + list(args), input='review this', env=env,
-                              capture_output=True, text=True)
-        return done, out
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.cfg = self.base / 'reviewer-cfg'
+        self.cfg.mkdir()
+        self.out = self.base / 'fake-out'
+        self.out.mkdir()
+        self.mirror = self.base / 'mirror'
+        self.mirror.mkdir()
+        self.fake = self.base / 'claude'
+        self.reply('{"type":"result","result":"REVIEW TEXT","total_cost_usd":0.2}')
+        self.procs = []
 
-    def test_logs_attempt_runs_isolated_readonly_reviewer_and_returns_text(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / 'reviewer-cfg'
-            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'claude-fable-5-2', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)})
-            self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertEqual(done.stdout.strip(), 'REVIEW TEXT')
-            argv = (out / 'args').read_text().split('\n')
-            self.assertEqual(argv[:2], ['-p', '--model'])
-            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-2')
-            self.assertEqual(argv[argv.index('--effort') + 1], 'high')
-            self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Grep,Glob')
-            self.assertNotIn('--dangerously-skip-permissions', argv)
-            self.assertNotIn('--resume', argv)
-            sid = argv[argv.index('--session-id') + 1]
-            self.assertEqual((out / 'config').read_text(), str(cfg))          # never the PM's harness config dir
-            self.assertEqual((out / 'stdin').read_text(), 'review this')
-            lines = (cfg / 'reviewer-calls.log').read_text().splitlines()
-            self.assertEqual(len(lines), 2)
-            started = launch.CALL_STARTED.fullmatch(lines[0])
-            self.assertIsNotNone(started)
-            self.assertEqual(started.group(2), sid)
-            self.assertEqual(launch.CALL_EXIT.fullmatch(lines[1]).group(1), started.group(1))
-            self.assertTrue((cfg / 'raw' / (sid + '.json')).exists())
+    def tearDown(self):
+        for proc in self.procs:
+            proc.kill()
+            proc.wait()
+        self.tmp.cleanup()
+
+    def reply(self, text, rc=0):
+        self.fake.write_text('#!/bin/bash\n'
+                             'printf "%s\\n" "$@" > "' + str(self.out) + '/args"\n'
+                             'printf "%s" "$CLAUDE_CONFIG_DIR" > "' + str(self.out) + '/config"\n'
+                             'printf "%s" "${CLAUDE_CODE_OAUTH_TOKEN:-absent}" > "' + str(self.out) + '/token"\n'
+                             'pwd > "' + str(self.out) + '/cwd"\n'
+                             'cat > "' + str(self.out) + '/stdin"\n'
+                             "echo '" + text + "'\n"
+                             'exit ' + str(rc) + '\n')
+        os.chmod(self.fake, 0o755)
+
+    def serve(self, token='secret-value', peer_uid=None, config=None, name='s'):
+        sock = self.base / name
+        env = {'PATH': os.environ['PATH']}
+        if token:
+            env['CLAUDE_CODE_OAUTH_TOKEN'] = token
+        proc = subprocess.Popen([sys.executable, str(self.HERE / 'fable_review.py'), 'serve', '--socket', str(sock),
+                                 '--model', 'claude-fable-5-2', '--config-dir', str(config or self.cfg), '--home', str(self.base),
+                                 '--cli', str(self.fake), '--root', str(self.mirror),
+                                 '--peer-uid', str(os.getuid() if peer_uid is None else peer_uid)],
+                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.procs.append(proc)
+        for _ in range(100):
+            if sock.exists() or proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        return sock, proc
+
+    def call(self, sock, cwd=None, args=(), prompt='review this'):
+        env = {'PATH': os.environ['PATH'], 'HOME': str(self.base), 'FABLE_REVIEW_SOCKET': str(sock),
+               'FABLE_REVIEW_LIB': str(self.HERE)}
+        return subprocess.run(['bash', str(self.WRAPPER)] + list(args), input=prompt, env=env, cwd=str(cwd or self.mirror),
+                              capture_output=True, text=True, timeout=60)
+
+    def log_lines(self):
+        path = self.cfg / 'reviewer-calls.log'
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_logs_attempt_runs_fixed_readonly_reviewer_and_returns_text(self):
+        sock, _ = self.serve()
+        done = self.call(sock)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), 'REVIEW TEXT')
+        argv = (self.out / 'args').read_text().split('\n')
+        self.assertEqual(argv[:2], ['-p', '--model'])
+        self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-2')
+        self.assertEqual(argv[argv.index('--effort') + 1], 'high')
+        self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Grep,Glob')
+        self.assertNotIn('--dangerously-skip-permissions', argv)
+        self.assertNotIn('--resume', argv)
+        sid = argv[argv.index('--session-id') + 1]
+        self.assertEqual((self.out / 'config').read_text(), str(self.cfg))     # never the PM's harness config dir
+        self.assertEqual((self.out / 'token').read_text(), 'secret-value')     # the token reaches the reviewer CLI only
+        self.assertEqual((self.out / 'cwd').read_text().strip(), str(self.mirror))
+        self.assertEqual((self.out / 'stdin').read_text(), 'review this')
+        lines = self.log_lines()
+        self.assertEqual(len(lines), 2)
+        started = launch.CALL_STARTED.fullmatch(lines[0])
+        self.assertIsNotNone(started)
+        self.assertEqual(started.group(2), sid)
+        self.assertEqual(launch.CALL_EXIT.fullmatch(lines[1]).groups(), (started.group(1), '0'))
+        self.assertEqual(json.loads((self.cfg / 'raw' / (sid + '.json')).read_text())['total_cost_usd'], 0.2)
 
     def test_failure_exit_code_propagates_and_is_logged(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / 'reviewer-cfg'
-            done, _ = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, fake_rc=3)
-            self.assertEqual(done.returncode, 3)
-            self.assertTrue((cfg / 'reviewer-calls.log').read_text().splitlines()[-1].endswith(' exit=3'))
+        self.reply('{"type":"result","result":"x"}', rc=3)
+        sock, _ = self.serve()
+        done = self.call(sock)
+        self.assertEqual(done.returncode, 3)
+        self.assertTrue(self.log_lines()[-1].endswith(' exit=3'))
 
     def test_empty_or_error_review_is_a_failure(self):
-        for reply in ('{"type":"result","result":""}', '{"type":"result","result":"  "}',
-                      '{"type":"result","is_error":true,"result":"rate limited"}', 'not json'):
-            with tempfile.TemporaryDirectory() as tmp:
-                cfg = Path(tmp) / 'reviewer-cfg'
-                done, _ = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, reply=reply)
-                self.assertEqual(done.returncode, 96, reply)
+        sock, _ = self.serve()
+        for text in ('{"type":"result","result":""}', '{"type":"result","result":"  "}',
+                     '{"type":"result","is_error":true,"result":"Not logged in"}', 'not json'):
+            with self.subTest(reply=text):
+                self.reply(text)
+                done = self.call(sock)
+                self.assertEqual(done.returncode, 96, text)
                 self.assertIn('no review text', done.stderr)
-                self.assertTrue((cfg / 'reviewer-calls.log').read_text().splitlines()[-1].endswith(' exit=96'))
+                self.assertTrue(self.log_lines()[-1].endswith(' exit=96'))
 
-    def test_refuses_without_reviewer_config_arguments_or_log(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            done, out = self.run_wrapper(tmp, {})                               # arms 1/2: switch absent
-            self.assertEqual(done.returncode, 98)
-            self.assertFalse((out / 'args').exists())
-            cfg = Path(tmp) / 'reviewer-cfg'
-            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, args=['exec'])
-            self.assertEqual(done.returncode, 2)
-            self.assertFalse((out / 'args').exists())
-            blocked = Path(tmp) / 'not-a-dir'
-            blocked.write_text('file, not a directory')
-            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(blocked)})
-            self.assertEqual(done.returncode, 97)
-            self.assertFalse((out / 'args').exists())
+    def test_request_carries_only_cwd_and_prompt_and_anything_else_is_refused(self):
+        sock, _ = self.serve()
+        outside = self.base / 'elsewhere'
+        outside.mkdir()
+        self.assertEqual(self.call(sock, cwd=outside).returncode, 94)          # cwd outside the allowed roots
+        self.assertEqual(self.call(sock, prompt='  \n').returncode, 94)       # nothing to review
+        self.assertEqual(self.call(sock, args=['--model', 'claude-opus-5-5']).returncode, 2)
+        import socket as socketlib
+        for request in ({'cwd': str(self.mirror), 'prompt': 'x', 'model': 'claude-opus-5-5'},
+                        {'cwd': str(self.mirror), 'prompt': 'x', 'argv': ['id']}, ['id'], {'cwd': 'mirror', 'prompt': 'x'}):
+            with self.subTest(request=request), socketlib.socket(socketlib.AF_UNIX) as conn:
+                conn.connect(str(sock))
+                conn.sendall(json.dumps(request).encode())
+                conn.shutdown(socketlib.SHUT_WR)
+                reply = json.loads(conn.makefile('rb').read())
+                self.assertEqual(reply['exit'], 94)
+        self.assertFalse((self.out / 'args').exists())                         # the CLI never started
+        self.assertEqual(self.log_lines(), [])                                 # a refused request is not an attempt
+
+    def test_refuses_without_helper_or_logging_and_from_another_uid(self):
+        done = self.call(self.base / 'no-socket')                              # arms 1/2: no helper in the container
+        self.assertEqual(done.returncode, 98)
+        self.assertIn('no reviewer is configured', done.stderr)
+        blocked = self.base / 'not-a-dir'
+        blocked.write_text('file, not a directory')
+        sock, _ = self.serve(config=blocked, name='s2')
+        self.assertEqual(self.call(sock).returncode, 97)                       # attempt cannot be logged: refused
+        sock3, _ = self.serve(peer_uid=os.getuid() + 1, name='s3')
+        self.assertEqual(self.call(sock3).returncode, 94)                      # only the PM's uid may ask
+        self.assertFalse((self.out / 'args').exists())
+        _, proc = self.serve(token='', name='s4')                              # a helper without token does not serve
+        self.assertEqual(proc.wait(timeout=30), 90)
+
+    def test_container_start_scripts_parse(self):
+        for script in ('fable-review.sh', 'lab-arm3-start.sh'):
+            self.assertEqual(subprocess.run(['bash', '-n', str(self.HERE / script)]).returncode, 0, script)
+        dockerfile = (self.HERE / 'Dockerfile').read_text()
+        for line in ('COPY fable-review.sh /usr/local/bin/fable-review', 'COPY lab-arm3-start.sh ' + launch.ARM3_START,
+                     'COPY fable_review.py /usr/local/lib/fable-review/fable_review.py'):
+            self.assertIn(line, dockerfile)
+        self.assertIn('--uid %d' % launch.REVIEWER_UID, dockerfile)
+        self.assertIn('chown fablereview:fablereview %s && chmod 700 %s' % (launch.REVIEWER_DST, launch.REVIEWER_DST), dockerfile)
+        start = (self.HERE / 'lab-arm3-start.sh').read_text()
+        self.assertIn('CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=3', start)
+        self.assertIn('unset CLAUDE_CODE_OAUTH_TOKEN LAB_REVIEWER_MODEL LAB_REVIEWER_CONFIG_DIR', start)
+        self.assertIn('exec setpriv --reuid=node --regid=node --init-groups --inh-caps=-all "$@"', start)
 
 if __name__ == '__main__':
     unittest.main()

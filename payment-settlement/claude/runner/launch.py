@@ -22,10 +22,16 @@ SKIP = {'.git', '.gradle', 'build', '.runs', '.codex', '.claude', 'node_modules'
 CLI_VERSION = '2.1.326'
 HOME_DST = '/home/node'
 CONFIG_DST = HOME_DST + '/.claude'                    # CLAUDE_CONFIG_DIR, passed explicitly (never implied)
-# Arm 3 second reviewer (replaces codex in the review playbook): fresh Claude sessions through runner/fable-review.sh
-# with their own config dir on a per-run volume, so reviewer transcripts are separable from the PM's.
+# Arm 3 second reviewer (replaces codex in the review playbook): fresh Claude sessions run by the reviewer helper
+# (runner/fable_review.py serve) under its own account, with their own config dir on a per-run volume, so reviewer
+# transcripts are separable from the PM's. The arm 3 container starts as root through runner/lab-arm3-start.sh, which
+# starts the helper (the only holder of the token in its environment) and then the PM as node with the token on an
+# inherited pipe (2.1.326 strips CLAUDE_CODE_OAUTH_TOKEN from Bash children: pilot 01). Arms 1/2 start as before.
 REVIEWER_DST = HOME_DST + '/.fable-review'
 REVIEWER_MODEL = 'claude-fable-5-2'
+REVIEWER_UID = 2001                                   # image user fablereview; owns the reviewer volume (mode 0700)
+ARM3_START = '/usr/local/bin/lab-arm3-start'
+ARM3_CAPS = ('SETUID', 'SETGID', 'DAC_READ_SEARCH')   # only for lab-arm3-start: switch users; reviewer reads the mirror
 USER_PROXY_MODEL = 'claude-opus-5-5'                 # agreed 2026-11-17 (scripts/consult_contract.py, arm 3 only)
 # Harness v4.3 explorer subagent keeps the model of its own definition (agents/explorer.md: sonnet). Claude Code 2.1.326
 # resolves a subagent's model as: explicit model (call parameter, else agent definition) before CLAUDE_CODE_SUBAGENT_MODEL,
@@ -106,11 +112,14 @@ def git_init(workspace):
         if done.returncode:
             raise RuntimeError('workspace git init failed: ' + done.stderr[-500:])
 
-def helper(manifest, script, mounts, network_none=True):
-    """Run a short no-token helper container against this run's volumes; returns (rc, stdout, stderr)."""
+def helper(manifest, script, mounts, network_none=True, user=None):
+    """Run a short no-token helper container against this run's volumes; returns (rc, stdout, stderr).
+    user: run as that uid instead of the image user (the reviewer volume belongs to REVIEWER_UID)."""
     name = 'payment-claude-helper-' + uuid.uuid4().hex
     command = ['docker', 'run', '--rm', '--name', name, '--cap-drop=ALL', '--security-opt=no-new-privileges',
                '--env', 'HOME=' + HOME_DST, '--env', 'CLAUDE_CONFIG_DIR=' + CONFIG_DST]
+    if user is not None:
+        command += ['--user', '%d:%d' % (user, user)]
     if network_none:
         command += ['--network', 'none']
     for mount in mounts:
@@ -255,6 +264,10 @@ PY
   case "$PUSHOUT" in *'"ask"'*) report git_guard_push ask;; *) report git_guard_push "exit$rc"; fail=1;; esac
   # second reviewer entry point (replaces codex): present, executable and parseable
   R=$(command -v fable-review); if [ -n "$R" ] && [ -x "$R" ] && bash -n "$R"; then report reviewer_on_path 1; else report reviewer_on_path 0; fail=1; fi
+  # the reviewer helper behind it: container start script, helper module and the reviewer account (no token, no call)
+  if [ -x /usr/local/bin/lab-arm3-start ] && bash -n /usr/local/bin/lab-arm3-start \
+     && python3 -I -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' /usr/local/lib/fable-review/fable_review.py 2>/dev/null \
+     && [ "$(id -u fablereview 2>/dev/null)" = 2001 ]; then report reviewer_helper_present 1; else report reviewer_helper_present 0; fail=1; fi
 fi
 report selftest_failed "$fail"
 '''
@@ -411,6 +424,7 @@ def initialize(args):
             'contract_sha256': frozen.get('contract_sha256') if frozen else None, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
             'reviewer_volume': ('payment-claude-reviewer-' + uuid.uuid4().hex) if args.arm == 3 else None,
             'requested_reviewer_model': REVIEWER_MODEL if args.arm == 3 else None,
+            'reviewer_uid': REVIEWER_UID if args.arm == 3 else None,    # owner of the reviewer volume (helper account)
             'source': str(source), 'workspace': str(dest / 'workspace'), 'network': network,
             'workspace_git_init': True, 'harness': str(args.harness.resolve()) if args.harness else None,
             'harness_seed': None, 'selftest': None, 'created_at': utc(),
@@ -447,8 +461,11 @@ def claude_command(manifest, resume, max_turns=None, max_budget_usd=None):
     return command
 
 def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_usd=None):
-    # Writable: workspace bind and this run's own state volumes. The token travels only through --env-file
-    # (the arm 3 reviewer CLI inherits it from the container environment; no other credential is mounted).
+    # Writable: workspace bind and this run's own state volumes. The token travels only through --env-file (no other
+    # credential is mounted). Arms 1/2: the image user node runs claude directly. Arm 3: the container starts as root
+    # with three capabilities only and lab-arm3-start hands the token to the reviewer helper (its own account) and to
+    # the PM (node, through a pipe, not its environment) — see runner/lab-arm3-start.sh.
+    arm3 = manifest.get('arm') == 3
     command = ['docker', 'create', '--name', name, '--interactive', '--init',
                '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
                '--cpus=2', '--memory=3g', '--workdir=/workspace', '--env-file', str(env_file),
@@ -461,16 +478,19 @@ def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_
         # perTurnEffort (observed_tools_and_effort); otherwise effort propagation stays unverified.
         command += ['--env', 'CLAUDE_CODE_SUBAGENT_MODEL=' + manifest['requested_worker_model'],
                     '--env', 'CLAUDE_CODE_SUBAGENT_EFFORT=high']
-    if manifest.get('arm') == 3:
+    if arm3:
         if not manifest.get('reviewer_volume') or not manifest.get('requested_reviewer_model'):
             raise ValueError('arm 3 requires a reviewer volume and reviewer model (dual review second reviewer)')
+        # read by lab-arm3-start before the PM starts (fixed for the helper, removed from the PM's environment)
         command += ['--mount', 'type=volume,src=' + manifest['reviewer_volume'] + ',dst=' + REVIEWER_DST,
                     '--env', 'LAB_REVIEWER_MODEL=' + manifest['requested_reviewer_model'],
-                    '--env', 'LAB_REVIEWER_CONFIG_DIR=' + REVIEWER_DST]
+                    '--env', 'LAB_REVIEWER_CONFIG_DIR=' + REVIEWER_DST, '--user', '0:0']
+        for cap in ARM3_CAPS:
+            command += ['--cap-add', cap]
     if manifest.get('network'):
         command += ['--network', manifest['network'], '--env', 'DB_URL=jdbc:postgresql://db:5432/payment',
                     '--env', 'BANK_BASE_URL=http://bank:8081']
-    return command + [manifest['image']] + claude_command(manifest, resume, max_turns, max_budget_usd)
+    return command + [manifest['image']] + ([ARM3_START] if arm3 else []) + claude_command(manifest, resume, max_turns, max_budget_usd)
 
 def read_token(env_file):
     env_file = Path(env_file)
@@ -494,10 +514,41 @@ def read_token(env_file):
         raise ValueError('env-file must contain exactly one ' + TOKEN_KEY + ' assignment')
     return assignments[0]
 
+RESULT_FIELDS = ('subtype', 'is_error', 'session_id', 'total_cost_usd', 'usage', 'modelUsage', 'num_turns', 'duration_ms',
+                 'duration_api_ms')
+
+def combine_results(results):
+    """One turn may emit several result events (pilot 01 turn 0002: the session resumed after a background worker
+    finished and reported a second result). Each event's usage covers its own part of the turn, so the four counters are
+    added; total_cost_usd and modelUsage are cumulative over the session (2.1.326, pilot 01), so the last event's values
+    stand for the turn. usage is None when any event lacks one of the four counters (never a partial sum)."""
+    if not results:
+        return None
+    last = results[-1]
+    combined = dict(last)
+    usages = [r.get('usage') if isinstance(r.get('usage'), dict) else {} for r in results]
+    if all(all(isinstance(u.get(k), int) and not isinstance(u.get(k), bool) for k in USAGE_KEYS) for u in usages):
+        total = {k: sum(u[k] for u in usages) for k in USAGE_KEYS}
+        tools = [u.get('server_tool_use') for u in usages]
+        if all(isinstance(t, dict) for t in tools):
+            total['server_tool_use'] = {k: sum(t.get(k) or 0 for t in tools if isinstance(t.get(k), int))
+                                        for k in sorted({k for t in tools for k in t})}
+        combined['usage'] = total
+    else:
+        combined['usage'] = None if len(results) > 1 else last.get('usage')
+    combined['session_ids'] = sorted({r.get('session_id') for r in results if r.get('session_id')})
+    if len(combined['session_ids']) > 1:
+        combined['session_id'] = None                   # never one session's id standing for several
+    combined['result_events'] = len(results)
+    combined['subtypes'] = [r.get('subtype') for r in results]
+    combined['any_error'] = any(r.get('is_error') for r in results)
+    return combined
+
 def collect(raw):
-    """Parse the preserved stream-json; return the final result event and stream statistics."""
+    """Parse the preserved stream-json; return the turn's result (all result events combined: combine_results), each
+    result event as reported (results) and stream statistics."""
     raw = Path(raw)
-    summary = {'result': None, 'assistant_messages': 0, 'stream_models': [], 'result_count': 0, 'unparsed_lines': 0}
+    summary = {'result': None, 'results': [], 'assistant_messages': 0, 'stream_models': [], 'result_count': 0, 'unparsed_lines': 0}
     models = set()
     with raw.open('rb') as source:
         for line in source:
@@ -517,8 +568,8 @@ def collect(raw):
                     models.add(message['model'])
             if event.get('type') == 'result':
                 summary['result_count'] += 1
-                summary['result'] = {k: event.get(k) for k in ('subtype', 'is_error', 'session_id', 'total_cost_usd',
-                                     'usage', 'modelUsage', 'num_turns', 'duration_ms', 'duration_api_ms')}
+                summary['results'].append({k: event.get(k) for k in RESULT_FIELDS})
+    summary['result'] = combine_results(summary['results'])
     summary['stream_models'] = sorted(models)
     return summary
 
@@ -722,10 +773,6 @@ def mask_text(text, secrets):
             text = text.replace(value, '<REDACTED-SECRET>')
     return text
 
-def stream_result_session(result):
-    final = (result or {}).get('result') or {}
-    return final.get('session_id')
-
 def finalize_result(output, result, status, error, hits):
     """Overall turn status is decided last (after collection and the secret scan), written atomically."""
     path = output / 'result.json'
@@ -805,12 +852,11 @@ def reviewer_dir_names(name, output):
     return names, copied.returncode, copied.stderr, (str(probe.relative_to(output)) if probe.exists() else None)
 
 def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
-    """Arm 3: copy the second reviewer's call log and transcripts out of the stopped container and account for every
-    attempt made this turn. Reviewer requests become role 'reviewer' events (request-level usage, never mixed into
-    the PM's or workers' sums). A log or transcript folder that could not be copied counts as absent only when the
-    reviewer directory itself was read and does not hold it; otherwise it is unknown and the turn stays incomplete.
+    """Arm 3: copy the second reviewer's call log, transcripts and raw results out of the stopped container (docker cp
+    runs on the daemon side, so the reviewer account's 0700 directory is no obstacle) and account for them
+    (account_reviewer). A log or transcript folder that could not be copied counts as absent only when the reviewer
+    directory itself was read and does not hold it; otherwise it is unknown and the turn stays incomplete.
     Returns (events, new_ids, incomplete, summary, calls_seen)."""
-    incomplete = []
     log = output / 'reviewer-calls.log'
     calls = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/reviewer-calls.log', str(log)],
                            capture_output=True, check=False)
@@ -819,37 +865,100 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
     names, dir_rc, dir_stderr, leftover = (None, None, b'', None)
     if calls.returncode != 0 or copied.returncode != 0:
         names, dir_rc, dir_stderr, leftover = reviewer_dir_names(name, output)
+    (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr + dir_stderr)
+    raw = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/raw', str(output / 'reviewer-raw')],
+                         capture_output=True, check=False)
+    return account_reviewer(output, dest, seen, run_id, turn_id, arm, calls.returncode, copied.returncode, raw.returncode,
+                            names, dir_rc, leftover)
+
+SYNTHETIC_MODEL = '<synthetic>'                       # assistant lines the CLI writes itself (no API request behind them)
+
+def transcript_requests(file):
+    """(lines with a requestId, assistant lines without one, whether every line without one is a synthetic zero-usage
+    line) of one transcript file."""
+    with_rid, without, synthetic_only = 0, 0, True
+    for line in Path(file).read_bytes().splitlines():
+        try:
+            item = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            return with_rid, without, False
+        if not isinstance(item, dict) or item.get('type') != 'assistant':
+            continue
+        if item.get('requestId'):
+            with_rid += 1
+            continue
+        without += 1
+        message = item.get('message') if isinstance(item.get('message'), dict) else {}
+        usage = message.get('usage') if isinstance(message.get('usage'), dict) else {}
+        if message.get('model') != SYNTHETIC_MODEL or any(usage.get(k) not in (0, None) for k in USAGE_KEYS):
+            synthetic_only = False
+    return with_rid, without, synthetic_only
+
+def failed_without_requests(raw_file, transcripts):
+    """A reviewer attempt that failed before any API request (pilot 01: "Not logged in"): its raw result is an error
+    with all four counters 0 (and cost 0 when given), and its transcript holds no line with a requestId, only synthetic
+    zero-usage assistant lines. Such an attempt is a failed attempt with usage 0, not unobserved usage. Anything else
+    (no raw result, no transcript, a real request) is not this case."""
+    try:
+        raw = json.loads(Path(raw_file).read_text())
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    usage = raw.get('usage') if isinstance(raw, dict) and isinstance(raw.get('usage'), dict) else None
+    if not usage or raw.get('is_error') is not True or any(usage.get(k) != 0 for k in USAGE_KEYS):
+        return False
+    if raw.get('total_cost_usd') not in (None, 0):
+        return False
+    if not transcripts:
+        return False
+    counts = [transcript_requests(f) for f in transcripts]
+    return all(rid == 0 and synthetic for rid, _, synthetic in counts)
+
+def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_rc, raw_rc, names=None, dir_rc=None,
+                     leftover=None):
+    """Account for every reviewer attempt from the copied files in the turn folder (reviewer-calls.log,
+    reviewer-projects/, reviewer-raw/). Reviewer requests become role 'reviewer' events (request-level usage, never mixed
+    into the PM's or workers' sums). An attempt that failed before any API request (failed_without_requests) is counted
+    as a failed attempt with usage 0 and does not make the turn incomplete; an attempt that made requests that could not
+    be collected keeps the turn incomplete. Returns (events, new_ids, incomplete, summary, calls_seen)."""
+    incomplete = []
     if leftover:
         incomplete.append({'reason': 'temporary copy of the reviewer directory could not be removed from the turn folder',
                            'path': leftover})
-    (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr + dir_stderr)
-    log_absent = calls.returncode != 0 and names is not None and 'reviewer-calls.log' not in names
-    log_unknown = calls.returncode != 0 and not log_absent
-    projects_absent = copied.returncode != 0 and names is not None and 'projects' not in names
-    started, finished = {}, set()
-    for line in (log.read_text().splitlines() if calls.returncode == 0 else []):
+    log = output / 'reviewer-calls.log'
+    log_absent = log_rc != 0 and names is not None and 'reviewer-calls.log' not in names
+    log_unknown = log_rc != 0 and not log_absent
+    projects_absent = projects_rc != 0 and names is not None and 'projects' not in names
+    started, finished = {}, {}
+    for line in (log.read_text().splitlines() if log_rc == 0 else []):
         hit = CALL_STARTED.fullmatch(line)
         if hit:
             started[hit.group(1)] = hit.group(2)
         elif CALL_EXIT.fullmatch(line):
-            finished.add(CALL_EXIT.fullmatch(line).group(1))
+            finished[CALL_EXIT.fullmatch(line).group(1)] = int(CALL_EXIT.fullmatch(line).group(2))
     # The log is cumulative inside the run's reviewer volume; calls already accounted for in earlier turns are skipped.
     ledger = dest / 'reviewer-calls.json'
     recorded = set(json.loads(ledger.read_text())['calls']) if ledger.exists() else set()
     new_calls = sorted(set(started) - recorded)
-    events, new_ids, stats, transcripts = [], [], {}, set()
-    if copied.returncode == 0:
-        events, new_ids, found, stats = build_events(output / 'reviewer-projects', seen, run_id, turn_id, arm, role='reviewer')
+    events, new_ids, stats, transcripts = [], [], {}, {}
+    projects = output / 'reviewer-projects'
+    if projects_rc == 0:
+        for file in sorted(projects.rglob('*.jsonl')):
+            transcripts.setdefault(file.stem, []).append(file)
+    # attempts (this turn or earlier: the transcript tree is cumulative) that failed before any API request
+    zero = {sid for sid in set(started.values()) if failed_without_requests(output / 'reviewer-raw' / (sid + '.json'),
+                                                                            transcripts.get(sid))}
+    if projects_rc == 0:
+        events, new_ids, found, stats = build_events(projects, seen, run_id, turn_id, arm, role='reviewer')
         incomplete += found
-        transcripts = {p.stem for p in (output / 'reviewer-projects').rglob('*.jsonl')}
-        if stats.get('unparsable_lines') or stats.get('assistant_without_requestId'):
+        excused = sum(transcript_requests(f)[1] for sid in zero for f in transcripts.get(sid, []))
+        without = (stats.get('assistant_without_requestId') or 0) - excused
+        if stats.get('unparsable_lines') or without:
             incomplete.append({'reason': 'reviewer transcript lines without parseable usage or requestId',
-                               'unparsable_lines': stats.get('unparsable_lines'),
-                               'assistant_without_requestId': stats.get('assistant_without_requestId')})
+                               'unparsable_lines': stats.get('unparsable_lines'), 'assistant_without_requestId': without})
     elif not projects_absent:
-        incomplete.append({'reason': 'reviewer transcript copy failed (docker cp rc=%s)' % copied.returncode})
+        incomplete.append({'reason': 'reviewer transcript copy failed (docker cp rc=%s)' % projects_rc})
     if log_unknown:
-        incomplete.append({'reason': 'reviewer call log copy failed; reviewer attempts unknown (docker cp rc=%s)' % calls.returncode})
+        incomplete.append({'reason': 'reviewer call log copy failed; reviewer attempts unknown (docker cp rc=%s)' % log_rc})
     elif transcripts and not started:
         incomplete.append({'reason': 'reviewer transcripts exist without any logged reviewer call'})
     for call in new_calls:
@@ -857,46 +966,119 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
             incomplete.append({'reason': 'reviewer call did not finish', 'call': call, 'session': started[call]})
         if started[call] not in transcripts:
             incomplete.append({'reason': 'reviewer attempt without transcript (usage unobservable)', 'call': call, 'session': started[call]})
-    costs = reviewer_costs(name, output, [started[c] for c in new_calls])
-    summary = {'log_rc': calls.returncode, 'log_absent': log_absent, 'log_unknown': log_unknown,
+    costs = reviewer_call_costs(output / 'reviewer-raw', [started[c] for c in new_calls])
+    failed = [c for c in new_calls if finished.get(c, 1) != 0]
+    summary = {'log_rc': log_rc, 'log_absent': log_absent, 'log_unknown': log_unknown,
                'calls_total': len(started), 'calls_this_turn': len(new_calls),
-               'calls_finished_total': len(finished & set(started)), 'transcript_files': len(transcripts),
-               'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
+               'calls_finished_total': len(set(finished) & set(started)),
+               'calls_succeeded_this_turn': sum(1 for c in new_calls if finished.get(c) == 0),
+               'calls_failed_this_turn': len(failed),        # exit != 0 or no exit line
+               'failed_attempts_without_requests': [{'call': c, 'session': started[c]} for c in failed if started[c] in zero],
+               'transcript_files': sum(len(v) for v in transcripts.values()),
+               'projects_rc': projects_rc, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
                'reviewer_dir_names': names, 'reviewer_dir_leftover': leftover, 'transcript_stats': stats,
-               'event_count': len(events), 'incomplete': len(incomplete), **costs}
+               'event_count': len(events), 'incomplete': len(incomplete), 'raw_rc': raw_rc, **costs}
     return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
 
-def reviewer_costs(name, output, sessions):
-    """CLI cost estimate of each reviewer call this turn, from the wrapper's raw/<session>.json in the reviewer volume.
-    A call whose raw result cannot be recovered or has no numeric total_cost_usd stays listed as unobserved; the turn's
-    reviewer cost is then None, never a partial sum presented as complete."""
-    raw_dir = output / 'reviewer-raw'
-    copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/raw', str(raw_dir)], capture_output=True, check=False)
+def reviewer_call_costs(raw_dir, sessions):
+    """CLI cost estimate of each reviewer call this turn, from the helper's raw/<session>.json (copied to reviewer-raw/).
+    Each call is a fresh session, so its total_cost_usd is that call's cost. A call whose raw result cannot be read or
+    has no numeric total_cost_usd stays listed as unobserved; the turn's reviewer cost is then None, never a partial sum
+    presented as complete."""
     calls, unobserved = {}, []
     for sid in sessions:
         cost = None
         try:
-            value = json.loads((raw_dir / (sid + '.json')).read_text()).get('total_cost_usd')
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
-                cost = value
+            cost = number(json.loads((Path(raw_dir) / (sid + '.json')).read_text()).get('total_cost_usd'))
         except (OSError, ValueError, AttributeError):
             pass
         calls[sid] = cost
         if cost is None:
             unobserved.append(sid)
-    return {'raw_rc': copied.returncode, 'call_costs_usd': calls, 'cost_unobserved': unobserved,
+    return {'call_costs_usd': calls, 'cost_unobserved': unobserved,
             'cost_usd': None if unobserved else round(sum(calls.values()), 6)}
 
 def number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
 
+# How the CLI reports cost (measured in pilot 01, 2.1.326): with --resume, total_cost_usd (and modelUsage) of a result
+# event is CUMULATIVE over the session, not per invocation (turn 1 reported 1.9925, turn 2 reported 7.8483 including
+# turn 1). Reviewer and user-proxy calls are fresh sessions, so their value is the call's own cost.
+COST_SEMANTICS = ('pinned session: total_cost_usd of the turn\'s last result event is cumulative over the session; a '
+                  'turn\'s cost is its increase over the previous turn of the same session and the run\'s pinned-session '
+                  'cost is the last cumulative value. Reviewer calls and user-proxy consultations are fresh sessions '
+                  '(their total_cost_usd is the call\'s cost). Unobserved values stay null, never 0.')
+
 def turn_cost(stream_result, reviewer):
-    """CLI cost estimates of one turn: the pinned session's total_cost_usd and (arm 3) the reviewer calls' sum.
-    Unobserved parts stay None and make cost_complete false."""
+    """CLI cost estimates of one turn: the pinned session's cumulative total_cost_usd at the end of the turn (the run
+    ledger derives the turn's increase) and (arm 3) the reviewer calls' sum. Unobserved parts stay None and make
+    cost_complete false."""
     pinned = number(stream_result.get('total_cost_usd'))
     reviewer_usd = None if reviewer is None else reviewer.get('cost_usd')
-    return {'pinned_session_usd': pinned, 'reviewer_usd': reviewer_usd, 'reviewer_applicable': reviewer is not None,
+    return {'pinned_session_usd': pinned, 'pinned_session_usd_semantics': 'cumulative',
+            'reviewer_usd': reviewer_usd, 'reviewer_applicable': reviewer is not None,
             'cost_complete': pinned is not None and (reviewer is None or reviewer_usd is not None)}
+
+def account_turn(output, manifest, run_id, turn_id, seen, exit_code, copied_rc, reviewer_part=None):
+    """The turn's accounting from the files already copied into the turn folder (stdout.jsonl, projects/ and, arm 3,
+    the reviewer part from collect_reviewer/account_reviewer); no docker call, so a recorded turn can be re-accounted.
+    Returns (result fields, events)."""
+    r_events, r_ids, r_incomplete, reviewer = reviewer_part or ([], [], [], None)
+    result = collect(output / 'stdout.jsonl')
+    events, new_ids, incomplete, stats = [], [], [{'reason': 'transcript copy failed (docker cp rc=%s)' % copied_rc}], {}
+    if copied_rc == 0 and (output / 'projects').exists():
+        events, new_ids, incomplete, stats = build_events(output / 'projects', seen, run_id, turn_id, manifest['arm'])
+    if reviewer is not None:
+        events, new_ids, incomplete = events + r_events, sorted(new_ids + r_ids), incomplete + r_incomplete
+    foreign = [s for s in ((result['result'] or {}).get('session_ids') or []) if s != manifest['session_id']]
+    if foreign:
+        incomplete.append({'reason': 'result session_id differs from the pinned session (forked or new session)',
+                           'observed': foreign})
+    if manifest['arm'] != 3:
+        leaked = [e['id'] for e in events if e['role'] == 'worker']
+        if leaked:
+            incomplete.append({'reason': 'sidechain request in an arm that forbids subagents', 'requestIds': leaked})
+    stream_result = result['result'] or {}
+    reported = stream_result.get('usage') if isinstance(stream_result.get('usage'), dict) else None
+    # The stream result covers the pinned session only: reviewer sessions are separate CLI processes and never part of it.
+    # A sum over transcripts that could not be read is unknown, not zero (None); with incomplete requests the
+    # sums cover only the observed requests (sums_are_lower_bounds).
+    main_seen = copied_rc == 0 and (output / 'projects').exists()
+    reviewer_seen = reviewer is not None and not reviewer['log_unknown'] and (reviewer['projects_rc'] == 0 or reviewer['projects_absent'])
+    main_sum = sum_usage([e for e in events if e['role'] not in ('worker', 'reviewer')]) if main_seen else None
+    all_sum = sum_usage([e for e in events if e['role'] != 'reviewer']) if main_seen else None
+    cross = {'reported': reported, 'main_sum': main_sum, 'all_sum': all_sum, 'main_delta': None, 'all_delta': None,
+             'reviewer_sum': sum_usage([e for e in events if e['role'] == 'reviewer']) if reviewer_seen else None,
+             'sums_are_lower_bounds': bool(incomplete), 'result_events': result['result_count'],
+             'note': 'reported = the four counters added over every result event of the turn (a turn may emit several); '
+                     'result.usage does not include subagent requests (pilot 01), so main_delta is the expected match '
+                     'and the run caps use only the request-level ledger; reviewer_sum is outside reported (None in '
+                     'arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)'}
+    if main_seen and reported and all(isinstance(reported.get(k), int) for k in USAGE_KEYS):
+        cross['main_delta'] = {k: reported[k] - main_sum[k] for k in USAGE_KEYS}
+        cross['all_delta'] = {k: reported[k] - all_sum[k] for k in USAGE_KEYS}
+    result.update({
+        'exit_code': exit_code, 'session_id': manifest['session_id'],
+        'session_id_confirmed': stream_result.get('session_id') == manifest['session_id'],
+        'request_ids': new_ids, 'event_count': len(events), 'incomplete': incomplete, 'transcript_stats': stats,
+        'reviewer': reviewer,
+        'cost': turn_cost(stream_result, reviewer),
+        'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
+        'web_requests': reported.get('server_tool_use') if reported else None,
+        'observed_tools_and_effort': observations(events, not incomplete and copied_rc == 0),
+        'usage_complete': (not incomplete and result['result'] is not None and exit_code == 0
+                           and copied_rc == 0 and bool(events)
+                           and stats.get('unparsable_lines', 1) == 0 and result['unparsed_lines'] == 0
+                           and stats.get('assistant_without_requestId', 1) == 0
+                           and cross['main_delta'] is not None
+                           and (all(v == 0 for v in cross['main_delta'].values()) or all(v == 0 for v in cross['all_delta'].values()))),
+        'usage_complete_note': 'arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)',
+        'usage_cross_check': cross,
+        'transcript_models': sorted({e['model'] for e in events}), 'roles': sorted({e['role'] for e in events}),
+        'actual_model': None,
+        'actual_model_note': 'transcript models/modelUsage are client-observed; requested model is not proof.',
+    })
+    return result, events
 
 def consult_completed(folder):
     """The single definition of a completed user-proxy consultation (consults/NNNN, scripts/consult_contract.py): the
@@ -949,15 +1131,30 @@ def run_ledger(dest):
         unreadable += [str(p.relative_to(dest)) for p in sorted((dest / 'turns').iterdir()) if p.is_dir() and not (p / 'result.json').exists()]
     consults = consult_folders(dest)                    # likewise a consultation without usage.json: incomplete, not skipped
     unreadable += [str(p.relative_to(dest)) for p in consults if not (p / 'usage.json').exists()]
-    costs, cost_unobserved = [], []
+    costs, cost_unobserved, cost_by_call, cumulative, failed_attempts = [], [], [], 0.0, 0
     for kind, ident, data in calls:
+        row = {'call': '%s/%s' % (kind, ident)}
         if kind == 'turn':
             cost = data.get('cost') or {}
-            parts = [cost.get('pinned_session_usd')] + ([cost.get('reviewer_usd')] if cost.get('reviewer_applicable') else [])
+            reported = number(cost.get('pinned_session_usd'))
+            reviewer_usd = cost.get('reviewer_usd') if cost.get('reviewer_applicable') else 0.0
+            increase = None if reported is None else reported - cumulative
+            if increase is not None and increase < -1e-9:
+                row['anomaly'] = 'cumulative session cost decreased (%s after %s)' % (reported, cumulative)
+                increase = None
+            row.update(pinned_session_cumulative_usd=reported,
+                       pinned_session_increase_usd=None if increase is None else round(increase, 6),
+                       reviewer_usd=number(reviewer_usd) if cost.get('reviewer_applicable') else None)
+            parts = [increase, reviewer_usd]
+            if reported is not None and increase is not None:
+                cumulative = reported
+            failed_attempts += len(((data.get('reviewer') or {}).get('failed_attempts_without_requests')) or [])
         else:
             parts = [data.get('cost_usd')]
+            row['consult_usd'] = number(data.get('cost_usd'))
+        cost_by_call.append(row)
         if any(number(v) is None for v in parts):
-            cost_unobserved.append('%s/%s' % (kind, ident))
+            cost_unobserved.append(row['call'])
         else:
             costs += parts
     complete = (not conflicts and not unreadable and all(data.get('usage_complete') is True for _, _, data in calls))
@@ -976,8 +1173,10 @@ def run_ledger(dest):
         'consults': len(consults), 'consults_completed': sum(1 for p in consults if consult_completed(p)),
         'consults_not_completed': [p.name for p in consults if not consult_completed(p)],
         'cost_usd': None if cost_unobserved else round(sum(costs), 6), 'cost_unobserved': cost_unobserved,
-        'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null); whether a resumed session reports '
-                     'per-invocation or cumulative cost is not verified before the pilot',
+        'cost_by_call': cost_by_call, 'cost_semantics': COST_SEMANTICS,
+        'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null)',
+        'reviewer_calls_failed': sum(((d.get('reviewer') or {}).get('calls_failed_this_turn') or 0) for k, _, d in calls if k == 'turn'),
+        'reviewer_failed_attempts_without_requests': failed_attempts,
         'updated_at': utc()}
 
 def write_ledger(dest):
@@ -1244,65 +1443,19 @@ def turn(args):
         copied = subprocess.run(['docker', 'cp', name + ':' + CONFIG_DST + '/projects', str(output / 'projects')],
                                 capture_output=True, check=False)
         (output / 'projects-copy.stderr').write_bytes(copied.stderr)
-        reviewer = None
+        reviewer_part, reviewer_calls = None, None
         if manifest.get('arm') == 3:
             r_events, r_ids, r_incomplete, reviewer, reviewer_calls = collect_reviewer(
                 name, output, dest, seen, args.run_id, turn_id, manifest['arm'])
+            reviewer_part = (r_events, r_ids, r_incomplete, reviewer)
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True, check=False)
-        result = collect(output / 'stdout.jsonl')
-        events, new_ids, incomplete, stats = [], [], [{'reason': 'transcript copy failed (docker cp rc=%s)' % copied.returncode}], {}
-        if copied.returncode == 0 and (output / 'projects').exists():
-            events, new_ids, incomplete, stats = build_events(output / 'projects', seen, args.run_id, turn_id, manifest['arm'])
-        if reviewer is not None:
-            events, new_ids, incomplete = events + r_events, sorted(new_ids + r_ids), incomplete + r_incomplete
+        result, events = account_turn(output, manifest, args.run_id, turn_id, seen, proc.returncode, copied.returncode,
+                                      reviewer_part)
         with (output / 'events.jsonl').open('x') as stream:
             for event in events:
                 stream.write(json.dumps(event, ensure_ascii=False) + '\n')
-        if stream_result_session(result) not in (None, manifest['session_id']):
-            incomplete.append({'reason': 'result session_id differs from the pinned session (forked or new session)',
-                               'observed': stream_result_session(result)})
-        if manifest['arm'] != 3:
-            leaked = [e['id'] for e in events if e['role'] == 'worker']
-            if leaked:
-                incomplete.append({'reason': 'sidechain request in an arm that forbids subagents', 'requestIds': leaked})
-        stream_result = result['result'] or {}
-        reported = stream_result.get('usage') if isinstance(stream_result.get('usage'), dict) else None
-        # The stream result covers the pinned session only: reviewer sessions are separate CLI processes and never part of it.
-        # A sum over transcripts that could not be read is unknown, not zero (None); with incomplete requests the
-        # sums cover only the observed requests (sums_are_lower_bounds).
-        main_seen = copied.returncode == 0 and (output / 'projects').exists()
-        reviewer_seen = reviewer is not None and not reviewer['log_unknown'] and (reviewer['projects_rc'] == 0 or reviewer['projects_absent'])
-        main_sum = sum_usage([e for e in events if e['role'] not in ('worker', 'reviewer')]) if main_seen else None
-        all_sum = sum_usage([e for e in events if e['role'] != 'reviewer']) if main_seen else None
-        cross = {'reported': reported, 'main_sum': main_sum, 'all_sum': all_sum, 'main_delta': None, 'all_delta': None,
-                 'reviewer_sum': sum_usage([e for e in events if e['role'] == 'reviewer']) if reviewer_seen else None,
-                 'sums_are_lower_bounds': bool(incomplete),
-                 'note': 'observation only until the smoke fixes whether result.usage includes sidechains; reviewer_sum is '
-                         'outside reported (None in arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)'}
-        if main_seen and reported and all(isinstance(reported.get(k), int) for k in USAGE_KEYS):
-            cross['main_delta'] = {k: reported[k] - main_sum[k] for k in USAGE_KEYS}
-            cross['all_delta'] = {k: reported[k] - all_sum[k] for k in USAGE_KEYS}
-        result.update({
-            'exit_code': proc.returncode, 'finished_at': utc(), 'session_id': manifest['session_id'],
-            'session_id_confirmed': stream_result.get('session_id') == manifest['session_id'],
-            'request_ids': new_ids, 'event_count': len(events), 'incomplete': incomplete, 'transcript_stats': stats,
-            'reviewer': reviewer,
-            'cost': turn_cost(stream_result, reviewer),
-            'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
-            'web_requests': reported.get('server_tool_use') if reported else None,
-            'observed_tools_and_effort': observations(events, not incomplete and copied.returncode == 0),
-            'usage_complete': (not incomplete and result['result'] is not None and proc.returncode == 0
-                               and copied.returncode == 0 and bool(events)
-                               and stats.get('unparsable_lines', 1) == 0 and result['unparsed_lines'] == 0
-                               and stats.get('assistant_without_requestId', 1) == 0
-                               and cross['main_delta'] is not None
-                               and (all(v == 0 for v in cross['main_delta'].values()) or all(v == 0 for v in cross['all_delta'].values()))),
-            'usage_complete_note': 'arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)',
-            'usage_cross_check': cross, 'role_files': write_role_files(output, events),
-            'transcript_models': sorted({e['model'] for e in events}), 'roles': sorted({e['role'] for e in events}),
-            'config_volume': volume_listing(manifest), 'actual_model': None,
-            'actual_model_note': 'transcript models/modelUsage are client-observed; requested model is not proof.',
-        })
+        result.update({'finished_at': utc(), 'role_files': write_role_files(output, events),
+                       'config_volume': volume_listing(manifest)})
         result['cli_status'] = 'ok' if proc.returncode == 0 else 'failed'
         result['status'] = 'collected'                 # finalized in the finally block after the secret scan
         write_json(output / 'result.json', result)
@@ -1310,7 +1463,7 @@ def turn(args):
         with (dest / 'request-ids.txt').open('a') as ledger:
             for event in events:
                 ledger.write(event['id'] + '\n')
-        if reviewer is not None and reviewer_calls is not None:
+        if reviewer_part is not None and reviewer_calls is not None:
             (dest / 'reviewer-calls.json').write_text(json.dumps({'calls': reviewer_calls}) + '\n')
         record_models(dest, manifest, events)
         print(json.dumps({k: result[k] for k in ('exit_code', 'session_id_confirmed', 'event_count', 'usage_complete',
@@ -1360,7 +1513,11 @@ def discard(args):
     for key in ('config_volume', 'reviewer_volume', 'codex_volume'):   # codex_volume: manifests created before v3-claude
         volume = manifest.get(key)
         if volume:
-            rc, out, err = helper(manifest, "find /vol -printf '%y %p\\n' | sort", ['type=volume,src=%s,dst=/vol' % volume])
+            # the reviewer volume belongs to the reviewer account (mode 0700): list it as that uid (manifests from before
+            # the reviewer helper carry no reviewer_uid; their volume belongs to the image user as before)
+            user = manifest.get('reviewer_uid') if key == 'reviewer_volume' else None
+            rc, out, err = helper(manifest, "find /vol -printf '%y %p\\n' | sort", ['type=volume,src=%s,dst=/vol' % volume],
+                                  **({'user': user} if user is not None else {}))
             listings[key] = (volume, rc, out.splitlines() if rc == 0 else None)
     if 'reviewer_volume' in listings:
         _, rc, entries = listings['reviewer_volume']
@@ -1447,7 +1604,8 @@ def main():
     run.add_argument('--run-id', required=True)
     run.add_argument('--prompt', type=Path, required=True)
     run.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
-    run.add_argument('--timeout-seconds', type=int, default=7200)
+    run.add_argument('--timeout-seconds', type=int, default=LIMITS['time_limit_seconds'],
+                     help='default: the run cap (no per-turn limit, decision 2026-11-18); always reduced to the run time left')
     run.add_argument('--max-turns', type=int)
     run.add_argument('--max-budget-usd', type=cost_value)
     run.add_argument('--resume', action='store_true')
