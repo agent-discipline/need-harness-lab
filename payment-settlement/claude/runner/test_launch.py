@@ -259,6 +259,22 @@ class RunnerTest(unittest.TestCase):
                                                'worker': {'web_tool_uses': 2, 'efforts': ['unobserved']}})
             self.assertFalse(launch.observations(events, False)['web_tool_uses_complete'])
 
+    def test_subagent_type_comes_from_the_transcript_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sub = Path(tmp) / 'projects/-workspace/s/subagents'
+            sub.mkdir(parents=True)
+            for name, agent, model in (('agent-a1', 'explorer', 'claude-sonnet-5'), ('agent-a2', 'general-purpose', 'claude-opus-5-5'),
+                                       ('agent-a3', None, 'claude-opus-5-5')):
+                (sub / (name + '.jsonl')).write_text(json.dumps({'type': 'assistant', 'requestId': 'r-' + name, 'isSidechain': True,
+                                                                 'sessionId': 's', 'message': {'model': model, 'usage': USAGE}}) + '\n')
+                if agent:
+                    (sub / (name + '.meta.json')).write_text(json.dumps({'agentType': agent}))
+            events, _, _, _ = launch.build_events(Path(tmp) / 'projects', set(), 'r', '0001', 3)
+            self.assertEqual({e['id']: (e['role'], e['agent_type']) for e in events},
+                             {'r-agent-a1': ('worker', 'explorer'), 'r-agent-a2': ('worker', 'general-purpose'),
+                              'r-agent-a3': ('worker', None)})
+            self.assertEqual(launch.USER_PROXY_MODEL, 'claude-opus-5-5')
+
     def test_inspect_redaction_and_scrub(self):
         raw = json.dumps([{'Config': {'Env': ['CLAUDE_CODE_OAUTH_TOKEN=secret-value', 'PATH=/bin']}}]).encode()
         redacted = launch.redact_inspect(raw)

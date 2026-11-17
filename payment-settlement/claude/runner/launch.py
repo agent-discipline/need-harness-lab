@@ -25,6 +25,13 @@ CONFIG_DST = HOME_DST + '/.claude'                    # CLAUDE_CONFIG_DIR, passe
 # with their own config dir on a per-run volume, so reviewer transcripts are separable from the PM's.
 REVIEWER_DST = HOME_DST + '/.fable-review'
 REVIEWER_MODEL = 'claude-fable-5-2'
+USER_PROXY_MODEL = 'claude-opus-5-5'                 # agreed 2026-11-17 (scripts/consult_contract.py, arm 3 only)
+# Harness v4.3 explorer subagent keeps the model of its own definition (agents/explorer.md: sonnet). Claude Code 2.1.326
+# resolves a subagent's model as: explicit model (call parameter, else agent definition) before CLAUDE_CODE_SUBAGENT_MODEL,
+# unless CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set (read from the CLI bundle, not yet observed in a paid run): the runner
+# therefore never sets FORCE. Explorer requests are identified by the agentType of their transcript's .meta.json.
+EXPLORER_AGENT = 'explorer'
+EXPLORER_MODEL_PREFIX = 'claude-sonnet-'
 TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN'
 USAGE_KEYS = ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens')
 EXPECTED_UID = 1000                                   # image USER node; workspace .git must be owned by the same uid
@@ -450,6 +457,12 @@ def build_events(projects, seen, run_id, turn_id, arm, role=None):
     for file in sorted(Path(projects).rglob('*.jsonl')):
         stats['files'] += 1
         rel = str(file.relative_to(projects))
+        agent_type = None                               # subagent transcripts have <name>.meta.json with agentType
+        try:
+            meta = json.loads(file.with_suffix('.meta.json').read_text())
+            agent_type = meta.get('agentType') if isinstance(meta, dict) and isinstance(meta.get('agentType'), str) else None
+        except (OSError, ValueError):
+            pass
         for number, line in enumerate(file.read_bytes().splitlines(), 1):
             if not line.strip():
                 continue
@@ -471,7 +484,9 @@ def build_events(projects, seen, run_id, turn_id, arm, role=None):
             usage = message.get('usage')
             entry = entries.setdefault(rid, {'usages': [], 'models': set(), 'worker': False, 'files': set(), 'tools': set(),
                                              'efforts': set(), 'sessions': set(), 'missing': False, 'first': (rel, number),
-                                             'timestamp': item.get('timestamp')})
+                                             'timestamp': item.get('timestamp'), 'agent_types': set()})
+            if agent_type:
+                entry['agent_types'].add(agent_type)
             # tool calls of this response (unique by tool_use id across lines and copies) and the CLI-recorded effort
             for block in message.get('content') if isinstance(message.get('content'), list) else []:
                 if isinstance(block, dict) and block.get('type') == 'tool_use':
@@ -509,7 +524,8 @@ def build_events(projects, seen, run_id, turn_id, arm, role=None):
                        'file': entry['first'][0], 'line': entry['first'][1], 'copies': len(entry['files']),
                        'transcript_sessions': sorted(entry['sessions']), 'timestamp': entry['timestamp'],
                        'web_tool_uses': sum(1 for _, n in entry['tools'] if n in WEB_TOOLS),
-                       'effort': next(iter(entry['efforts'])) if len(entry['efforts']) == 1 else None})
+                       'effort': next(iter(entry['efforts'])) if len(entry['efforts']) == 1 else None,
+                       'agent_type': next(iter(entry['agent_types'])) if len(entry['agent_types']) == 1 else None})
     stats['session_ids'] = sorted(stats['session_ids'])
     return events, sorted(new_ids), incomplete, stats
 
