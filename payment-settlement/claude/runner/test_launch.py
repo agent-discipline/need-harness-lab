@@ -39,7 +39,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn('HOME=/home/node', cmd)
         self.assertIn('CLAUDE_CONFIG_DIR=/home/node/.claude', cmd)
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', ' '.join(cmd))
-        self.assertNotIn('CLAUDE_CODE_SUBAGENT_MODEL', ' '.join(cmd))
+        self.assertNotIn('CLAUDE_CODE_SUBAGENT', ' '.join(cmd))
         self.assertIn('--session-id', cmd)
         self.assertNotIn('--resume', cmd)
         self.assertNotIn('--bare', cmd)
@@ -73,6 +73,7 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn('codex', ' '.join(cmd))
         self.assertNotIn('bind,src=', ' '.join(m for m in mounts if 'workspace' not in m))   # no credential file mounted
         self.assertIn('CLAUDE_CODE_SUBAGENT_MODEL=worker-y', cmd)
+        self.assertIn('CLAUDE_CODE_SUBAGENT_EFFORT=high', cmd)
         self.assertNotIn('--tools', cmd)
         self.assertNotIn('docker.sock', ' '.join(cmd))
         # arms 1/2 never receive the reviewer switch, so fable-review refuses there

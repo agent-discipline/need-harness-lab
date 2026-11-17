@@ -353,7 +353,10 @@ def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_
                '--mount', 'type=bind,src=' + manifest['workspace'] + ',dst=/workspace',
                '--mount', 'type=volume,src=' + manifest['config_volume'] + ',dst=' + CONFIG_DST]
     if manifest.get('requested_worker_model'):
-        command += ['--env', 'CLAUDE_CODE_SUBAGENT_MODEL=' + manifest['requested_worker_model']]
+        # workers: agreed model and effort high (CLI 2.1.326 reads CLAUDE_CODE_SUBAGENT_EFFORT; propagation is
+        # confirmed only by the pilot's per-request transcript models, never assumed)
+        command += ['--env', 'CLAUDE_CODE_SUBAGENT_MODEL=' + manifest['requested_worker_model'],
+                    '--env', 'CLAUDE_CODE_SUBAGENT_EFFORT=high']
     if manifest.get('arm') == 3:
         if not manifest.get('reviewer_volume') or not manifest.get('requested_reviewer_model'):
             raise ValueError('arm 3 requires a reviewer volume and reviewer model (dual review second reviewer)')
