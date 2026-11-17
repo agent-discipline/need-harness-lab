@@ -1,0 +1,14 @@
+test_bank_payload_reuse (test_reconcile.ReconciliationControls.test_bank_payload_reuse) ... ok
+test_double_settlement_item (test_reconcile.ReconciliationControls.test_double_settlement_item) ... ok
+test_duplicate_debit (test_reconcile.ReconciliationControls.test_duplicate_debit) ... ok
+test_missing_ledger (test_reconcile.ReconciliationControls.test_missing_ledger) ... ok
+test_orphan_bank (test_reconcile.ReconciliationControls.test_orphan_bank) ... ok
+test_valid (test_reconcile.ReconciliationControls.test_valid) ... ok
+test_wrong_kst_settlement_date (test_reconcile.ReconciliationControls.test_wrong_kst_settlement_date) ... ok
+test_wrong_settlement (test_reconcile.ReconciliationControls.test_wrong_settlement) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.002s
+
+OK
+exit=0
