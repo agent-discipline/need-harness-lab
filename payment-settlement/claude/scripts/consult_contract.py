@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fresh isolated Claude user proxy: frozen contract + questions only, no tools, its own session and config.
 
-The proxy model is an explicit argument (no default): the experiment has not fixed it yet. When readiness.json
-records user_proxy_model, the argument must match it.
+The proxy model has no default: readiness.json must carry the frozen user_proxy_model and --model must equal it.
+Output goes to <runs>/<run-id>/consults/NNNN so the run ledger counts the proxy with every other role.
 """
 import argparse
 import hashlib
@@ -53,21 +53,37 @@ def final_text(stdout):
     return text
 
 
+def consult_dir(runs, run_id):
+    """Consultations live inside their run (consults/NNNN) so the run ledger counts them with every other role."""
+    run = Path(runs).resolve() / launch.valid_run(run_id)
+    manifest = json.loads((run / 'manifest.json').read_text())
+    if manifest.get('arm') != 3:
+        raise ValueError('the user proxy answers only the harness arm (arm 3)')
+    folder = run / 'consults'
+    number = len([p for p in folder.iterdir() if p.is_dir()]) + 1 if folder.is_dir() else 1
+    return run, folder / ('%04d' % number)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--run-id', required=True, help='run the consultation belongs to (its cost is that condition\'s cost)')
+    p.add_argument('--run-id', required=True, help='arm 3 run the consultation belongs to (its cost is that condition\'s cost)')
     p.add_argument('--questions', type=Path, required=True)
-    p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--model', required=True, help='user proxy model id (not fixed by the protocol yet)')
+    p.add_argument('--model', required=True, help='must equal the frozen readiness user_proxy_model')
     p.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
     p.add_argument('--readiness', type=Path, default=ROOT / 'docs/results/readiness.json')
+    p.add_argument('--runs', type=Path, default=ROOT / '.runs')
     p.add_argument('--timeout-seconds', type=int, default=1800)
     p.add_argument('--dry-run', action='store_true')
     a = p.parse_args()
-    launch.valid_run(a.run_id)
     ready = json.loads(a.readiness.read_text())
-    if ready.get('user_proxy_model') and ready['user_proxy_model'] != a.model:
-        p.error('--model differs from readiness user_proxy_model')
+    if not ready.get('user_proxy_model'):
+        p.error('readiness has no frozen user_proxy_model; freeze it before any proxy call')
+    if ready['user_proxy_model'] != a.model:
+        p.error('--model differs from the frozen user_proxy_model')
+    try:
+        run, out = consult_dir(a.runs, a.run_id)
+    except (OSError, ValueError) as exc:
+        p.error(str(exc))
     image = ready['image_digests']['runner']
     env_file = a.env_file.resolve()
     token = launch.read_token(env_file)
@@ -79,9 +95,8 @@ def main():
                   'run_id': a.run_id, 'role': 'user-proxy', 'model': a.model, 'session_id': session_id,
                   'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(), 'env_file': str(env_file)}
     if a.dry_run:
-        print(json.dumps(dict(invocation, prompt_bytes=len(prompt.encode())), indent=2, ensure_ascii=False))
+        print(json.dumps(dict(invocation, prompt_bytes=len(prompt.encode()), output=str(out)), indent=2, ensure_ascii=False))
         return 0
-    out = a.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     (out / 'packet').mkdir()
     for file, content in packet.items():
@@ -89,6 +104,10 @@ def main():
     (out / 'prompt.txt').write_text(prompt)
     (out / 'invocation.json').write_text(json.dumps(invocation, indent=2, ensure_ascii=False) + '\n')
     code, error = None, None
+    # written first so an interrupted call is visible to the run ledger as an incomplete (not a zero) consultation
+    usage = {'run_id': a.run_id, 'role': 'user-proxy', 'requested_model': a.model, 'session_id': session_id,
+             'usage': None, 'usage_unobserved': True, 'usage_complete': False, 'cost_usd': None}
+    (out / 'usage.json').write_text(json.dumps(usage, indent=2, ensure_ascii=False) + '\n')
     try:
         created = subprocess.run(command, capture_output=True, check=False)
         if created.returncode:
@@ -106,17 +125,23 @@ def main():
         if copied.returncode == 0:
             events, ids, incomplete, stats = launch.build_events(out / 'projects', set(), a.run_id, 'proxy-' + session_id,
                                                                  0, role='user-proxy')
+        for event in events:
+            event['requested_model'] = a.model
         (out / 'events.jsonl').write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in events))
         stream = launch.collect(out / 'stdout.jsonl')
         response = final_text(out / 'stdout.jsonl')
         (out / 'response.txt').write_text(response or '')
-        usage = {'run_id': a.run_id, 'role': 'user-proxy', 'requested_model': a.model, 'session_id': session_id,
-                 'session_id_confirmed': ((stream['result'] or {}).get('session_id') == session_id),
-                 'transcript_models': sorted({e['model'] for e in events}), 'request_ids': ids,
-                 'usage': launch.sum_usage(events), 'incomplete': incomplete, 'transcript_stats': stats,
-                 'stream_result': stream['result'], 'exit_code': code,
-                 'usage_complete': (code == 0 and not incomplete and bool(events) and stats.get('unparsable_lines', 1) == 0
-                                    and stats.get('assistant_without_requestId', 1) == 0)}
+        complete = (code == 0 and not incomplete and bool(events) and stats.get('unparsable_lines', 1) == 0
+                    and stats.get('assistant_without_requestId', 1) == 0)
+        observed = copied.returncode == 0 and bool(events)
+        usage.update({'session_id_confirmed': ((stream['result'] or {}).get('session_id') == session_id),
+                      'transcript_models': sorted({e['model'] for e in events}), 'request_ids': ids,
+                      # never a zero dictionary for usage nobody observed; partial sums are flagged as lower bounds
+                      'usage': launch.sum_usage(events) if observed else None, 'usage_unobserved': not observed,
+                      'usage_is_lower_bound': observed and not complete,
+                      'incomplete': incomplete, 'transcript_stats': stats, 'stream_result': stream['result'],
+                      'exit_code': code, 'usage_complete': complete,
+                      'cost_usd': launch.number((stream['result'] or {}).get('total_cost_usd'))})
         (out / 'usage.json').write_text(json.dumps(usage, indent=2, ensure_ascii=False) + '\n')
     except (OSError, RuntimeError, ValueError) as exc:
         error = launch.mask_text(str(exc)[:1000], [token])
@@ -125,6 +150,7 @@ def main():
         hits = launch.scrub(out, [token])
         if hits:
             (out / 'SECRET-LEAK.txt').write_text('credential found and redacted in: ' + ', '.join(hits) + '\nrotate the token now\n')
+        launch.write_ledger(run)
     if error or hits:
         print('user proxy failed: ' + (error or 'credential leak redacted; rotate the token'), file=sys.stderr)
         return 1

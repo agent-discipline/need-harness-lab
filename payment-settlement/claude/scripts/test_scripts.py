@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -180,6 +181,51 @@ class CaptureTurnTest(unittest.TestCase):
 
 
 class ConsultContractTest(unittest.TestCase):
+    def setup_run(self, tmp, arm=3, proxy_model='decided-model'):
+        env = Path(tmp) / 'claude.env'
+        env.write_text('CLAUDE_CODE_OAUTH_TOKEN=DO-NOT-PRINT-0123456789\n')
+        os.chmod(env, 0o600)
+        questions = Path(tmp) / 'q.txt'
+        questions.write_text('질문')
+        path = Path(tmp) / 'readiness.json'
+        write(path, ready(**({'user_proxy_model': proxy_model} if proxy_model else {})))
+        runs = Path(tmp) / 'runs'
+        write(runs / 'claude-arm3-core01' / 'manifest.json', {'arm': arm, 'run_id': 'claude-arm3-core01'})
+        (runs / 'claude-arm3-core01' / 'turns').mkdir()
+        return ['consult_contract.py', '--run-id', 'claude-arm3-core01', '--questions', str(questions), '--env-file', str(env),
+                '--readiness', str(path), '--runs', str(runs)], runs / 'claude-arm3-core01'
+
+    def call(self, argv, fake=None):
+        out = io.StringIO()
+        with patch.object(sys, 'argv', argv), patch.object(consult_contract.subprocess, 'run', side_effect=fake) as run, \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = consult_contract.main()
+            except SystemExit as exc:
+                code = exc.code
+        return code, run, out.getvalue()
+
+    def fake(self, copy_ok=True):
+        state = {}
+        def run(cmd, **kw):
+            if cmd[:2] == ['docker', 'create']:
+                state['session'] = cmd[cmd.index('--session-id') + 1]
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+            if cmd[:2] == ['docker', 'start']:
+                kw['stdout'].write(json.dumps({'type': 'result', 'result': 'APPROVED', 'session_id': state['session'],
+                                               'usage': USAGE, 'total_cost_usd': 0.07}).encode() + b'\n')
+                return SimpleNamespace(returncode=0)
+            if cmd[:2] == ['docker', 'cp']:
+                if not copy_ok:
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'copy failed')
+                target = Path(cmd[-1]) / '-tmp'
+                target.mkdir(parents=True)
+                (target / (state['session'] + '.jsonl')).write_text(json.dumps(
+                    {'type': 'assistant', 'requestId': 'req-proxy', 'sessionId': state['session'],
+                     'message': {'model': 'decided-model', 'usage': USAGE}}) + '\n')
+            return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+        return run
+
     def test_proxy_has_no_tools_no_mounts_and_dry_run_spends_nothing(self):
         cmd = consult_contract.proxy_command('img', 'n', Path('/e'), 'proxy-model', 'sid')
         self.assertEqual(cmd[cmd.index('--tools') + 1], '')
@@ -187,25 +233,44 @@ class ConsultContractTest(unittest.TestCase):
         self.assertNotIn('--dangerously-skip-permissions', cmd)
         self.assertEqual(cmd[cmd.index('--model') + 1], 'proxy-model')
         with tempfile.TemporaryDirectory() as tmp:
-            env = Path(tmp) / 'claude.env'
-            env.write_text('CLAUDE_CODE_OAUTH_TOKEN=DO-NOT-PRINT\n')
-            os.chmod(env, 0o600)
-            questions = Path(tmp) / 'q.txt'
-            questions.write_text('질문')
-            path = Path(tmp) / 'readiness.json'
-            write(path, ready(user_proxy_model='decided-model'))
-            base = ['consult_contract.py', '--run-id', 'claude-arm3-core01', '--questions', str(questions),
-                    '--output', str(Path(tmp) / 'out'), '--env-file', str(env), '--readiness', str(path), '--dry-run']
-            out = io.StringIO()
-            with patch.object(sys, 'argv', base + ['--model', 'decided-model']), patch.object(consult_contract.subprocess, 'run') as run, \
-                 contextlib.redirect_stdout(out):
-                self.assertEqual(consult_contract.main(), 0)
-                run.assert_not_called()
-            self.assertNotIn('DO-NOT-PRINT', out.getvalue())
-            self.assertFalse((Path(tmp) / 'out').exists())
-            with patch.object(sys, 'argv', base + ['--model', 'other-model']), contextlib.redirect_stderr(io.StringIO()), \
-                 self.assertRaises(SystemExit):
-                consult_contract.main()
+            argv, run_dir = self.setup_run(tmp)
+            code, run, out = self.call(argv + ['--model', 'decided-model', '--dry-run'])
+            self.assertEqual(code, 0, out)
+            run.assert_not_called()
+            self.assertNotIn('DO-NOT-PRINT', out)
+            self.assertFalse((run_dir / 'consults').exists())
+            self.assertNotEqual(self.call(argv + ['--model', 'other-model', '--dry-run'])[0], 0)
+
+    def test_proxy_model_must_be_frozen_and_only_arm3_consults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, _ = self.setup_run(tmp, proxy_model=None)
+            code, run, out = self.call(argv + ['--model', 'any-model', '--dry-run'])
+            self.assertNotEqual(code, 0)
+            self.assertIn('user_proxy_model', out)
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, _ = self.setup_run(tmp, arm=1)
+            self.assertNotEqual(self.call(argv + ['--model', 'decided-model', '--dry-run'])[0], 0)
+
+    def test_proxy_usage_lands_in_the_run_ledger_and_unobserved_usage_is_not_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            code, _, out = self.call(argv + ['--model', 'decided-model'], self.fake())
+            self.assertEqual(code, 0, out)
+            usage = json.loads((run_dir / 'consults/0001/usage.json').read_text())
+            self.assertEqual(usage['usage'], USAGE)
+            self.assertEqual(usage['cost_usd'], 0.07)
+            self.assertTrue(usage['usage_complete'])
+            ledger = json.loads((run_dir / 'ledger.json').read_text())
+            self.assertEqual(ledger['roles']['user-proxy']['requests'], 1)
+            self.assertEqual(ledger['cost_usd'], 0.07)
+            code, _, out = self.call(argv + ['--model', 'decided-model'], self.fake(copy_ok=False))
+            usage = json.loads((run_dir / 'consults/0002/usage.json').read_text())
+            self.assertIsNone(usage['usage'])
+            self.assertTrue(usage['usage_unobserved'])
+            self.assertFalse(usage['usage_complete'])
+            ledger = json.loads((run_dir / 'ledger.json').read_text())
+            self.assertFalse(ledger['usage_complete'])
+            self.assertIn('consult/0002', ledger['incomplete_calls'])
 
 
 class LoadCheckTest(unittest.TestCase):
