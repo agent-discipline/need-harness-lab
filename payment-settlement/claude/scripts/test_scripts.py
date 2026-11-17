@@ -685,6 +685,29 @@ class EvaluationCostLedgerTest(unittest.TestCase):
             ok[3] = 'u'
             self.assertNotEqual(self.cli(ledger, *ok)[0], 0)
 
+    def test_one_session_records_one_adapter_line_per_job_and_never_the_same_job_twice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / 'evaluation-cost.jsonl'
+            adapter = ['--role', 'judging-adapter', '--session', 'agent-7', '--model', 'claude-fable-5-2',
+                       '--total-tokens', '10', '--source', 'completion notice', '--run-id', 'claude-arm1-core01']
+            self.assertEqual(self.cli(ledger, *adapter, '--item', 'arm1-core01 adapter')[0], 0)
+            self.assertEqual(self.cli(ledger, *adapter, '--item', 'arm2-core01 adapter')[0], 0)
+            before = ledger.read_bytes()
+            code, err = self.cli(ledger, *adapter, '--item', 'arm1-core01 adapter')   # exact duplicate
+            self.assertNotEqual(code, 0)
+            self.assertIn('already recorded', err)
+            for bad in (['--item', ' '],):
+                self.assertNotEqual(self.cli(ledger, *adapter, *bad)[0], 0)
+            conductor = ['--role', 'conductor', '--session', 'agent-7', '--model', 'claude-fable-5-2', '--total-tokens', '5',
+                         '--source', 'completion notice', '--run-id', 'claude-arm1-core01']
+            self.assertNotEqual(self.cli(ledger, *conductor, '--item', 'x')[0], 0)  # conductor: one per session, no item
+            self.assertEqual(ledger.read_bytes(), before)
+            self.assertEqual(self.cli(ledger, *conductor)[0], 0)
+            self.assertNotEqual(self.cli(ledger, *conductor)[0], 0)
+            self.assertEqual([(l['role'], l['item']) for l in self.lines(ledger)],
+                             [('judging-adapter', 'arm1-core01 adapter'), ('judging-adapter', 'arm2-core01 adapter'),
+                              ('conductor', None)])
+
 
 def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results=None, tools=None, models=None,
                    usage_complete=True, selftest=True, readiness=True, record_status='RUNNING', censored=None, turns=1,

@@ -3,8 +3,10 @@
 ledger docs/results/evaluation-cost.jsonl.
 
 Decision 2026-11-17 (spec 10.4): evaluation cost belongs to the experiment, not to a run. It never enters a run ledger,
-a run cap or an arm's cost. One line = one conductor session or one adapter authoring; the main session records it from
-the agent's completion notice usage. A conductor that wrote the adapter itself records one conductor line marked
+a run cap or an arm's cost. One line = one conductor session or one adapter-writing job; the main session records it
+from the agent's completion notice usage. A session that wrote several adapters records one judging-adapter line per
+job, each with its own --item label (the same role, session and item is never recorded twice). A conductor line stays
+one per session and takes no --item. A conductor that wrote the adapter itself records one conductor line marked
 --includes-judging-adapter and no separate adapter line. The ledger is append-only; a line is never rewritten.
 Tokens are either the four request counters or, when the source reports only a total, --total-tokens alone.
 """
@@ -49,13 +51,19 @@ def read_lines(ledger):
     return lines
 
 
-def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, includes_adapter=False, note=None):
+def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, includes_adapter=False, note=None,
+          item=None):
     """Validate one line; returns the dict to append."""
     if role not in ROLES:
         raise ValueError('role must be one of ' + ', '.join(ROLES))
     for name, value in (('session', session), ('model', model), ('source', source)):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(name + ' is required')
+    if item is not None:
+        if role != 'judging-adapter':
+            raise ValueError('--item labels a judging-adapter job; a conductor line is one per session')
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError('--item must not be empty')
     if not run_ids:
         raise ValueError('name every run id this session or adapter covered (--run-id, repeat)')
     for run_id in run_ids:
@@ -75,7 +83,8 @@ def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, in
         raise ValueError('give the four counters or --total-tokens')
     if cost_usd is not None:
         cost_usd = launch.cost_value(cost_usd)
-    return {'role': role, 'session': session, 'model': model, 'usage': usage, 'usage_split_observed': usage is not None,
+    return {'role': role, 'session': session, 'item': item, 'model': model, 'usage': usage,
+            'usage_split_observed': usage is not None,
             'total_tokens': total, 'tokens_source': source, 'run_ids': list(run_ids), 'cost_usd': cost_usd,
             'includes_judging_adapter': bool(includes_adapter), 'note': note,
             'recorded_at': datetime.now(timezone.utc).isoformat(),
@@ -83,13 +92,16 @@ def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, in
 
 
 def append(ledger, line):
-    """Append under an exclusive lock; the same (role, session) is never recorded twice."""
+    """Append under an exclusive lock; the same (role, session, item) is never recorded twice (a line written before
+    items existed has item None)."""
     ledger = Path(ledger)
     ledger.parent.mkdir(parents=True, exist_ok=True)
+    key = (line['role'], line['session'], line.get('item'))
     with ledger.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
-        if any(l.get('role') == line['role'] and l.get('session') == line['session'] for l in read_lines(ledger)):
-            raise ValueError('%s session %s is already recorded; the ledger is append-only' % (line['role'], line['session']))
+        if any((l.get('role'), l.get('session'), l.get('item')) == key for l in read_lines(ledger)):
+            raise ValueError('%s session %s%s is already recorded; the ledger is append-only'
+                             % (line['role'], line['session'], ' item %s' % key[2] if key[2] is not None else ''))
         stream.write(json.dumps(line, ensure_ascii=False) + '\n')
         stream.flush()
     return line
@@ -100,6 +112,8 @@ def main():
     p.add_argument('--ledger', type=Path, default=default_ledger())
     p.add_argument('--role', required=True, choices=ROLES)
     p.add_argument('--session', required=True, help='conductor session / adapter authoring agent identifier')
+    p.add_argument('--item', help='judging-adapter only: label of this adapter-writing job (e.g. the run id or adapter '
+                   'name) so one session can record one line per job')
     p.add_argument('--model', required=True, help='model id the source reports (not the requested alias)')
     for key, flag in SPLIT.items():
         p.add_argument(flag, dest=key, type=non_negative)
@@ -116,7 +130,7 @@ def main():
         p.error('give all four counters (%s) or none of them' % ', '.join(SPLIT.values()))
     try:
         line = append(a.ledger, entry(a.role, a.session, a.model, given or None, a.total_tokens, a.source, a.run_ids,
-                                      a.cost_usd, a.includes_judging_adapter, a.note))
+                                      a.cost_usd, a.includes_judging_adapter, a.note, a.item))
     except (OSError, ValueError) as exc:
         p.error(str(exc))
     print(json.dumps(line, ensure_ascii=False))

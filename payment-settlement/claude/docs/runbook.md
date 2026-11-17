@@ -154,19 +154,19 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 
 진행자(실험 진행 에이전트)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 2,000만 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
 
-기록 주체는 **메인**이다(진행자 에이전트 완료 알림의 usage). 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 덧붙이기만 하며(같은 역할·세션은 두 번 기록되지 않는다, 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다), 맡은 run id를 전부 적는다.
+기록 주체는 **메인**이다(진행자 에이전트 완료 알림의 usage). 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 같은 세션이 어댑터를 여러 번 작성했으면 건마다 `judging-adapter` 한 줄을 쓰고 `--item`에 건을 구분하는 표시(예: 대상 run id·어댑터 이름)를 적는다. 진행자(`conductor`) 줄은 세션당 한 줄이고 `--item`을 받지 않는다. 덧붙이기만 하며(같은 역할·세션·`item`은 두 번 기록되지 않는다, 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다), 맡은 run id를 전부 적는다.
 
 ```bash
 # 진행자 세션 1개(맡은 run을 모두 --run-id로). 진행자가 어댑터를 직접 썼으면 --includes-judging-adapter, 어댑터 줄은 따로 쓰지 않는다
 python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role conductor --session <세션 식별자> --model <보고된 모델 id> \
   --input-tokens N --cache-creation-input-tokens N --cache-read-input-tokens N --output-tokens N \
   --source "<숫자의 출처: 예 진행자 완료 알림 usage>" --run-id claude-arm1-core01 --run-id claude-arm2-core01 [--includes-judging-adapter]
-# 진행자가 아닌 에이전트가 어댑터를 작성한 1건
-python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judging-adapter --session <식별자> --model <id> \
+# 진행자가 아닌 에이전트가 어댑터를 작성한 1건(같은 세션의 다음 건은 다른 --item으로 한 줄 더)
+python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judging-adapter --session <식별자> --item "<건 표시>" --model <id> \
   --total-tokens <합> --source "<출처>" --run-id <id>
 ```
 
-줄의 칸: `role`·`session`·`model`·`usage`(네 카운터, 합계만 있으면 null)·`total_tokens`·`tokens_source`·`run_ids`·`cost_usd`(선택, 0 이상의 유한수)·`includes_judging_adapter`·`recorded_at`. 누락 점검은 결과 정리(task 10)에서 한다: 본 실험 30건과 파일럿의 모든 run id가 어느 한 줄의 `run_ids`에 들어 있어야 하고, 빠진 run은 표에 "평가 비용 미기록"으로 드러난다.
+줄의 칸: `role`·`session`·`item`(어댑터 건 표시, 진행자 줄은 null)·`model`·`usage`(네 카운터, 합계만 있으면 null)·`total_tokens`·`tokens_source`·`run_ids`·`cost_usd`(선택, 0 이상의 유한수)·`includes_judging_adapter`·`recorded_at`. 누락 점검은 결과 정리(task 10)에서 한다: 본 실험 30건과 파일럿의 모든 run id가 어느 한 줄의 `run_ids`에 들어 있어야 하고, 빠진 run은 표에 "평가 비용 미기록"으로 드러난다.
 
 ## 사이클 준비 실패 복구
 
