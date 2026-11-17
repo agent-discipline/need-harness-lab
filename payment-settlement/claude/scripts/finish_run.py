@@ -5,8 +5,8 @@ directory .runs/<run> (ledger computed on the spot, manifest, request events, se
 named in the manifest) and the cap record censored.json.
 
 Order (spec 10.1): judging -> verdict.json -> launch.py normalize -> capture_turn.py -> this script -> discard ->
-commit_run.py. Every finalized turn must already be captured in the record folder (refused otherwise), so the hashes
-recorded here are those of the files as committed.
+commit_run.py. Every finalized turn must already be captured in the record folder, its capture completed (the marker
+capture_turn.py writes last; refused otherwise), so the hashes recorded here are those of the files as committed.
 
 PASSED/FAILED are never arguments: PASSED only when all of C01..C20 are PASS in verdict.json. INVALID_INFRA (an
 execution-environment failure unrelated to the implementation) is the only status given by argument, with a reason and
@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runner'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 import launch
+import capture_turn
 import commit_run
 import freeze_readiness
 
@@ -128,8 +129,9 @@ def terminal(passed, censored):
 
 def capture_state(run, folder):
     """The finish comes after normalize and capture_turn (spec 10.1), so the record folder must already hold every turn
-    the run directory finalized (status ok/failed — what capture_turn accepts), byte-identical result.json. Returns
-    (turns not captured or captured from another result, turns capture_turn cannot take: cut short / not finalized)."""
+    the run directory finalized (status ok/failed — what capture_turn accepts): a completed capture (captured_complete)
+    of a byte-identical result.json. Returns (turns not captured, captured only part-way, changed since, or captured
+    from another result; turns capture_turn cannot take: cut short / not finalized)."""
     missing, not_capturable = [], []
     for turn in sorted(p for p in (run / 'turns').iterdir() if p.is_dir()) if (run / 'turns').is_dir() else []:
         try:
@@ -139,10 +141,21 @@ def capture_state(run, folder):
         if status not in ('ok', 'failed'):
             not_capturable.append(turn.name)
             continue
-        copy = folder / 'turns' / turn.name / 'result.json'
-        if not copy.is_file() or sha(copy) != sha(turn / 'result.json'):
+        if not captured_complete(folder / 'turns' / turn.name, sha(turn / 'result.json')):
             missing.append(turn.name)
     return missing, not_capturable
+
+
+def captured_complete(copy, result_sha):
+    """A turn folder whose capture finished: the marker capture_turn.py writes last is present, every file it lists is
+    there unchanged, and the result.json among them is the run directory's."""
+    try:
+        files = json.loads((copy / capture_turn.CAPTURED).read_text())['files']
+        return (isinstance(files, dict) and files.get('result.json') == result_sha
+                and all(isinstance(name, str) and '/' not in name and (copy / name).is_file() and sha(copy / name) == digest
+                        for name, digest in files.items()))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def readiness_of(manifest):
@@ -198,9 +211,9 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
         raise ValueError('--supersede needs a finished record and a non-empty --reason')
     uncaptured, not_capturable = capture_state(run, folder)
     if uncaptured:
-        raise ValueError('turns %s of %s are not captured in %s (or differ from the run directory): the finish comes '
-                         'after normalize and capture_turn.py, so the evidence hashes are those of the committed files'
-                         % (', '.join(uncaptured), run_id, folder / 'turns'))
+        raise ValueError('turns %s of %s are not captured in %s (missing, capture did not complete, files changed since, or '
+                         'differ from the run directory): the finish comes after normalize and capture_turn.py, so the evidence '
+                         'hashes are those of the committed files' % (', '.join(uncaptured), run_id, folder / 'turns'))
     censored = json.loads((run / 'censored.json').read_text()) if (run / 'censored.json').exists() else None
     verdict = read_verdict(folder, run_id) if (folder / VERDICT).exists() else None
     invalid = None

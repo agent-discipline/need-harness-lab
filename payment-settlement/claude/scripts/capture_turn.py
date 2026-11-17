@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Archive an actual Claude runner turn and its evaluator-written analysis into the run's records."""
 import argparse
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -8,6 +9,10 @@ import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+# Written as the last action of a turn's capture, naming every file the capture left with its sha256: a turn folder
+# without it is a capture that stopped part-way (finish_run.py refuses such a turn, and a turn whose listed files are
+# missing or changed; capturing it again replaces the partial folder).
+CAPTURED = "captured.json"
 sys.path.insert(0, str(ROOT.parent / "measurement"))
 sys.path.insert(0, str(ROOT / "runner"))
 from normalize import normalize
@@ -31,6 +36,13 @@ def main_text(stdout):
     return "\n\n".join(texts)
 
 
+def journal_has_turn(recorder, records, turn):
+    """Whether the record journal already holds the turn event whose evidence is this turn's result.json."""
+    wanted = ("turns", f"{turn:04d}", "result.json")
+    return any(Path(item["path"]).parts[-3:] == wanted
+               for event in recorder.existing(records) for item in event.get("evidence", []))
+
+
 def load_recorder():
     spec = importlib.util.spec_from_file_location("record", ROOT.parent / "recording/record.py")
     recorder = importlib.util.module_from_spec(spec)
@@ -51,7 +63,18 @@ def capture(run_id, turn, analysis, status, runs=None):
     if result.get("status") not in ("ok", "failed") or result.get("session_id") != manifest["session_id"]:
         raise ValueError("turn is not finalized by the runner or belongs to another session")
     destination = records / "turns" / f"{turn:04d}"
-    destination.mkdir(parents=True, exist_ok=False)
+    if destination.exists():
+        if (destination / CAPTURED).exists():
+            raise FileExistsError(f"turn {turn:04d} is already captured in {destination}")
+        # A capture that stopped part-way: every file in the folder is derived again from the run directory and the
+        # analysis argument, so the partial folder is replaced — unless the journal (append-only) already holds this
+        # turn, which needs inspection instead of a second journal entry.
+        if journal_has_turn(recorder, records, turn):
+            raise ValueError(f"turn {turn:04d} is in the journal of {records} but its capture did not complete; "
+                             "inspect events.jsonl and the turn folder before recovering")
+        print(f"turn {turn:04d}: replacing a capture that did not complete", file=sys.stderr)
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
     for name in ("prompt.txt", "result.json", "invocation.json", "stderr.txt"):
         shutil.copy2(raw / name, destination / name)
     # Full transcripts stay in evaluator-owned .runs; the record keeps the pinned session's visible text.
@@ -90,6 +113,11 @@ def capture(run_id, turn, analysis, status, runs=None):
     recorder.record_turn(records, destination / "prompt.txt", destination / "analysis.md",
                          "pm" if manifest["arm"] == 3 else "implementer", manifest["session_id"], status,
                          destination / "response.txt", [destination / "result.json", destination / "usage.jsonl"])
+    # last action: the marker names every file this capture left in the turn folder with its hash
+    files = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(destination.iterdir()) if p.is_file()}
+    marker = destination / (CAPTURED + ".tmp")
+    marker.write_text(json.dumps({"run_id": run_id, "turn": f"{turn:04d}", "files": files}, indent=2) + "\n")
+    marker.replace(destination / CAPTURED)
     print(destination)
 
 

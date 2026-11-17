@@ -468,6 +468,34 @@ class CaptureTurnTest(unittest.TestCase):
                 self.assertEqual(ledger['roles']['pm']['requests'], 3)
                 with self.assertRaises(FileExistsError):
                     capture_turn.capture('claude-arm3-core01', 3, analysis, 'ITERATING')
+                marker = json.loads((records / 'turns/0003' / capture_turn.CAPTURED).read_text())
+                self.assertEqual(marker['files'], {p.name: finish_run.sha(p) for p in (records / 'turns/0003').iterdir()
+                                                   if p.name != capture_turn.CAPTURED})
+                self.assertEqual(sorted(marker['files']), ['analysis.md', 'invocation.json', 'prompt.txt', 'response.txt',
+                                                           'result.json', 'stderr.txt', 'usage.jsonl'])
+                # a capture that stops part-way (before the journal entry) leaves no marker; capturing again replaces it
+                turn(4, [dict(type='message', id='r-pm4', model='claude-fable-5-2', usage=USAGE, role='pm')], True)
+                analysis.write_text('analysis 4')
+                journal = (records / 'events.jsonl').read_bytes()
+                with patch.object(capture_turn, 'main_text', side_effect=OSError('disk full')):
+                    with self.assertRaises(OSError):
+                        capture_turn.capture('claude-arm3-core01', 4, analysis, 'ITERATING')
+                self.assertTrue((records / 'turns/0004/result.json').is_file())
+                self.assertFalse((records / 'turns/0004' / capture_turn.CAPTURED).exists())
+                self.assertEqual((records / 'events.jsonl').read_bytes(), journal)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    capture_turn.capture('claude-arm3-core01', 4, analysis, 'ITERATING')
+                rows4 = [json.loads(l)['event_id'] for l in (records / 'turns/0004/usage.jsonl').read_text().splitlines()]
+                self.assertEqual(rows4, ['r-pm4'])
+                self.assertTrue((records / 'turns/0004' / capture_turn.CAPTURED).is_file())
+                # stopped after the journal entry: not replaced (the journal is append-only), inspected instead
+                (records / 'turns/0004' / capture_turn.CAPTURED).unlink()
+                journal = (records / 'events.jsonl').read_bytes()
+                with self.assertRaises(ValueError) as ctx:
+                    capture_turn.capture('claude-arm3-core01', 4, analysis, 'ITERATING')
+                self.assertIn('0004', str(ctx.exception))
+                self.assertEqual((records / 'events.jsonl').read_bytes(), journal)
+                self.assertTrue((records / 'turns/0004/usage.jsonl').is_file())
 
 
 class ConsultContractTest(unittest.TestCase):
@@ -709,6 +737,20 @@ class EvaluationCostLedgerTest(unittest.TestCase):
                               ('conductor', None)])
 
 
+def capture_copy(run, folder, name, complete=True):
+    """The record folder's copy of a turn's result.json and, for a capture that completed, its marker."""
+    (folder / 'turns' / name).mkdir(parents=True, exist_ok=True)
+    shutil.copy2(run / 'turns' / name / 'result.json', folder / 'turns' / name / 'result.json')
+    if complete:
+        mark_captured(folder / 'turns' / name)
+
+
+def mark_captured(copy):
+    """The marker capture_turn.py writes last: every file of the turn folder with its sha256."""
+    write(copy / capture_turn.CAPTURED, {'turn': copy.name, 'files': {p.name: finish_run.sha(p) for p in sorted(copy.iterdir())
+                                                                       if p.is_file() and p.name != capture_turn.CAPTURED}})
+
+
 def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results=None, tools=None, models=None,
                    usage_complete=True, selftest=True, readiness=True, record_status='RUNNING', censored=None, turns=1,
                    proxy_model=None, captured=True):
@@ -747,8 +789,7 @@ def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results
     if not pilot:
         write(folder / 'run.json', {'run_id': run_id, 'status': record_status, 'isolation_verified': True})
     for t in sorted((run / 'turns').glob('*')) if captured else []:             # what capture_turn.py leaves
-        (folder / 'turns' / t.name).mkdir(parents=True)
-        shutil.copy2(t / 'result.json', folder / 'turns' / t.name / 'result.json')
+        capture_copy(run, folder, t.name)
     results = results or {}
     criteria = {c: {'result': results.get(c, 'PASS'), 'evidence': ['acceptance-http.json'], 'note': 'observed'}
                 for c in finish_run.CRITERIA}
@@ -945,19 +986,35 @@ class FinishRunTest(unittest.TestCase):
     def test_finish_comes_after_every_finalized_turn_is_captured(self):
         with tempfile.TemporaryDirectory() as tmp:                              # turn 0002 not captured yet
             root, run, folder = finish_fixture(tmp, turns=2, captured=False)
-            (folder / 'turns/0001').mkdir(parents=True)
-            shutil.copy2(run / 'turns/0001/result.json', folder / 'turns/0001/result.json')
+            capture_copy(run, folder, '0001')
             before = (folder / 'run.json').read_bytes()
             with self.assertRaises(ValueError) as ctx:
                 self.finish(root)
             self.assertIn('0002', str(ctx.exception))
             self.assertNotIn('0001', str(ctx.exception))
             self.assertEqual((folder / 'run.json').read_bytes(), before)
-            (folder / 'turns/0002').mkdir()                                       # captured from another result
-            (folder / 'turns/0002/result.json').write_text('{"status": "ok"}')
+            capture_copy(run, folder, '0002', complete=False)                     # capture stopped part-way
+            with self.assertRaises(ValueError) as ctx:
+                self.finish(root)
+            self.assertIn('0002', str(ctx.exception))
+            self.assertEqual((folder / 'run.json').read_bytes(), before)
+            (folder / 'turns/0002/result.json').write_text('{"status": "ok"}')   # captured from another result
+            mark_captured(folder / 'turns/0002')
             with self.assertRaises(ValueError):
                 self.finish(root)
             shutil.copy2(run / 'turns/0002/result.json', folder / 'turns/0002/result.json')
+            (folder / 'turns/0002/analysis.md').write_text('analysis')
+            mark_captured(folder / 'turns/0002')
+            for change in ('delete', 'edit'):                                     # a listed file gone or changed since
+                with self.subTest(change=change):
+                    if change == 'delete':
+                        (folder / 'turns/0002/analysis.md').unlink()
+                    else:
+                        (folder / 'turns/0002/analysis.md').write_text('edited')
+                    with self.assertRaises(ValueError) as ctx:
+                        self.finish(root)
+                    self.assertIn('0002', str(ctx.exception))
+                    (folder / 'turns/0002/analysis.md').write_text('analysis')
             self.assertEqual(self.finish(root)[1], 'PASSED')
             self.assertEqual(self.record(folder)['turns_not_capturable'], [])
         with tempfile.TemporaryDirectory() as tmp:                              # a cut-short turn cannot be captured
