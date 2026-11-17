@@ -5,7 +5,7 @@ ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="/opt/java/openjdk/bin:${PATH}"
 # jq/flock(util-linux)/awk/realpath(coreutils) are required by the original harness hooks (arm 3).
 RUN apt-get update && apt-get install -y --no-install-recommends git python3 curl ca-certificates bash unzip jq util-linux procps && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code@2.1.280 && claude --version
+RUN npm install -g @anthropic-ai/claude-code@2.1.326 && claude --version
 # v3-claude: no Codex. Arm 3's second reviewer is a fresh Claude session on the reviewer model (fable-review.sh);
 # it is enabled only where the runner sets LAB_REVIEWER_MODEL / LAB_REVIEWER_CONFIG_DIR.
 COPY fable-review.sh /usr/local/bin/fable-review

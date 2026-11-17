@@ -18,7 +18,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]           # payment-settlement/claude
 REPO = ROOT.parents[1]                                # need-haness-lab (env-file must live outside)
 SKIP = {'.git', '.gradle', 'build', '.runs', '.codex', '.claude', 'node_modules', 'logs', 'artifacts', 'experiment', '__pycache__'}
-CLI_VERSION = '2.1.280'
+CLI_VERSION = '2.1.326'
 HOME_DST = '/home/node'
 CONFIG_DST = HOME_DST + '/.claude'                    # CLAUDE_CONFIG_DIR, passed explicitly (never implied)
 # Arm 3 second reviewer (replaces codex in the review playbook): fresh Claude sessions through runner/fable-review.sh

@@ -5,7 +5,7 @@
   "arm": null,
   "core": 1,
   "provider": "claude-code",
-  "cli_version": "2.1.280",
+  "cli_version": "2.1.326",
   "requested_model": null,
   "requested_pm_model": null,
   "requested_worker_model": null,
