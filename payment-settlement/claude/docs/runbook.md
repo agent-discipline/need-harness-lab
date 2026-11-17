@@ -32,7 +32,7 @@ python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt /tmp
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
 
-이미지: 동결 전(인증 스모크)에는 `--image`(기본 `payment-claude-runner:2.1.326` 태그)를 쓴다. `readiness.json`이 생긴 뒤의 `init`(파일럿·사이클)은 그 동결 digest만 쓴다 — `--image`를 생략하면 digest가 들어가고, 다른 값은 거부된다(바꾸려면 새 프로토콜 버전).
+이미지: 동결 전(인증 스모크)에는 `--image`(기본 `payment-claude-runner:2.1.326` 태그)를 쓴다. `readiness.json`이 생긴 뒤의 `init`(파일럿·사이클)은 그 동결 digest만 쓴다 — `--image`를 생략하면 digest가 들어가고, 다른 값은 거부된다(바꾸려면 새 프로토콜 버전). 동결 전 실행은 **기본 위치**(`docs/results/readiness.json`)에 동결 파일이 없을 때만 된다 — `--readiness`로 경로를 명시했는데 그 파일이 없으면 `init`은 거부한다. 3번의 대리 사용자 호출(`consult_contract.py`)은 그 run의 manifest에 고정된 이미지(`image`)로만 실행한다(`invocation.json`의 `image`).
 
 `turn`은 Docker 컨테이너를 만들고 `claude -p --output-format stream-json`을 고정 session id로 실행한다(첫 턴 `--session-id`, 이후 `--resume`). `.runs/<run>/turns/NNNN/`에 prompt 원문·invocation·원시 stdout/stderr·마스킹된 inspect·transcript 사본(`projects/`)·`events.jsonl`·`events.role-*.jsonl`·`result.json`을 보존한다. 종료 후 run 디렉터리 전체를 토큰 값으로 스캔해 히트가 있으면 `SECRET-LEAK.txt`를 남기고 실패로 끝낸다(토큰 회전 필요).
 
@@ -54,19 +54,11 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 | `initial` | 첫 턴(`--resume` 없음, `--kind`를 주면 거부) | — |
 | `feedback` | 평가자 판정 결과 전달(`prompts/feedback.md`) | 30회 |
 | `answer` | 3번: 대리 사용자 답 전달. 1·2번은 거부. 아직 전달하지 않은 **완료된** `consults/NNNN`이 있어야 한다(완료 consult 수 > `answer` 턴 수). 완료 = 대리 사용자 호출이 exit 0·기록된 오류 없음·시크릿 누출 없음·응답 비어 있지 않음(`launch.consult_completed`, `usage.json`의 `completed`). 실패·빈 응답 consult는 answer 턴을 허용하지 않고 장부의 `consults_not_completed`에 남는다. `usage.json` 없는 consult 디렉터리는 장부의 `incomplete_calls`에 들어간다 | 별도 기록 |
-| `recovery` | 바로 앞 턴이 `ok`로 끝나지 않았을 때 그 턴을 이어 감. 앞 턴이 `ok`면 거부. **앞 턴이 `ok`가 아니면 재개 턴은 `recovery`만 허용**(`feedback`·`answer` 거부 — 실패한 턴도 모델에 닿았을 수 있으므로 그 턴의 종류로 센다) | 이어 가는 턴의 종류로 센다 |
+| `recovery` | 바로 앞 턴이 `ok`로 끝나지 않았을 때 그 턴을 이어 감. **그 턴과 같은 프롬프트만 보낸다**(앞 턴 `invocation.json`의 `prompt_sha256`과 일치해야 하며, 다르거나 해시가 없으면 호출 전 거부). 앞 턴이 `ok`면 거부. **앞 턴이 `ok`가 아니면 재개 턴은 `recovery`만 허용**(`feedback`·`answer` 거부 — 실패한 턴도 모델에 닿았을 수 있으므로 그 턴의 종류로 센다) | 이어 가는 턴의 종류로 센다 |
 
 `--kind` 없는 재개 턴은 유료 호출 전에 거부된다. `turn_kind`가 없는(또는 `invocation.json`이 없는) 턴 디렉터리가 있으면 상한 계산이 실패하고(건너뛰지 않음) 그 run의 다음 호출은 막힌다. `limit_gate` 결과(`invocation.json`의 `limits_before_call`)와 `ledger.json`에 `turn_kinds`(`delivered`: 성공 전달 수 `initial`·`feedback`·`answer` / `declared`: 시도별 선언 종류 수)와 `answer_turns`(limit 상태)가 남는다. 실패한 `feedback` 턴은 세지 않고, 그 `recovery`가 성공하면 1회로 센다(종전 "성공 턴만 센다" 규칙 유지).
 
-상한에 닿으면 `censored.json`(상태·그때의 사용량)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)을 기록한다. 산출물은 지우지 않는다. 상한은 **다음 유료 호출을 막는 규칙**이다(2026-11-17 결정): `censored.json`은 지우거나 고치지 않으며, 그 run에는 완료 여부와 관계없이 더 이상 호출이 나가지 않는다. 종료 상태는 진행자가 손으로 옮기지 않고 `scripts/finish_run.py --run-id <id> --verdict PASSED|FAILED|INVALID_INFRA`(평가자 판정)로 `run.json`에 쓴다:
-
-| 평가자 판정 | `censored.json` | `run.json` `status` | 함께 남는 것 |
-|---|---|---|---|
-| `PASSED` | 없음 | `PASSED` | `cap_reached=false` |
-| `PASSED` | `CENSORED_BUDGET`/`CENSORED_TIME`, `first.when="after call"`(마지막 호출 도중 초과) | `PASSED` | `cap_reached=true`, `cap_overshoot`(어느 상한·초과량·그때 사용량) — 결과 표에서 "완료 + 초과"로 구분 |
-| `PASSED` | 그 밖(`before call` 차단, `CENSORED_TURNS`) | 거부(통과 판정 이후에 호출을 시도했다는 뜻이므로 기록 확인) | — |
-| `FAILED` | 있음 | `censored.json`의 `CENSORED_*` | `cap_reached=true` |
-| `FAILED`/`INVALID_INFRA` | 없음 | 판정 그대로 | — | 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
+상한에 닿으면 `censored.json`(상태·그때의 사용량·어느 종류의 호출에서 닿았는지 `call`: `turn` 또는 `user-proxy`)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)과 그 호출의 종류를 기록한다. 산출물은 지우지 않는다. 상한은 **다음 유료 호출을 막는 규칙**이다(2026-11-17 결정): `censored.json`은 지우거나 고치지 않으며, 그 run에는 완료 여부와 관계없이 더 이상 호출이 나가지 않는다. 종료 상태는 아래 "종료와 커밋"의 `finish_run.py`가 판정표(`verdict.json`)와 `censored.json`에서 도출한다(종료 상태 표도 그 절).
 
 ## 실패한 턴의 복구
 
@@ -74,24 +66,98 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 ## 종료와 커밋
 
-run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ①′ 평가 비용 기록(아래 절) → ①″ 평가자 판정 뒤 `finish_run.py`로 종료 상태 기록(위 상한 절의 표) → ② `launch.py normalize --run-id <id>` → ③ `scripts/capture_turn.py`로 남은 턴 기록(`ledger.json`이 기록에 복사된다) → ④ `launch.py discard --run-id <id>` → ⑤ `commit_run.py`. ④는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
+순서(고정, 요구사항 명세 §10.1):
+
+```
+마지막 턴 종료(또는 상한 차단)
+  → ① 판정 실행: 진행자가 판정기·어댑터를 실행하고 산출물과 시나리오별 관측 메모를 기록 폴더에 저장(통과 여부는 정하지 않는다)
+  → ② 판정표: 메인 세션이 산출물을 직접 읽고 기록 폴더에 verdict.json을 쓴다
+  → ③ 종료 기록: finish_run.py --run-id <id>
+  → ④ launch.py normalize → ⑤ capture_turn.py(남은 턴) → ⑥ launch.py discard → ⑦ commit_run.py(본 실험만)
+```
+
+기록 폴더는 manifest가 정한다: 본 실험은 `docs/experiments/<arm>/core<N>/`, 파일럿(`init --pilot`)은 `docs/pilots/<run id>/`. `capture_turn.py`·`finish_run.py`는 그 폴더의 `run.json`의 `run_id`가 실행 run id와 다르면 거부한다.
+
+### 판정표 `verdict.json` (메인이 쓴다)
+
+기록 폴더에 둔다. 형식(예시: `docs/results/verdict.example.json` — 예시 표시 `_example`가 있으면 거부된다):
+
+```json
+{
+  "run_id": "claude-arm1-core01",
+  "judged_by": "판정한 메인 세션 표시(필수, 비어 있으면 거부)",
+  "judged_at": "2026-11-18T00:00:00+00:00",
+  "criteria": {
+    "C01": {"result": "PASS", "evidence": ["acceptance-http.json", "acceptance-audit.json"], "note": "판정 근거 요지"},
+    "...": "C01~C20 정확히 20개",
+    "C20": {"result": "NOT_RUN", "evidence": ["load-check.json"], "note": "..."}
+  }
+}
+```
+
+- `result`는 `PASS`·`FAIL`·`PARTIAL`·`NOT_RUN` 중 하나. 20개가 모두 `PASS`일 때만 통과다(`PARTIAL`·`NOT_RUN`은 통과가 아니다 — `evaluation/README.md` 결과 해석).
+- `evidence`는 기록 폴더 기준 상대 경로 목록(폴더 밖·절대 경로는 거부). 종료 기록은 파일마다 존재 여부와 sha256을 `run.json`의 `verdict.evidence`에 남기고, 없는 파일은 `evidence_missing`, 근거가 빈 기준은 `criteria_without_evidence`에 남는다.
+- 기계가 확인하는 것은 형식·근거 파일의 존재와 해시·`judged_by`까지다. 판정 내용이 맞는지는 확인하지 못한다.
+
+### 종료 기록 `finish_run.py`
+
+```bash
+python3 payment-settlement/claude/scripts/finish_run.py --run-id <id>                         # 판정표에서 도출
+python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --invalid-infra "<사유>" --evidence <기록 폴더 기준 파일> [--evidence ...]
+python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersede --reason "<정정 사유>"
+```
+
+- PASSED·FAILED는 인자로 받지 않는다. `INVALID_INFRA`만 인자다: 구현과 무관한 실행 환경의 실패(Docker·호스트·판정 도구 자체의 고장)일 때만, 사유와 근거 파일(1개 이상, 기록 폴더 안)과 함께, 진행자가 제안하고 메인이 확인한 뒤에 쓴다. 판정 실행이 구현 때문에 실패한 것은 `FAIL`이다. 판정표가 20개 모두 `PASS`이면 `INVALID_INFRA`는 거부된다.
+- 대상은 턴이 한 번 이상 나간 run이다. 기록 상태가 `NOT_STARTED`·`SETUP_FAILED`이거나 턴 기록이 없으면 거부한다(아래 "사이클 준비 실패 복구").
+- run당 한 번이다. 이미 종료 상태(또는 `finished_at`)가 있으면 거부하고, 정정은 `--supersede --reason`으로만 한다. 이전 `run.json`은 `run.superseded-<시각>.json`으로 옆에 남고 새 기록의 `supersedes`가 그 파일·해시·사유를 가리킨다. 파일럿 재판정도 같은 방법이다.
+- 상한에 호출 전 차단으로 끝난 run은 새 턴 없이 그 시점까지의 기록으로 판정·종료 기록·커밋한다.
+
+종료 상태(실제 분기 — `finish_run.terminal`):
+
+| 판정표 | `censored.json` | `run.json` `status` | 함께 남는 것 |
+|---|---|---|---|
+| 20개 모두 `PASS` | 없음 | `PASSED` | `cap_reached=false` |
+| 20개 모두 `PASS` | `CENSORED_BUDGET`/`CENSORED_TIME`, `first.when="after call"`, `first.call="turn"`(마지막 **턴** 도중 초과) | `PASSED` | `cap_reached=true`, `cap_overshoot`(상한·초과량·그때 사용량·`call`) — 결과 표에서 "완료 + 초과" |
+| 20개 모두 `PASS` | 그 밖(`call="user-proxy"`, `call` 칸 없음, `before call` 차단, `CENSORED_TURNS`) | **거부**(기록 확인 후 메인 보고) | — |
+| 하나라도 `PASS`가 아님 | 있음 | `censored.json`의 `CENSORED_*` | `cap_reached=true` |
+| 하나라도 `PASS`가 아님 | 없음 | `FAILED` | — |
+| (인자 `--invalid-infra`) | 무관 | `INVALID_INFRA` | `invalid_infra`(사유·근거 해시), `all_acceptance_passed=false` |
+| `verdict.json` 없음(그리고 `--invalid-infra` 없음) | 무관 | **거부** | — |
+
+`commit_run.py`가 `PASSED`에 요구하는 네 칸은 종료 기록이 아래 원천에서만 쓴다(원천이 없거나 거짓이면 false — `run.json`에 미리 들어 있던 값은 덮어쓴다, 도출 내역은 `evidence_derivation`):
+
+| 칸 | 원천 |
+|---|---|
+| `all_acceptance_passed` | 판정표 20개 모두 `PASS` + 모든 기준에 근거 파일이 있고 전부 존재 |
+| `usage_complete` | 실행 폴더(`.runs/<id>`)에서 종료 기록 시점에 계산한 run 장부의 `usage_complete` |
+| `all_role_models_verified` | manifest의 역할별 관측 모델 + 요청 이벤트(대리 사용자 포함)를 합의 모델과 대조 — 동결과 같은 함수 `freeze_readiness.run_role_check`. 있어야 할 역할(1·2번 `implementer`, 3번 `pm`·`worker`·`reviewer`)이 관측되지 않으면 false. explorer의 Sonnet 예외는 요청 단위 |
+| `isolation_verified` | 그 run의 init self-test와 3번의 호출 전 self-test가 모두 통과 + 그 run의 도구 목록이 동결 파일(manifest가 가리키는 `readiness.json`의 `evidence.smoke_runs`)의 그 조건 도구 목록과 같음 — `freeze_readiness.run_isolation_check`. 세 조건 간 비교는 동결 때 한 번 |
+
+통과했는데 네 칸 중 하나라도 false면 상태는 `PASSED`로 쓰이고 `commit_run.py`가 커밋을 막는다. 우회 경로는 없다: 진행자는 거기서 멈추고 원인을 `issues.md`에 적어 메인에 보고하며, 메인이 사용자에게 보고한다(다음 사이클은 시작하지 않는다). 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
+
+파일럿은 `commit_run.py` 대상이 아니다(본 실험 30건 전용). 파일럿 기록(`docs/pilots/<run id>/`)은 일반 docs 커밋으로 남긴다. 파일럿의 판정표·종료 기록은 보고 ②의 자료이고, 동결의 `pilot_passed`는 지금처럼 실행 폴더(`.runs`)에서 도출한다(`freeze_readiness.py --pilot-run`).
+
+⑥ `discard`는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
 
 `scripts/commit_run.py --arm N --core M`(Codex 판의 바이트 복사본 — Codex 쪽이 바뀌면 `verify_setup.py` 패리티가 깨지므로 그때 다시 복사한다)이 상태·문서(`summary.md`·`transcript.md`·`events.jsonl`·`usage-summary.json`·**`issues.md`** — 그 시행에서 발생한 문제와 해결)·이전 시행 커밋 여부를 확인한 뒤 해당 core와 기록만 커밋한다. 원격 push는 하지 않는다. 실험 종료 후 `launch.py discard --run-id <id>`가 run별 Docker volume의 파일 목록(내용 아님)을 `discard-<시각>.json`에 기록한 뒤 volume을 제거한다. `credentials_file_in_volume`이 `null`이면 조회 실패이므로 "없음"으로 읽지 않는다.
 
 ## 평가 비용 기록 (진행자·판정 어댑터)
 
-진행자(실험 진행 에이전트)와 판정 어댑터의 토큰은 **평가 비용**이다. run의 2,000만 상한에도, 조건의 비용 합계에도 넣지 않고 장부(`ledger.json`)의 `evaluation_cost` 블록에 역할별로 따로 남는다. 기록이 없는 역할은 `"not recorded"`로 보이며 0으로 읽지 않는다.
+진행자(실험 진행 에이전트)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 2,000만 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
+
+기록 주체는 **메인**이다(진행자 에이전트 완료 알림의 usage). 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 덧붙이기만 하며(같은 역할·세션은 두 번 기록되지 않는다, 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다), 맡은 run id를 전부 적는다.
 
 ```bash
-# 판정 어댑터: 그 시행을 위해 어댑터를 LLM으로 작성·수정했을 때, 작성 직후
-python3 payment-settlement/claude/scripts/record_evaluation_cost.py --run-id <id> --role judging-adapter --model <보고된 모델 id> \
-  --total-tokens <합> --source "<숫자의 출처: 예 작성 에이전트 완료 알림 usage>"
-# 진행자: run 종료 순서 ①′에서, 그 run을 맡은 진행자 세션의 사용량으로
-python3 payment-settlement/claude/scripts/record_evaluation_cost.py --run-id <id> --role conductor --model <보고된 모델 id> \
-  --input-tokens N --cache-creation-input-tokens N --cache-read-input-tokens N --output-tokens N --source "<출처>"
+# 진행자 세션 1개(맡은 run을 모두 --run-id로). 진행자가 어댑터를 직접 썼으면 --includes-judging-adapter, 어댑터 줄은 따로 쓰지 않는다
+python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role conductor --session <세션 식별자> --model <보고된 모델 id> \
+  --input-tokens N --cache-creation-input-tokens N --cache-read-input-tokens N --output-tokens N \
+  --source "<숫자의 출처: 예 진행자 완료 알림 usage>" --run-id claude-arm1-core01 --run-id claude-arm2-core01 [--includes-judging-adapter]
+# 진행자가 아닌 에이전트가 어댑터를 작성한 1건
+python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judging-adapter --session <식별자> --model <id> \
+  --total-tokens <합> --source "<출처>" --run-id <id>
 ```
 
-원천이 네 카운터를 주면 넷 다(`usage`), 합계만 주면 `--total-tokens`만 넣는다(분할은 미관측으로 남는다). 한 진행자 세션이 여러 run을 맡아 run별로 나눌 수 없으면 `--source`에 그 세션이 맡은 run id를 함께 적는다. 기록은 `.runs/<id>/evaluation/NNNN/record.json`에 쌓이고 덮어쓰지 않는다. 판정 어댑터를 LLM 없이 썼으면 그 사실을 `issues.md`에 적는다(기록하지 않으면 `not recorded`로 남는다).
+줄의 칸: `role`·`session`·`model`·`usage`(네 카운터, 합계만 있으면 null)·`total_tokens`·`tokens_source`·`run_ids`·`cost_usd`(선택, 0 이상의 유한수)·`includes_judging_adapter`·`recorded_at`. 누락 점검은 결과 정리(task 10)에서 한다: 본 실험 30건과 파일럿의 모든 run id가 어느 한 줄의 `run_ids`에 들어 있어야 하고, 빠진 run은 표에 "평가 비용 미기록"으로 드러난다.
 
 ## 사이클 준비 실패 복구
 
@@ -125,5 +191,5 @@ python3 payment-settlement/claude/scripts/record_evaluation_cost.py --run-id <id
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
 - [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴) → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3>`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 증거 파일에서만 도출)
 - [ ] 파일럿 개시 전: `preflight.py --stage pilot <ledger+readiness>` 전 항목 true (`pilot_passed`만 면제, 가짜 true 금지 — 프로토콜·상한 포함)
-- [ ] 파일럿 init: `python3 payment-settlement/claude/runner/launch.py init --run-id claude-pilot-arm3 --arm 3 --core 1 --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json` — readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`로 확인한다
+- [ ] 파일럿 init: `python3 payment-settlement/claude/runner/launch.py init --pilot --run-id claude-pilot-01 --arm 3 --core 1 --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json` — 파일럿 run id는 `claude-pilot-NN`(그 밖의 id에 `--pilot`, 또는 `--pilot` 없이 이 접두는 거부), 기록은 `docs/pilots/<run id>/`. readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`로 확인한다
 - [ ] 파일럿 뒤: `freeze_readiness.py ... --pilot-run <id> --replace`로 `pilot_passed`를 파일럿 산출물에서 도출(파일럿 manifest가 init 때 기록한 `contract_sha256`·`image`가 지금 쓰는 동결값과 같을 때만 통과). `--replace`는 플래그만 다시 도출한다 — 동결 입력(`frozen-inputs.json`)이나 이미지 id가 바뀌었으면 거부된다(프로토콜 버전 변경·전 조건 재실행 대상) → 사이클 개시 게이트(`start_cycle.py`, 항상 `--stage cycle` 기준)
