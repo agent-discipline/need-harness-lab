@@ -379,33 +379,50 @@ def supersede_plan(output, reason, now, frozen):
 
 
 def write_freeze(output, readiness, frozen, moves):
-    """Write the new readiness.json and frozen-inputs.json atomically: both are written under temporary names first,
-    then the files being replaced are archived (moves), then the new files take their place. If anything fails after an
-    archive rename, the archived files are put back, so the default location never ends up without a freeze."""
+    """Write the new readiness.json and frozen-inputs.json atomically as a pair: both are written under temporary names
+    first, every file that exists now is kept under a hard-linked backup name, then the files being replaced are
+    archived (moves) and the new files take their place. If any step fails, both files return to their previous state
+    (restored from the backups, or removed when they did not exist), the archives made in this call are removed (the
+    backups held the same files), and no temporary file is left: never a mix of the old and the new freeze."""
     listing = output.with_name('frozen-inputs.json')
-    staged = []
+    finals = (output, listing)
+    staged, backups, archived = [], {}, []
     try:
         for path, text in ((output, json.dumps(readiness, indent=2, ensure_ascii=False) + '\n'),
                            (listing, json.dumps(frozen, indent=2) + '\n')):
             tmp = path.with_name('.%s.tmp-%d' % (path.name, os.getpid()))
             tmp.write_text(text)
             staged.append((tmp, path))
-        done = []
+        for path in finals:
+            if path.exists():
+                backup = path.with_name('.%s.bak-%d' % (path.name, os.getpid()))
+                os.link(path, backup)
+                backups[path] = backup
         try:
             for path, target in moves:
                 path.rename(target)
-                done.append((path, target))
+                archived.append(target)
             for tmp, path in staged:
                 tmp.replace(path)
-        except OSError:
-            for path, target in reversed(done):
-                if not path.exists():
-                    target.rename(path)
+        except BaseException:
+            for path in finals:
+                if path in backups:                       # restored with link/unlink only: the rollback never needs
+                    backup = backups.pop(path)            # the rename/replace that may be what just failed
+                    if not (path.exists() and os.path.samefile(path, backup)):
+                        if path.exists():
+                            path.unlink()
+                        os.link(backup, path)
+                    backup.unlink()
+                elif path.exists():
+                    path.unlink()
+            for target in archived:
+                if target.exists():
+                    target.unlink()
             raise
     finally:
-        for tmp, _ in staged:
-            if tmp.exists():
-                tmp.unlink()
+        for leftover in [tmp for tmp, _ in staged] + list(backups.values()):
+            if leftover.exists():
+                leftover.unlink()
 
 
 def attested(path):

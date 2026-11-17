@@ -496,6 +496,43 @@ class FreezeReplaceTest(unittest.TestCase):
             self.assertEqual(list(Path(tmp).glob('*superseded*')) + list(Path(tmp).glob('.*.tmp-*')), [])
             self.assertIs(Path.replace, real_replace)
 
+    def test_write_freeze_rolls_back_both_files_at_every_step(self):
+        real_rename, real_replace = Path.rename, Path.replace
+        for fail_at in range(1, 5):                     # archive readiness, archive listing, new readiness, new listing
+            for first_freeze in (False, True):
+                with self.subTest(fail_at=fail_at, first_freeze=first_freeze), tempfile.TemporaryDirectory() as tmp:
+                    out = Path(tmp) / 'readiness.json'
+                    listing = Path(tmp) / 'frozen-inputs.json'
+                    moves = []
+                    if not first_freeze:
+                        out.write_text('old readiness')
+                        listing.write_text('old listing')
+                        moves = [(out, Path(tmp) / 'readiness.superseded-x.json'), (listing, Path(tmp) / 'frozen-inputs.superseded-x.json')]
+                    steps = []
+                    def counted(real):
+                        def step(path, target):
+                            steps.append(path)
+                            if len(steps) == fail_at:
+                                raise OSError('injected failure at step %d' % fail_at)
+                            return real(path, target)
+                        return step
+                    with patch.object(Path, 'rename', counted(real_rename)), patch.object(Path, 'replace', counted(real_replace)):
+                        try:
+                            freeze_readiness.write_freeze(out, {'new': 1}, {'new': 2}, moves)
+                            failed = False
+                        except OSError:
+                            failed = True
+                    names = sorted(p.name for p in Path(tmp).iterdir())
+                    if failed:
+                        expected = [] if first_freeze else ['frozen-inputs.json', 'readiness.json']
+                        self.assertEqual(names, expected)            # no archive, temp or backup left, no mix
+                        if not first_freeze:
+                            self.assertEqual((out.read_text(), listing.read_text()), ('old readiness', 'old listing'))
+                    else:                                            # fewer steps than fail_at: the write completed
+                        self.assertEqual(json.loads(out.read_text()), {'new': 1})
+                        self.assertEqual(json.loads(listing.read_text()), {'new': 2})
+            self.assertIs(Path.rename, real_rename)
+
     def test_replace_blockers(self):
         found = dict(self.FOUND)
         previous = {'contract_sha256': 'a', 'image_digests': dict(found, runner='sha256:frozen')}
