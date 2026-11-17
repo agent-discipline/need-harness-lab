@@ -1,0 +1,1 @@
+This is an execution infrastructure smoke test, not a payment implementation task. Do not use tools or modify files. Reply with exactly RUNNER_OK.

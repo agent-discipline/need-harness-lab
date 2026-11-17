@@ -1,0 +1,208 @@
+{
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "07a08142-56e7-452e-b157-6a0491c203c8",
+    "total_cost_usd": 0.37135524999999997,
+    "usage": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 17446,
+      "cache_read_input_tokens": 36981,
+      "output_tokens": 257,
+      "output_tokens_details": {
+        "thinking_tokens": 80
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 17446,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 32,
+          "output_tokens": 59,
+          "cache_read_input_tokens": 26863,
+          "cache_creation_input_tokens": 701,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 701
+          },
+          "type": "message",
+          "model": null
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-fable-5-1": {
+        "inputTokens": 34,
+        "outputTokens": 257,
+        "cacheReadInputTokens": 36981,
+        "cacheCreationInputTokens": 17446,
+        "webSearchRequests": 0,
+        "costUSD": 0.37135524999999997,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 80,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "num_turns": 2,
+    "duration_ms": 5650,
+    "duration_api_ms": 5103
+  },
+  "assistant_messages": 4,
+  "stream_models": [
+    "claude-fable-5-1"
+  ],
+  "result_count": 1,
+  "unparsed_lines": 0,
+  "exit_code": 0,
+  "finished_at": "2026-09-23T13:02:07.347694+00:00",
+  "session_id": "07a08142-56e7-452e-b157-6a0491c203c8",
+  "session_id_confirmed": true,
+  "request_ids": [
+    "req_011CfLR3a68BNDbv38p9gXxK",
+    "req_011CfLR3rjz5HjCsoK8UNtRw"
+  ],
+  "event_count": 2,
+  "incomplete": [],
+  "transcript_stats": {
+    "files": 1,
+    "unparsable_lines": 0,
+    "assistant_lines": 4,
+    "assistant_without_requestId": 0,
+    "session_ids": [
+      "07a08142-56e7-452e-b157-6a0491c203c8"
+    ]
+  },
+  "usage_complete": true,
+  "usage_cross_check": {
+    "reported": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 17446,
+      "cache_read_input_tokens": 36981,
+      "output_tokens": 257,
+      "output_tokens_details": {
+        "thinking_tokens": 80
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 17446,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 32,
+          "output_tokens": 59,
+          "cache_read_input_tokens": 26863,
+          "cache_creation_input_tokens": 701,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 701
+          },
+          "type": "message",
+          "model": null
+        }
+      ],
+      "speed": "standard"
+    },
+    "main_sum": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 17446,
+      "cache_read_input_tokens": 36981,
+      "output_tokens": 257
+    },
+    "all_sum": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 17446,
+      "cache_read_input_tokens": 36981,
+      "output_tokens": 257
+    },
+    "main_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "all_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "note": "observation only until the smoke fixes whether result.usage includes sidechains"
+  },
+  "role_files": {
+    "pm": "events.role-pm.jsonl"
+  },
+  "transcript_models": [
+    "claude-fable-5-1"
+  ],
+  "roles": [
+    "pm"
+  ],
+  "config_volume": {
+    "rc": 0,
+    "entries": [
+      "d .",
+      "d ./backups",
+      "d ./hooks",
+      "d ./hooks/tests",
+      "d ./hooks/tests/cases",
+      "d ./playbooks",
+      "d ./projects",
+      "d ./session-env",
+      "d ./session-env/07a08142-56e7-452e-b157-6a0491c203c8",
+      "d ./sessions",
+      "d ./templates",
+      "f ./.claude.json",
+      "f ./.last-cleanup",
+      "f ./CLAUDE.md",
+      "f ./backups/.claude.json.backup.1790168519800",
+      "f ./core.md",
+      "f ./hooks/capture-prompt.sh",
+      "f ./hooks/codex-scan.sh",
+      "f ./hooks/deploy.sh",
+      "f ./hooks/detect-layer.sh",
+      "f ./hooks/gate-guard.sh",
+      "f ./hooks/git-guard.sh",
+      "f ./hooks/reinject-mode.sh",
+      "f ./hooks/session-mode-guard.sh",
+      "f ./hooks/set-state.sh",
+      "f ./hooks/state-lib.sh",
+      "f ./hooks/task-mode-guard.sh",
+      "f ./hooks/tests/baseline.manifest",
+      "f ./hooks/tests/lib.sh",
+      "f ./hooks/tests/run.sh",
+      "f ./hooks/tests/tests.lock",
+      "f ./playbooks/design-taste.md",
+      "f ./playbooks/implementation-lazymode.md",
+      "f ./playbooks/open-source.md",
+      "f ./playbooks/refactoring.md",
+      "f ./playbooks/review.md",
+      "f ./policy-limits.json",
+      "f ./policy-limits.json.stamp.json",
+      "f ./remote-settings.json",
+      "f ./settings.json",
+      "f ./templates/log.md",
+      "f ./templates/measurement-log.md",
+      "f ./templates/requirement-spec.md"
+    ],
+    "credentials_file_in_volume": false
+  },
+  "actual_model": null,
+  "actual_model_note": "transcript models/modelUsage are client-observed; requested model is not proof."
+}

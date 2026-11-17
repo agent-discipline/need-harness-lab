@@ -1,0 +1,2 @@
+[codex-wrapper] --ephemeral removed for usage observability (experiment D2)
+2026-09-23T13:02:59.379569Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit

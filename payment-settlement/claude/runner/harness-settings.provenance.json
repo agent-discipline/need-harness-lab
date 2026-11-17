@@ -1,0 +1,17 @@
+{
+  "source": "~/.claude/settings.json (live deployment of claude-code-harness 1754f16)",
+  "source_sha256": "82d705ef6c3afec0837546b0e600fe3cda1653d85e907e4e897e781b74c426a1",
+  "extracted_at": "2026-09-23T06:14:24.395608+00:00",
+  "kept": "hooks section only",
+  "removed_top_level_keys": [
+    "cleanupPeriodDays",
+    "permissions",
+    "model",
+    "statusLine",
+    "enabledPlugins",
+    "tui",
+    "skipWorkflowUsageWarning"
+  ],
+  "removed_hook_commands": "10 orca agent-hook entries (host-only observability, not part of the harness)",
+  "note": "harness-source/settings.json (repo root copy) references hooks that do not exist (scope-guard, template-guard); the live wiring is the reference. Container model pin is set per arm by the runner, not by settings (live pin claude-fable-5-1[1m] is NOT carried: context_variant=default)."
+}

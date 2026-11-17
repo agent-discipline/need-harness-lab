@@ -1,0 +1,68 @@
+# Claude 판 구동과 시행 절차
+
+명령은 저장소 루트 기준이다. 공유 fixture(`../../infra`, `../../evaluation`)와 계약(`../../docs`)은 Codex 판과 같다.
+
+## 준비
+
+```bash
+python3 payment-settlement/claude/scripts/prepare.py
+python3 payment-settlement/claude/scripts/verify_setup.py
+docker build -t payment-claude-runner:2.1.280 payment-settlement/claude/runner
+```
+
+인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 3번은 codex 리뷰를 위해 `~/.codex/auth.json`(0600, uid 1000)을 읽기 전용으로 추가 마운트한다.
+
+## 시행 (한 번에 하나, schedule.json 순서)
+
+```bash
+L=payment-settlement/claude/runner/launch.py
+# 1·2번
+python3 $L init --run-id claude-arm1-core01 --arm 1 --core 1
+# 3번: 하네스 시딩 + 훅 self-test
+python3 $L init --run-id claude-arm3-core01 --arm 3 --core 1 --harness payment-settlement/claude/harness-source
+# 통합 테스트가 필요한 시행은 자기 Compose project의 네트워크를 준다: --network payment-c1a1_default
+
+python3 payment-settlement/claude/scripts/lab.py prompt --arm 1 > /tmp/first-prompt.txt
+python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --dry-run
+python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
+# 평가자가 판정·피드백을 쓴 뒤 같은 세션으로 재개
+python3 $L turn --run-id claude-arm1-core01 --resume --prompt /tmp/next-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
+# 3번은 --codex-auth ~/.codex/auth.json 추가
+python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
+```
+
+`turn`은 Docker 컨테이너를 만들고 `claude -p --output-format stream-json`을 고정 session id로 실행한다(첫 턴 `--session-id`, 이후 `--resume`). `.runs/<run>/turns/NNNN/`에 prompt 원문·invocation·원시 stdout/stderr·마스킹된 inspect·transcript 사본(`projects/`)·`events.jsonl`·`events.role-*.jsonl`·`result.json`을 보존한다. 종료 후 run 디렉터리 전체를 토큰 값으로 스캔해 히트가 있으면 `SECRET-LEAK.txt`를 남기고 실패로 끝낸다(토큰 회전 필요).
+
+시행별 문서화는 Codex 판과 같다: `python3 payment-settlement/recording/record.py --run-dir payment-settlement/claude/docs/experiments/<arm>/core<N> ...`로 프롬프트 전문·응답·분석·증거를 원장에 추가한다. transcript를 직접 편집하지 않는다. `result.json`의 `usage_complete`, `incomplete`, `usage_cross_check`, `config_volume.credentials_file_in_volume`, `hook_selftest_before_call`을 분석에 인용한다.
+
+## 실패한 턴의 복구
+
+`turn`이 유료 호출 이후 예외로 끝나면 `turns/NNNN/`에 원문과 `result.json{status:"failed"}`가 남는다(`cli_status`는 CLI exit code, `status`는 수집·토큰 스캔까지 끝난 뒤의 최종 판정). 다음 `turn`은 새 번호를 받는다. **첫 턴/재개 판정은 config volume에 그 session id의 transcript가 존재하는지로 한다**: 실패한 호출이라도 transcript를 남겼으면 다음 턴은 `--resume`이어야 하고, 남기지 않았으면 `--session-id` 첫 턴이다(실행기가 실측해 반대 지정을 거부한다). 실패 턴에서 완전히 수집된 요청은 `request-ids.txt`에 들어가고, 원장에 들어가기 전에 중단된 요청은 다음 턴에서 다시 집계된다. `normalize`는 모든 턴의 이벤트를 requestId로 병합해(첫 등장 usage, worker 역할은 단조) 중복을 막는다. 디렉터리를 손으로 지우지 않는다.
+
+## 종료와 커밋
+
+`scripts/commit_run.py --arm N --core M`(Codex 판의 바이트 복사본 — Codex 쪽이 바뀌면 `verify_setup.py` 패리티가 깨지므로 그때 다시 복사한다)이 상태·문서(`summary.md`·`transcript.md`·`events.jsonl`·`usage-summary.json`·**`issues.md`** — 그 시행에서 발생한 문제와 해결)·이전 시행 커밋 여부를 확인한 뒤 해당 core와 기록만 커밋한다. 원격 push는 하지 않는다. 실험 종료 후 `launch.py discard --run-id <id>`가 run별 Docker volume의 파일 목록(내용 아님)을 `discard-<시각>.json`에 기록한 뒤 volume을 제거한다. `credentials_file_in_volume`이 `null`이면 조회 실패이므로 "없음"으로 읽지 않는다.
+
+## 알려진 경계
+
+- 네트워크: `--network`를 주지 않으면 기본 bridge라 다른 컨테이너에 IP로 닿을 수 있다. 격리 주장은 파일시스템·세션·상태 범위다(Codex 판과 동일한 정직 경계).
+- headless(`-p`)에서 git-guard의 `permissionDecision: ask`는 승인 UI가 없다. push는 금지 영역이므로 실험 영향은 작지만 관측 결과를 run 문서에 남긴다.
+- codex `--sandbox read-only`는 이 이미지(`cap-drop=ALL`)에서 bubblewrap 네임스페이스를 만들 수 없어 **도구를 쓰는 호출은 실패한다**(2026-09-23 실측: `bwrap: No permissions to create a new namespace`; 도구 없는 응답은 성공). 3번 PM은 프롬프트 각주대로 `--dangerously-bypass-approvals-and-sandbox`를 `user override`로 기록하고 쓴다 — 컨테이너 자체가 경계다. 호스트 codex도 같은 kernel에서 `bwrap: loopback` 오류로 샌드박스 실행이 불가했다.
+- codex `auth.json`은 읽기 전용이라 장시간 run에서 토큰 갱신이 필요하면 리뷰 호출이 실패할 수 있다. 실패는 `usage_complete=false` + "리뷰 2호 미관측"으로 기록하고 성공으로 위장하지 않는다.
+
+## 실험 개시 체크리스트
+
+- [x] 유료 스모크 ①: 1번형 1턴 `RUNNER_OK` — `result.usage` 4개 카운터·`session_id` 일치·`total_cost_usd`·`modelUsage` 확인 (2026-09-23, `docs/results/setup/claude/summary.json`)
+- [x] 유료 스모크 ②: 같은 run `--resume` → `RUNNER_OK_RESUMED`, transcript 파일 1개(fork 없음), request-ids 중복 0
+- [x] 유료 스모크 ③: 3번형에서 SessionStart·PreToolUse 훅 실행 관측, gate-guard가 SPEC=0 Write 차단(`HOOK_BLOCKED`), 파일 미생성
+- [x] 스모크 ④: 컨테이너 안 `codex exec --sandbox read-only`가 read-only auth로 성공, 래퍼가 세션·usage 보존
+- [x] config volume에 `.credentials.json` 없음(`.claude.json`·policy-limits·remote-settings만) — 폐기 절차는 파일 목록 기록 후 `docker volume rm`
+- [x] `context_variant`: CLI가 두 모델 모두 `contextWindow 1000000`을 보고 — `[1m]` 접미 없이 1M 적용, `default` 유지
+- [ ] `result.usage`의 sidechain 포함 여부·`CLAUDE_CODE_SUBAGENT_MODEL`/effort 전파: 서브에이전트가 있는 arm 3 첫 run(파일럿)에서 확정 — 그 전까지 `usage_cross_check`는 관측치
+- [ ] 본 실험 `--max-turns`/`--max-budget-usd` 값 고정(스모크는 3~4턴·1 USD)
+- [ ] **D5 웹 도구**: 1·2번 allow-list에 `WebSearch`/`WebFetch`가 포함되어 있고 Codex arm에는 없다. 끌지(allow-list에서 제거 = 패리티) / 열고 기록할지(arm 3 하네스는 높음 stakes에서 외부 검색 의무) 사용자 결정. 어느 쪽이든 `result.web_requests`와 manifest `observed_tools`로 실사용을 기록한다
+- [ ] arm 3 codex 리뷰 사용량: `codex-sessions/`(rollout JSONL)를 codex adapter로 정규화하는 절차 확정 전까지 해당 턴은 `reviewer_usage_pending=true`·`usage_complete=false`
+- [ ] 본 실험 개시 전 토큰 재발급(최초 토큰은 채팅 경유 노출 — `docs/auth-token.md`)
+- [ ] C01..C20 판정기·DB adapter·장애 주입 완성(Codex 쪽 공유) 후 파일럿 1회
+- [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
+- [ ] preflight 12항목 전부 boolean true (가짜 true 금지)

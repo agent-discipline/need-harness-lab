@@ -1,0 +1,124 @@
+{
+  "run_id": "setup-selftest-v3-arm3",
+  "arm": 3,
+  "core": 1,
+  "provider": "claude-code",
+  "cli_version": "2.1.280",
+  "requested_model": "claude-fable-5-1",
+  "requested_worker_model": "claude-opus-5",
+  "context_variant": "default",
+  "subagents": "opus-high",
+  "actual_model": null,
+  "effort": "high",
+  "session_id": "ded0ced2-e312-4b3b-9f57-e3929679f4f8",
+  "cache_policy": "observed-cache",
+  "strict_zero_cache_supported": false,
+  "image": "payment-claude-runner:2.1.280",
+  "config_volume": "payment-claude-10322679b5c440b1ab31b6ddce6da808",
+  "codex_volume": "payment-claude-codex-9364b0ebc10345ff8f82e28e61317db6",
+  "source": "/home/jun/project/need-haness-lab/payment-settlement/claude/3/core1",
+  "workspace": "/home/jun/project/need-haness-lab/payment-settlement/claude/.runs/setup-selftest-v3-arm3/workspace",
+  "network": null,
+  "workspace_git_init": true,
+  "harness": "/home/jun/project/need-haness-lab/payment-settlement/claude/harness-source",
+  "harness_seed": {
+    "sources": {
+      "core.md": {
+        "core.md": "2212830fcb28e676111f0ae8fdb724b010ac6aee7ae6744d8abcb950ad744c8b"
+      },
+      "hooks": {
+        "capture-prompt.sh": "07b3bcd76dd275e2333e92b197bb08cc0d20590eaa401160317c9584d2c7755b",
+        "codex-scan.sh": "3ce7a6a3333cfd707b6fec059d9117170f2e29f4e927686bb5dddabb5d2101f2",
+        "deploy.sh": "74f41b1670ecebbe6321e95df2c81a535512eb224a6a235d5ace53a93555688a",
+        "detect-layer.sh": "afa5654f39577478833a1cd6303de97b0b0e37b2420564f2ba0dbaaea76567f7",
+        "gate-guard.sh": "e5e1ff1593c88761d21cceeced35266172449f9ee694eb3314713152b2b458d4",
+        "git-guard.sh": "a72bd522edd9c4850a0ef655450d0b6fb34876c6268d8f05897ad70193bc3650",
+        "reinject-mode.sh": "0e0527255bcd017c1da9b4dd75283f2609b60de83a67364ae756dc18e05a3e06",
+        "session-mode-guard.sh": "43a969b2e2169e61b1fbe03aee145b18b9a8a516d581e827fa680fdc49130642",
+        "set-state.sh": "1056fae592738c132efd0061b977b2c3e5bc136986b6e79c6318658665ece1ba",
+        "state-lib.sh": "d69ad2083550f70bc7b10def90ccefad741afc5e19202317d946d6ad8e236fd5",
+        "task-mode-guard.sh": "bd67a1b779f0449d35c5b5f95c85fa30573d840a457c088a995de79918c46464",
+        "tests/baseline.manifest": "a482b885eb9f790650845f61a2873cecbd7da0e1415c68841f39f99c0bc022e1",
+        "tests/cases/codex-scan.sh": "f211184fe40bf182b2453af9fc525cf43388617c551186c7e0bb75509f49e112",
+        "tests/cases/cwd-resolution.sh": "6d3d514c3661abc33f518b78f5e7213d0c1f2b0d8c569c05f0857f2f3c619882",
+        "tests/cases/detect-layer.sh": "dbb769f9ba80c4318fa9b4278328373249d990124dc18f87834a19d34791fe04",
+        "tests/cases/gate-guard.sh": "e7182d053acbe1edb76e96824d0a21fb027c0c63d527598b1862091e866c9042",
+        "tests/cases/git-guard.sh": "b8f9275979d0bddaad36acc8ccc418fb5c97ce48c5520982edb82d6ef167466b",
+        "tests/cases/misc-guards.sh": "b5946a1adafe6e0d323cba97f6aec98867a52c54ceffa0d0c9f70e2a0c4873fd",
+        "tests/cases/sidecar-docsroot.sh": "a300b3e17b2235035e27c1c9f6b0baa59d184dafd67d8951ea7967b4cd0d0939",
+        "tests/cases/state-schema.sh": "90897bfb9e7914f528fb039a2d6a31d2263a7e03faa0498dd8fbb25bbd4c52a3",
+        "tests/lib.sh": "6a778fcb02db6ec70cf1b1d559ac8e28463c93d1339d66be2f85698ac26f6565",
+        "tests/run.sh": "777067bad35fd92d87e997a08a22b9994faff59eb3d99329e7197aca863c4f81",
+        "tests/tests.lock": "072ba38eb753aba7a4dc9c2e8eff50c7e5eb422d9e8d8861c774b1210d0d1502"
+      },
+      "playbooks": {
+        "design-taste.md": "87ae8e5b5b81d67a19ba0f21199ba9c88dddfa1141082bcc0a3fd52425dcce68",
+        "implementation-lazymode.md": "898fa9ff9d056b92bcdcf7285c395fe646c11bc81f0e8ca4c3a69daee71860e0",
+        "open-source.md": "d8e0da8079a4daf91248d51fa8eab94bd8c44c265e1a1a36d6ce42534e082e0b",
+        "refactoring.md": "d86fd8e80f6212c0ef810768b4a9f23b24fa14c6ee57ef2cf8eaddbdc9d44edb",
+        "review.md": "20c0593c7cf90996ad2f165f98749c1f2442edc40075deb0089c27a644f20068"
+      },
+      "templates": {
+        "log.md": "da77d8fcebc1132bdd17f9d55ec737ef72f3df917d8ef2019b18a60ae1f5177c",
+        "measurement-log.md": "9621e0a158e3d69b02c5e43daa321420ee5b81b6ef2e3efaa4e3375cd9a9ca39",
+        "requirement-spec.md": "8b5f7bb3306450623b3cf28672a4f1fcb2386d723587845b1a63281dfcd002d6"
+      }
+    },
+    "runner": {
+      "CLAUDE.md": {
+        "harness-bootstrap-CLAUDE.md": "1e3d226ee1999e9a55a97b86d32a37f24ccfff2f15803c9c16932f8038531961"
+      },
+      "settings.json": {
+        "harness-settings.json": "cdf35bc7b3fa3abd5e47b34e94936d3df05d89cf6a68b9fa0249b64cbbda8feb"
+      }
+    },
+    "listing": "total 48\ndrwxr-xr-x 5 node node  4096 Sep 23 14:15 .\ndrwxr-xr-x 1 node node  4096 Sep 23 14:01 ..\n-rw-r--r-- 1 node node  1684 Sep 23 14:15 CLAUDE.md\n-rw-r--r-- 1 node node 16808 Sep 23 14:15 core.md\ndrwxr-xr-x 3 node node  4096 Sep 23 14:15 hooks\ndrwxr-xr-x 2 node node  4096 Sep 23 14:15 playbooks\n-rw-r--r-- 1 node node  2113 Sep 23 14:15 settings.json\ndrwxr-xr-x 2 node node  4096 Sep 23 14:15 templates\n"
+  },
+  "selftest": {
+    "at": "2026-09-23T14:15:42.536533+00:00",
+    "rc": 0,
+    "stderr_tail": "VERIFIED 34\n",
+    "cli_args_rejected": "0",
+    "cli_exit": "1",
+    "cli_result_lines": "1",
+    "cli_tools": "Task,Bash,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterWorktree,ExitWorktree,ListAgents,NotebookEdit,Read,ReportFindings,ScheduleWakeup,SendMessage,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Workflow,Write",
+    "workspace_git_exit": "0",
+    "settings_sha_match": "1",
+    "hooks_checked": "8",
+    "harness_hash_match": "1",
+    "harness_no_extras": "1",
+    "gate_l1_write_exit": "2",
+    "gate_docs_write_exit": "0",
+    "bash_hooks_benign": "git-guard=0;codex-scan=0;gate-guard=0;",
+    "bash_hooks_teeth_exit": "2",
+    "git_guard_push": "ask",
+    "codex_on_path": "1",
+    "selftest_failed": "0",
+    "passed": true
+  },
+  "created_at": "2026-09-23T14:15:39.750108+00:00",
+  "observed_tools": [
+    "Task",
+    "Bash",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "DesignSync",
+    "Edit",
+    "EnterWorktree",
+    "ExitWorktree",
+    "ListAgents",
+    "NotebookEdit",
+    "Read",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "SendMessage",
+    "Skill",
+    "TaskStop",
+    "ToolSearch",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write"
+  ]
+}

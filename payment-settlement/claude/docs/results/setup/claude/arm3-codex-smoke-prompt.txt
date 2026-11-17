@@ -1,0 +1,1 @@
+This is an execution infrastructure smoke test. Do not use tools or modify files. Reply with exactly CODEX_IN_CONTAINER_OK.

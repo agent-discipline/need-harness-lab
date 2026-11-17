@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"01a0ce5c-abd5-71d2-8ff2-86f10c1adbcb"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"CODEX_IN_CONTAINER_OK"}}
+{"type":"turn.completed","usage":{"input_tokens":14157,"cached_input_tokens":12160,"cache_write_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":0}}
+codex rc=0
+--- last message:
+CODEX_IN_CONTAINER_OK
+--- sessions persisted:
+1

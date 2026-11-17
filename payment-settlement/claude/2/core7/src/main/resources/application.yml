@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: payment-lab
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:15432/payment}
+    username: ${DB_USER:lab}
+    password: ${DB_PASSWORD:lab-local-only}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 1000
+      validation-timeout: 500
+  flyway:
+    # Fixture owns users/agencies. Implementer adds V1+ business migrations.
+    baseline-on-migrate: true
+    baseline-version: 0
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 64
+      min-spare: 8
+    accept-count: 100
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+bank:
+  base-url: ${BANK_BASE_URL:http://localhost:18081}
+  timeout-ms: 1000

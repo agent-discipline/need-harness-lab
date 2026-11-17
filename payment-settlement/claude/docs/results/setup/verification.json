@@ -1,0 +1,45 @@
+{
+  "scope": "SETUP_ONLY",
+  "timestamp_utc": "2026-09-23T14:16:36.640810+00:00",
+  "starter_copies": 30,
+  "all_starters_identical": true,
+  "shared_input_parity": {
+    "template": true,
+    "prompts": true,
+    "harness-source": true,
+    "compose.yaml": true,
+    "scripts/lab.py": true,
+    "scripts/commit_run.py": true,
+    "experiment_ledgers": true,
+    "schedule": true
+  },
+  "prompt_parity": {
+    "1": {
+      "claude_sha256": "850ccf3562e6ca85278a413b2a733512d6ed426e0bd29f93ed766b23cb7070de",
+      "codex_sha256": "850ccf3562e6ca85278a413b2a733512d6ed426e0bd29f93ed766b23cb7070de",
+      "identical": true
+    },
+    "2": {
+      "claude_sha256": "05bd1bcc30fe408e9f58c2d52162c84baa71f750395ebea84359a0a1a2eb0d40",
+      "codex_sha256": "05bd1bcc30fe408e9f58c2d52162c84baa71f750395ebea84359a0a1a2eb0d40",
+      "identical": true
+    },
+    "3": {
+      "claude_sha256": "7d1006752bf1ccccfdf6072f460ef0ab46d82f91d8125ca8a30ace893a20ecc6",
+      "codex_sha256": "756a93d7e491747cbf54a6ab46a4e7218b3bac01e4f1e3555953d96895f8eee4",
+      "identical": false
+    }
+  },
+  "prompt_parity_expected": {
+    "1": true,
+    "2": true,
+    "3": false
+  },
+  "docker_fixture": {
+    "fixture_verified_here": false,
+    "codex_evidence_path": "payment-settlement/codex/docs/results/setup/verification.json",
+    "codex_evidence_sha256": "b6511d78d3dd532cd5897ff936db1bd5187f23719e2feacfe04f81ad6b92f555",
+    "basis": "compose.yaml byte-identical to codex/compose.yaml"
+  },
+  "passed": true
+}

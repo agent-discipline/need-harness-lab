@@ -1,0 +1,1 @@
+This is the second infrastructure smoke turn. Without using tools or modifying files, reply exactly with your previous response followed by _RESUMED.

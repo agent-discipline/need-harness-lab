@@ -1,0 +1,19 @@
+{
+  "run_id": "setup-cli-smoke-arm1",
+  "event_count": 2,
+  "input_tokens": 29796,
+  "output_tokens": 26,
+  "total_tokens": 29822,
+  "cached_input_tokens": 23892,
+  "cache_write_input_tokens": 5900,
+  "reasoning_tokens": null,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "claude-opus-5"
+  ],
+  "actual_models": [
+    "claude-opus-5"
+  ],
+  "actual_model_missing_events": 0
+}

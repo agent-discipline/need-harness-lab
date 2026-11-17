@@ -1,0 +1,213 @@
+{
+  "scope": "SETUP_ONLY",
+  "date": "2026-09-23",
+  "cli_version": "2.1.280",
+  "image": "payment-claude-runner:2.1.280",
+  "auth": "subscription-oauth-token via --env-file",
+  "turns": [
+    {
+      "id": "arm1-turn-1",
+      "model": "claude-opus-5",
+      "subtype": "success",
+      "reply": "RUNNER_OK",
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 5800,
+        "cache_read_input_tokens": 9046,
+        "output_tokens": 10
+      },
+      "total_cost_usd": 0.06278299999999999,
+      "session_id_confirmed": true,
+      "usage_complete": true,
+      "main_delta": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+      },
+      "credentials_file_in_volume": false
+    },
+    {
+      "id": "arm1-turn-2-resume",
+      "model": "claude-opus-5",
+      "subtype": "success",
+      "reply": "RUNNER_OK_RESUMED",
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 100,
+        "cache_read_input_tokens": 14846,
+        "output_tokens": 16
+      },
+      "total_cost_usd": 0.07161599999999999,
+      "session_id_confirmed": true,
+      "transcript_files": 1,
+      "usage_complete": true,
+      "main_delta": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+      }
+    },
+    {
+      "id": "arm3-turn-1-hook-negative",
+      "model": "claude-fable-5-1",
+      "subtype": "success",
+      "reply": "HOOK_BLOCKED: [gate-guard] 요구사항 명세 미합의(SPEC=0) — L1(실행물 변경) 진입 차단.",
+      "probe_file_created": false,
+      "hooks_observed": [
+        "SessionStart hook_started/hook_response",
+        "PreToolUse:Write gate-guard exit 2"
+      ],
+      "usage": {
+        "input_tokens": 34,
+        "cache_creation_input_tokens": 17446,
+        "cache_read_input_tokens": 36981,
+        "output_tokens": 257
+      },
+      "total_cost_usd": 0.37135524999999997,
+      "session_id_confirmed": true,
+      "usage_complete": true,
+      "main_delta": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0
+      },
+      "credentials_file_in_volume": false
+    },
+    {
+      "id": "arm3-codex-smoke",
+      "tool": "codex exec 0.155.1 inside the image, playbook flags (--sandbox read-only --ephemeral -o), wrapper stripped --ephemeral",
+      "reply": "CODEX_IN_CONTAINER_OK",
+      "rc": 0,
+      "usage": {
+        "input_tokens": 14157,
+        "cached_input_tokens": 12160,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9
+      },
+      "sessions_persisted": 1,
+      "note": "models-manager refresh timeout warning (+~14s), same as host measurement in review.md"
+    }
+  ],
+  "context_window_reported": {
+    "claude-opus-5": 1000000,
+    "claude-fable-5-1": 1000000
+  },
+  "claude_total_cost_usd_estimate": 0.5058,
+  "billed_cost": null,
+  "findings": [
+    "A1: token-only auth works; result.usage/modelUsage/total_cost_usd present; resume keeps session and single transcript file",
+    "A2: original hooks run in headless -p and gate-guard blocks L1 writes with SPEC=0",
+    "result.usage equals the sum of transcript requestId usages (delta 0) in all turns; sidechain inclusion still unverified (no subagent in smoke)",
+    "no .credentials.json written to the config volume",
+    "D4: CLI reports contextWindow 1000000 for both models without the [1m] suffix"
+  ],
+  "not_verified": [
+    "subagent model/effort propagation (CLAUDE_CODE_SUBAGENT_MODEL)",
+    "result.usage sidechain inclusion",
+    "InstructionsLoaded/ConfigChange/SubagentStop hook firing",
+    "compaction request accounting",
+    "git-guard ask behavior in headless"
+  ],
+  "files": {
+    "arm1-manifest-post-hardening.json": "719eb4f5f31dd08a76afbe05b61166af14c237b05f377db66486c9d8593722d8",
+    "arm1-manifest.json": "a6d3cf557097f8120a78ceb9ec88c8929d7407cb9ae552fcd0eb5611f015afef",
+    "arm1-turn-1-events.jsonl": "950da1341e835c091902beae4290b735891574bb88426eb7d7ecdfaa8328db8b",
+    "arm1-turn-1-invocation.json": "2056d15202a7881ebae3f479b7bf91558f1051eaa6689339cb20b3709f001106",
+    "arm1-turn-1-raw.jsonl": "79fa3ea1e14aa9f38bb968615bc66924fe37230a87c1fd496b2bd08cc08f19b8",
+    "arm1-turn-1-result.json": "86dbe3e6eda25d00eb527d76ecb0dd9d47bf779f73535265b3664086ae067382",
+    "arm1-turn-2-events.jsonl": "3edab9d7ec43ad8dd3db31ff7a45cc13aebd64c9a6e53608ebb87400c9a86ee5",
+    "arm1-turn-2-invocation.json": "d9bcd8a809964c73eb8ab1759e2658e6a0213d237fe08af6fa2d96a42f68e86f",
+    "arm1-turn-2-raw.jsonl": "bef676880f6f55c0ef04c7eff946ec3284cd92b1bcb5875220f708035ec168d1",
+    "arm1-turn-2-result.json": "6e38d3767452fde1ec5a742b89792a5ce282049df0ada3f08bd1e4d15ed65a12",
+    "arm1-usage-summary.json": "29ec647bc07b99a6c48cfad52748217e6fd1370e20b5bc52b4b11c03a0e2a891",
+    "arm3-codex-smoke-prompt.txt": "25ad9885e524c6e7ea8788fc295e597d0dd8502c9d822ef86747aef090c04f82",
+    "arm3-codex-smoke-stderr.txt": "e927e04587174894947bd7fd7fe15805c101d54d836ad60de09585398fd6c7c6",
+    "arm3-codex-smoke-stdout.txt": "aa0a065fde37040a9bda64850ece733994871d62fdc8abdf77c803ab1d8c5212",
+    "arm3-manifest-post-hardening.json": "a4c26a4c061d6aadab1daa929b95d73006102bbe72202acf80f75d4422780da4",
+    "arm3-manifest.json": "b1246d07ce686e0dfb71720f60a94d45cde1bcf53bf5f83c10d1d39f9510d830",
+    "arm3-turn-1-events.jsonl": "2542f0c0245fffbf6aabe586c86273aec5e1fc83c204203286d494b5115614e2",
+    "arm3-turn-1-invocation.json": "4871a7c386ab514ab866718679081b421193534a8870e2ab9c80545f73b5e676",
+    "arm3-turn-1-raw.jsonl": "45d6eae1b99a34201df08058a2e0b520d4c38270565d875b42a35ccc70662a87",
+    "arm3-turn-1-result.json": "8b7aad930d6eeb2dfe7bbf1287e247f2772d15dec34ba9cf62b772aa8840bf16",
+    "arm3-usage-summary.json": "37b5898058f06608dece1eb34cd6b0068008f381f4c94bd4d1dc5ce888389630",
+    "smoke-1-prompt.txt": "89c554b3b393fa93eb7554f032cfeac219652c5a4a32c969e629c3ab6bcc542f",
+    "smoke-2-resume-prompt.txt": "fde9565b8a0ceabc7ebb53bc6c799ba60a0ce3f9842c26c665bb41da4182db35",
+    "smoke-3-arm3-negative-prompt.txt": "9ff0a94417462728ef5ab39d658e6e3457c0971cce11a24ea29a7fa967d10417"
+  },
+  "note": "invocation.json copies carry the env-file path only; usage summaries and invocations were added to the hash list after review loop 1",
+  "evidence_generations": {
+    "paid_turns_and_manifests_2026-09-23T06Z": "recorded by the PRE-hardening collector (before review loops 1-2): result.json lacks codex_sessions/web_requests/status fields; selftest reports checked 1 hook only. The paid observations (auth, usage fields, resume, hook blocking, codex-in-container) remain valid as observations.",
+    "post_hardening_selftest_manifests": "arm1-manifest-post-hardening.json / arm3-manifest-post-hardening.json: no-cost `init` with the shipped runner after review loops 1-3 (allow-list tool surface, settings SHA, 8 hooks, seeded-file hashes + no-extras check, Bash probes, push→ask). No paid call; paid-turn evidence was not re-run."
+  },
+  "post_hardening_selftest": {
+    "arm1": {
+      "rc": 0,
+      "cli_args_rejected": "0",
+      "cli_exit": "1",
+      "cli_result_lines": "1",
+      "workspace_git_exit": "0",
+      "selftest_failed": "0",
+      "passed": true
+    },
+    "arm3": {
+      "rc": 0,
+      "cli_args_rejected": "0",
+      "cli_exit": "1",
+      "cli_result_lines": "1",
+      "workspace_git_exit": "0",
+      "settings_sha_match": "1",
+      "hooks_checked": "8",
+      "harness_hash_match": "1",
+      "harness_no_extras": "1",
+      "gate_l1_write_exit": "2",
+      "gate_docs_write_exit": "0",
+      "bash_hooks_benign": "git-guard=0;codex-scan=0;gate-guard=0;",
+      "bash_hooks_teeth_exit": "2",
+      "git_guard_push": "ask",
+      "codex_on_path": "1",
+      "selftest_failed": "0",
+      "passed": true
+    }
+  },
+  "post_hardening_observed_tools": {
+    "arm1": [
+      "Bash",
+      "Edit",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "Read",
+      "ToolSearch",
+      "WebFetch",
+      "WebSearch",
+      "Write"
+    ],
+    "arm3": [
+      "Task",
+      "Bash",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "DesignSync",
+      "Edit",
+      "EnterWorktree",
+      "ExitWorktree",
+      "ListAgents",
+      "NotebookEdit",
+      "Read",
+      "ReportFindings",
+      "ScheduleWakeup",
+      "SendMessage",
+      "Skill",
+      "TaskStop",
+      "ToolSearch",
+      "WebFetch",
+      "WebSearch",
+      "Workflow",
+      "Write"
+    ]
+  }
+}

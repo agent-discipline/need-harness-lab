@@ -1,0 +1,173 @@
+{
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "55422eff-feea-4026-a58b-aacac982631b",
+    "total_cost_usd": 0.07161599999999999,
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 100,
+      "cache_read_input_tokens": 14846,
+      "output_tokens": 16,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 100,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 16,
+          "cache_read_input_tokens": 14846,
+          "cache_creation_input_tokens": 100,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 100
+          },
+          "type": "message",
+          "model": null
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-5": {
+        "inputTokens": 4,
+        "outputTokens": 26,
+        "thinkingTokens": 0,
+        "cacheReadInputTokens": 23892,
+        "cacheCreationInputTokens": 5900,
+        "webSearchRequests": 0,
+        "costUSD": 0.07161599999999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "canonicalModel": "claude-opus-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "num_turns": 1,
+    "duration_ms": 1902,
+    "duration_api_ms": 2920
+  },
+  "assistant_messages": 1,
+  "stream_models": [
+    "claude-opus-5"
+  ],
+  "result_count": 1,
+  "unparsed_lines": 0,
+  "exit_code": 0,
+  "finished_at": "2026-09-23T13:02:52.534349+00:00",
+  "session_id": "55422eff-feea-4026-a58b-aacac982631b",
+  "session_id_confirmed": true,
+  "request_ids": [
+    "req_011CfLR7BHXtpUpc9HUUt8ia"
+  ],
+  "event_count": 1,
+  "incomplete": [],
+  "transcript_stats": {
+    "files": 1,
+    "unparsable_lines": 0,
+    "assistant_lines": 2,
+    "assistant_without_requestId": 0,
+    "session_ids": [
+      "55422eff-feea-4026-a58b-aacac982631b"
+    ]
+  },
+  "usage_complete": true,
+  "usage_cross_check": {
+    "reported": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 100,
+      "cache_read_input_tokens": 14846,
+      "output_tokens": 16,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 100,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 16,
+          "cache_read_input_tokens": 14846,
+          "cache_creation_input_tokens": 100,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 100
+          },
+          "type": "message",
+          "model": null
+        }
+      ],
+      "speed": "standard"
+    },
+    "main_sum": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 100,
+      "cache_read_input_tokens": 14846,
+      "output_tokens": 16
+    },
+    "all_sum": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 100,
+      "cache_read_input_tokens": 14846,
+      "output_tokens": 16
+    },
+    "main_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "all_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "note": "observation only until the smoke fixes whether result.usage includes sidechains"
+  },
+  "role_files": {
+    "implementer": "events.role-implementer.jsonl"
+  },
+  "transcript_models": [
+    "claude-opus-5"
+  ],
+  "roles": [
+    "implementer"
+  ],
+  "config_volume": {
+    "rc": 0,
+    "entries": [
+      "d .",
+      "d ./backups",
+      "d ./projects",
+      "d ./sessions",
+      "f ./.claude.json",
+      "f ./backups/.claude.json.backup.1790168513512",
+      "f ./policy-limits.json",
+      "f ./policy-limits.json.stamp.json",
+      "f ./remote-settings.json"
+    ],
+    "credentials_file_in_volume": false
+  },
+  "actual_model": null,
+  "actual_model_note": "transcript models/modelUsage are client-observed; requested model is not proof."
+}

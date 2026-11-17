@@ -1,0 +1,19 @@
+{
+  "run_id": "setup-cli-smoke-arm3",
+  "event_count": 2,
+  "input_tokens": 54461,
+  "output_tokens": 257,
+  "total_tokens": 54718,
+  "cached_input_tokens": 36981,
+  "cache_write_input_tokens": 17446,
+  "reasoning_tokens": null,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "claude-fable-5-1"
+  ],
+  "actual_models": [
+    "claude-fable-5-1"
+  ],
+  "actual_model_missing_events": 0
+}
