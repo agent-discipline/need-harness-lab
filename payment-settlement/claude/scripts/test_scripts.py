@@ -256,6 +256,54 @@ class ContractDriftTest(unittest.TestCase):
             run.assert_not_called()
 
 
+class CyclePartialFailureTest(unittest.TestCase):
+    def run_cycle(self, tmp, fail_on):
+        root = Path(tmp) / 'claude'
+        for arm in (1, 2, 3):
+            write(root / 'docs/experiments' / str(arm) / 'core1/run.json',
+                  dict(status='NOT_STARTED', arm=arm, protocol='payment-settlement-v3-claude'))
+        write(root / 'docs/results/cycles.json', [dict(cycle=c, status='NOT_STARTED') for c in range(1, 11)])
+        readiness = Path(tmp) / 'readiness.json'
+        write(readiness, ready())
+        calls = []
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            text = ' '.join(str(c) for c in cmd)
+            return SimpleNamespace(returncode=1 if fail_on and fail_on(text) else 0)
+        argv = ['start_cycle.py', '--cycle', '1', '--readiness', str(readiness), '--env-file', '/x.env']
+        with patch.object(start_cycle, 'ROOT', root), patch.object(sys, 'argv', argv), \
+             patch.object(start_cycle, 'gate', return_value=[]), patch.object(start_cycle, 'contract_drift', return_value=[]), \
+             patch.object(start_cycle.subprocess, 'run', side_effect=fake_run), patch.object(start_cycle.lab, 'verify'), \
+             patch.object(start_cycle.lab, 'prompt', side_effect=lambda arm: 'p'), contextlib.redirect_stdout(io.StringIO()):
+            code = start_cycle.main()
+        return code, root, calls
+
+    def test_setup_failure_of_one_arm_is_recorded_and_no_turn_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, root, calls = self.run_cycle(tmp, lambda t: 'compose' in t and 'c01-a2' in t)
+            self.assertEqual(code, 1)
+            self.assertFalse(any('turn' in c for c in calls))
+            run2 = json.loads((root / 'docs/experiments/2/core1/run.json').read_text())
+            self.assertEqual(run2['status'], 'SETUP_FAILED')
+            self.assertIn('compose up exited 1', run2['setup_error'])
+            for arm in (1, 3):
+                self.assertEqual(json.loads((root / ('docs/experiments/%d/core1/run.json' % arm)).read_text())['status'], 'NOT_STARTED')
+            cycle = json.loads((root / 'docs/results/cycles.json').read_text())[0]
+            self.assertEqual(cycle['status'], 'SETUP_FAILED')
+            self.assertEqual(list(cycle['setup_failures']), ['claude-arm2-core01'])
+
+    def test_failed_initial_turn_is_kept_per_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, root, calls = self.run_cycle(tmp, lambda t: ' turn ' in t and 'claude-arm3-core01' in t)
+            self.assertEqual(code, 1)
+            run3 = json.loads((root / 'docs/experiments/3/core1/run.json').read_text())
+            self.assertEqual((run3['status'], run3['initial_turn_exit'], run3['initial_turn_failed']), ('RUNNING', 1, True))
+            run1 = json.loads((root / 'docs/experiments/1/core1/run.json').read_text())
+            self.assertEqual(run1['initial_turn_exit'], 0)
+            cycle = json.loads((root / 'docs/results/cycles.json').read_text())[0]
+            self.assertEqual(cycle['initial_turn_exits']['claude-arm3-core01'], 1)
+
+
 class CaptureTurnTest(unittest.TestCase):
     def test_capture_normalizes_runner_events_once_with_roles(self):
         with tempfile.TemporaryDirectory() as tmp:

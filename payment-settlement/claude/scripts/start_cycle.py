@@ -120,27 +120,48 @@ def main():
         print(json.dumps({'cycle': args.cycle, 'runs': [dict(run_id=r, project=pr, ports=po) for r, pr, po in plan],
                           'image': ready['image_digests']['runner']}, indent=2))
         return 0
-    launches = []
+    # Set up all three arms first; a cycle's turns start together or not at all.
+    launches, prepared, failures = [], [], {}
     for arm, (run_id, project, ports) in zip((1, 2, 3), plan):
         records = ROOT / 'docs/experiments' / str(arm) / f'core{args.cycle}'
         prompt = records / 'initial-prompt.txt'
-        prompt.write_text(lab.prompt(arm))
         # models come from launch.MODELS (frozen in readiness.requested_models); the image is the frozen id
         init = [sys.executable, str(runner), 'init', '--run-id', run_id, '--arm', str(arm), '--core', str(args.cycle),
                 '--image', ready['image_digests']['runner'], '--network', project + '_default']
         if arm == 3:
             init += ['--harness', str(ROOT / 'harness-source')]
-        subprocess.run(init, check=True, cwd=REPO)
         env = dict(os.environ, ARM=f'.runs/{run_id}', CORE='workspace', **ports)
         compose = ['docker', 'compose', '-p', project, '-f', str(ROOT / 'compose.yaml')]
-        subprocess.run(compose + ['up', '-d', '--wait', 'db', 'bank'], env=env, check=True, cwd=REPO)
+        try:
+            prompt.write_text(lab.prompt(arm))
+            for step, command, extra in (('init', init, {}), ('compose up', compose + ['up', '-d', '--wait', 'db', 'bank'], {'env': env})):
+                done = subprocess.run(command, cwd=REPO, **extra)
+                if done.returncode:
+                    raise RuntimeError('%s exited %s' % (step, done.returncode))
+        except (OSError, RuntimeError) as exc:
+            failures[run_id] = str(exc)[:500]
+            run = json.loads((records / 'run.json').read_text())
+            run.update(status='SETUP_FAILED', setup_error=failures[run_id], project=project, ports=ports,
+                       setup_failed_at=datetime.now(timezone.utc).isoformat())
+            save(records / 'run.json', run)
+            continue
+        prepared.append((arm, run_id, project, ports, records, prompt))
+    now = datetime.now(timezone.utc).isoformat()
+    if failures:
+        current.update(status='SETUP_FAILED', setup_failures=failures, setup_failed_at=now,
+                       prepared_runs=[r for _, r, *_ in prepared])
+        save(cycles_path, cycles)
+        print(json.dumps({'cycle': args.cycle, 'setup_failed': failures, 'turns_started': 0,
+                          'recovery': 'payment-settlement/claude/docs/runbook.md: 사이클 준비 실패 복구'}, ensure_ascii=False))
+        return 1
+    for arm, run_id, project, ports, records, prompt in prepared:
         run = json.loads((records / 'run.json').read_text())
         run.update({k: ready[k] for k in ready if k not in ('status', 'run_id', 'arm', 'core', 'evidence', 'actual_models')})
-        run.update(status='RUNNING', started_at=datetime.now(timezone.utc).isoformat(), project=project, ports=ports,
+        run.update(status='RUNNING', started_at=now, project=project, ports=ports,
                    actual_model=(ready.get('actual_models') or {}).get(str(arm)))
         save(records / 'run.json', run)
         launches.append((run_id, records, prompt))
-    current.update(status='RUNNING', started_at=datetime.now(timezone.utc).isoformat())
+    current.update(status='RUNNING', started_at=now)
     save(cycles_path, cycles)
 
     def launch(item):
@@ -154,8 +175,13 @@ def main():
         return code
     with ThreadPoolExecutor(max_workers=3) as pool:
         codes = list(pool.map(launch, launches))
+    # Each run keeps its own exit; a failed first turn stays RUNNING and is recovered per the runbook (same session).
+    for (run_id, records, _), code in zip(launches, codes):
+        run = json.loads((records / 'run.json').read_text())
+        run.update(initial_turn_exit=code, initial_turn_failed=bool(code))
+        save(records / 'run.json', run)
     # Implementation completion is NOT experiment completion; validation follows.
-    current['initial_turns_finished'] = True
+    current.update(initial_turns_finished=True, initial_turn_exits={r: c for (r, _, _), c in zip(launches, codes)})
     save(cycles_path, cycles)
     return int(any(codes))
 
