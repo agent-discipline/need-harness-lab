@@ -132,10 +132,13 @@ class FreezeTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         freeze_readiness.attested(attest)
 
-    def pilot(self, runs, roles=('pm', 'worker', 'reviewer'), models=None, last='ok', pending=False, censored=False, arm=3):
+    CONTRACT, IMAGE = 'c' * 64, 'sha256:frozen'
+
+    def pilot(self, runs, roles=('pm', 'worker', 'reviewer'), models=None, last='ok', pending=False, censored=False, arm=3,
+              contract=CONTRACT, image=IMAGE):
         run = runs / 'pilot'
         models = models or {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5'], 'reviewer': ['claude-fable-5-2']}
-        write(run / 'manifest.json', dict(arm=arm, actual_role_models=models))
+        write(run / 'manifest.json', dict(arm=arm, actual_role_models=models, contract_sha256=contract, image=image))
         for n, status in ((1, 'ok'), (2, last)):
             t = run / 'turns' / ('%04d' % n)
             write(t / 'result.json', dict(status=status, usage_complete=status == 'ok', reviewer_usage_pending=pending,
@@ -154,10 +157,13 @@ class FreezeTest(unittest.TestCase):
                  'censored': ({'censored': True}, False), 'not arm 3': ({'arm': 1}, False),
                  'worker on another model': ({'models': {'pm': ['claude-fable-5-2'], 'worker': ['claude-sonnet-5'],
                                                          'reviewer': ['claude-fable-5-2']}}, False),
-                 'reviewer model unobserved': ({'models': {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5']}}, False)}
+                 'reviewer model unobserved': ({'models': {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5']}}, False),
+                 'ran under another contract': ({'contract': 'd' * 64}, False),
+                 'ran before any freeze': ({'contract': None}, False),
+                 'ran on another image': ({'image': 'payment-claude-runner:2.1.326'}, False)}
         for name, (kw, expected) in cases.items():
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
-                passed, detail = freeze_readiness.pilot_evidence(Path(tmp), self.pilot(Path(tmp), **kw))
+                passed, detail = freeze_readiness.pilot_evidence(Path(tmp), self.pilot(Path(tmp), **kw), self.CONTRACT, self.IMAGE)
                 self.assertIs(passed, expected, detail['checks'])
 
     def test_arm3_workers_explorer_on_sonnet_others_on_opus(self):
@@ -179,18 +185,18 @@ class FreezeTest(unittest.TestCase):
             manifest = json.loads((run / 'manifest.json').read_text())
             manifest['actual_role_models']['worker'] = ['claude-opus-5-5', 'claude-sonnet-5']
             write(run / 'manifest.json', manifest)
-            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot')
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)
             self.assertTrue(passed, detail)
             (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='ex', model='claude-sonnet-5', role='worker',
                                                            agent_type=None, turn='0003', usage=USAGE)) + '\n')
-            self.assertFalse(freeze_readiness.pilot_evidence(Path(tmp), 'pilot')[0])
+            self.assertFalse(freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)[0])
             (t / 'events.jsonl').write_text('')
             consult = run / 'consults/0001'
             consult.mkdir(parents=True)
             write(consult / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0})
             (consult / 'events.jsonl').write_text(json.dumps(dict(type='message', id='px', model='claude-fable-5-2',
                                                                  role='user-proxy', turn='p', usage=USAGE)) + '\n')
-            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot')
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)
             self.assertFalse(passed)
             self.assertFalse(detail['role_model_check']['user-proxy'])
 
@@ -202,6 +208,62 @@ class FreezeTest(unittest.TestCase):
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5-5', 'claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['x'], None))
+
+
+class FreezeReplaceTest(unittest.TestCase):
+    FOUND = {'payment-claude-runner:' + freeze_readiness.launch.CLI_VERSION: 'sha256:frozen', 'postgres:16': 'sha256:pg'}
+
+    def main(self, tmp, inventory, pilot=None):
+        out = Path(tmp) / 'readiness.json'
+        argv = ['freeze_readiness.py', '--output', str(out), '--runs', str(Path(tmp) / 'runs'), '--replace']
+        if pilot:
+            argv += ['--pilot-run', pilot]
+        flags = {k: True for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
+                                   'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
+        smoke = (flags, {'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'},
+                 {'s%d' % a: {'arm': a} for a in (1, 2, 3)})
+        err = io.StringIO()
+        with patch.object(sys, 'argv', argv), patch.object(freeze_readiness, 'clean_baseline', return_value=('abc', [])), \
+             patch.object(freeze_readiness, 'images', return_value=(dict(self.FOUND), [])), \
+             patch.object(freeze_readiness, 'smoke_evidence', return_value=smoke), \
+             patch.object(freeze_readiness, 'inventory', return_value=inventory), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            try:
+                code = freeze_readiness.main()
+            except SystemExit as exc:
+                code = exc.code
+        return code, err.getvalue(), out
+
+    def test_replace_rederives_flags_but_refuses_changed_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'readiness.json'
+            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v1'})      # (output absent: first freeze)
+            self.assertEqual(code, 0, err)
+            first = json.loads(out.read_text())
+            self.assertFalse(first['pilot_passed'])
+            # a pilot run initialized under this freeze carries its contract hash and frozen image
+            FreezeTest.pilot(None, Path(tmp) / 'runs', contract=first['contract_sha256'], image='sha256:frozen')
+            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v1'}, pilot='pilot')
+            self.assertEqual(code, 0, err)
+            second = json.loads(out.read_text())
+            self.assertTrue(second['pilot_passed'], second['evidence']['pilot'])
+            self.assertEqual(second['contract_sha256'], first['contract_sha256'])
+            self.assertEqual(len(list(Path(tmp).glob('readiness.superseded-*.json'))), 1)
+            # the acceptance criteria changed after the freeze: --replace is refused, the freeze stays as it was
+            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v2'}, pilot='pilot')
+            self.assertNotEqual(code, 0)
+            self.assertIn('docs/acceptance.md', err)
+            self.assertIn('protocol version change', err)
+            self.assertEqual(json.loads(out.read_text()), second)
+            self.assertEqual(len(list(Path(tmp).glob('readiness.superseded-*.json'))), 1)
+
+    def test_replace_blockers(self):
+        found = dict(self.FOUND)
+        previous = {'contract_sha256': 'a', 'image_digests': dict(found, runner='sha256:frozen')}
+        self.assertEqual(freeze_readiness.replace_blockers(previous, {}, 'a', found), [])
+        self.assertTrue(freeze_readiness.replace_blockers(previous, {}, 'b', found))
+        self.assertEqual(freeze_readiness.replace_blockers(previous, {}, 'a', dict(found, **{'postgres:16': 'sha256:new'})),
+                         ['image ids differ from the readiness being replaced'])
 
 
 class FreezeArgumentsTest(unittest.TestCase):

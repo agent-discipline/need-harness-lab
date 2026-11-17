@@ -162,9 +162,11 @@ def smoke_evidence(runs, run_ids):
     return flags, actual, detail
 
 
-def pilot_evidence(runs, run_id):
+def pilot_evidence(runs, run_id, contract_sha256, runner_image):
     """Pilot (spec section 5): one arm 3 run carried to its end, whose subagent usage is separated from the parent's
-    without double counting and whose second reviewer's usage was observed. Derived from the run's own artifacts."""
+    without double counting and whose second reviewer's usage was observed. Derived from the run's own artifacts.
+    It counts only for the freeze it ran under: the contract hash and runner image its manifest recorded at init must
+    be the ones of the readiness being written."""
     run = Path(runs) / run_id
     manifest = json.loads((run / 'manifest.json').read_text())
     results = [json.loads(p.read_text()) for p in sorted(run.glob('turns/*/result.json'))]
@@ -177,6 +179,8 @@ def pilot_evidence(runs, run_id):
         models['user-proxy'] = all(model_matches([m], AGREED[(3, 'user-proxy')]) for m in proxy_models)
     checks = {
         'arm_3': manifest.get('arm') == 3,
+        'same_contract': bool(contract_sha256) and manifest.get('contract_sha256') == contract_sha256,
+        'frozen_image': bool(runner_image) and manifest.get('image') == runner_image,
         # carried to its end: not censored and the last turn finished ok (quality acceptance is not part of the pilot gate)
         'completed': bool(results) and not (run / 'censored.json').exists() and results[-1].get('status') == 'ok',
         'all_usage_observed': ledger['usage_complete'] and not ledger['conflicts'],
@@ -190,6 +194,23 @@ def pilot_evidence(runs, run_id):
     return all(checks.values()), {'run_id': run_id, 'checks': checks, 'role_model_check': models,
                                   'ledger': {k: ledger[k] for k in ('roles', 'total_tokens', 'usage_complete', 'cost_usd')},
                                   'manifest_sha256': sha(run / 'manifest.json')}
+
+
+def replace_blockers(previous, frozen, digest, found, listing=None):
+    """--replace may re-derive flags (pilot, attestations, smoke runs) but never re-freeze changed inputs: the current
+    inventory and image ids must equal those of the readiness being replaced. Empty list = nothing changed."""
+    failures = []
+    if previous.get('contract_sha256') != digest:
+        try:
+            old = json.loads(Path(listing).read_text()) if listing else None
+        except (OSError, ValueError):
+            old = None
+        changed = sorted(k for k in old.keys() | frozen.keys() if old.get(k) != frozen.get(k)) if isinstance(old, dict) else []
+        failures.append('frozen inputs differ from the readiness being replaced: ' +
+                        (', '.join(changed[:20]) if changed else 'contract_sha256 %s != %s' % (previous.get('contract_sha256'), digest)))
+    if (previous.get('image_digests') or {}) != dict(found, runner=found.get('payment-claude-runner:' + launch.CLI_VERSION)):
+        failures.append('image ids differ from the readiness being replaced')
+    return failures
 
 
 def attested(path):
@@ -221,7 +242,8 @@ def main():
     p.add_argument('--pilot-run', help='launch.py run id of the finished arm 3 pilot; pilot_passed is derived from it')
 
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
-    p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp)')
+    p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp) '
+                   'with re-derived flags; refused when the frozen inputs or image ids changed (protocol version change)')
     a = p.parse_args()
     if a.output.exists() and not a.replace:
         p.error('readiness exists; a protocol freeze is not overwritten (use --replace to supersede and keep the old one)')
@@ -236,9 +258,17 @@ def main():
     if smoked != {1, 2, 3} or set(actual) != {'1', '2', '3'}:
         p.error('smoke runs of all three arms with their agreed models are required (arms smoked: %s, verified actual '
                 'models: %s)' % (sorted(smoked), sorted(actual)))
-    attest_flags, attest_evidence = attested(a.attest) if a.attest else ({}, {})
-    pilot_passed, pilot_detail = pilot_evidence(a.runs, a.pilot_run) if a.pilot_run else (False, None)
     frozen = inventory()
+    digest = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
+    runner = found['payment-claude-runner:' + launch.CLI_VERSION]
+    if a.output.exists():
+        changed = replace_blockers(json.loads(a.output.read_text()), frozen, digest, found,
+                                   a.output.with_name('frozen-inputs.json'))
+        if changed:
+            p.error('; '.join(changed) + ' — nothing changes after the freeze: a change requires a protocol version change '
+                    '(new protocol, new freeze) and a re-run of every arm, not --replace')
+    attest_flags, attest_evidence = attested(a.attest) if a.attest else ({}, {})
+    pilot_passed, pilot_detail = pilot_evidence(a.runs, a.pilot_run, digest, runner) if a.pilot_run else (False, None)
     now = datetime.now(timezone.utc).isoformat()
     readiness = dict(
         protocol=PROTOCOL, provider='claude-code', auth='subscription-oauth-token', cli_version=launch.CLI_VERSION,
@@ -246,8 +276,7 @@ def main():
         requested_reviewer_model=launch.REVIEWER_MODEL, user_proxy_model=launch.USER_PROXY_MODEL,
         actual_models=actual, reasoning_effort='high', cache_policy='observed-cache', billed_cost=None,
         baseline_sha=head, harness_sha=prepare.HARNESS_SHA,
-        contract_sha256=hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest(),
-        image_digests=dict(found, runner=found['payment-claude-runner:' + launch.CLI_VERSION]),
+        contract_sha256=digest, image_digests=dict(found, runner=runner),
         **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE}, pilot_passed=pilot_passed,
         evidence=dict(smoke_runs=detail, attested=attest_evidence, pilot=pilot_detail), frozen_at=now,
         note='flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed')

@@ -361,7 +361,9 @@ def initialize(args):
             'actual_model': None, 'effort': 'high', 'session_id': str(uuid.uuid4()),
             'cache_policy': 'observed-cache', 'strict_zero_cache_supported': False,
             'image': image, 'image_frozen': frozen is not None,
-            'readiness': str(frozen['path']) if frozen else None, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
+            'readiness': str(frozen['path']) if frozen else None,
+            # the frozen contract this run is measured under (None before the freeze); freeze_readiness ties pilot evidence to it
+            'contract_sha256': frozen.get('contract_sha256') if frozen else None, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
             'reviewer_volume': ('payment-claude-reviewer-' + uuid.uuid4().hex) if args.arm == 3 else None,
             'requested_reviewer_model': REVIEWER_MODEL if args.arm == 3 else None,
             'source': str(source), 'workspace': str(dest / 'workspace'), 'network': network,

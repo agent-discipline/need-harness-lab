@@ -140,6 +140,7 @@ class RunnerTest(unittest.TestCase):
             readiness.write_text(json.dumps({'image_digests': {'runner': 'sha256:frozen'}, 'contract_sha256': 'c' * 64}))
             pilot = init('pilot')                                       # after the freeze: the frozen digest by default
             self.assertEqual((pilot['image'], pilot['image_frozen'], pilot['readiness']), ('sha256:frozen', True, str(readiness.resolve())))
+            self.assertEqual((smoke['contract_sha256'], pilot['contract_sha256']), (None, 'c' * 64))   # the freeze the run ran under
             self.assertEqual(init('same', image='sha256:frozen')['image'], 'sha256:frozen')
             for other in ('payment-claude-runner:' + launch.CLI_VERSION, 'sha256:other'):
                 with self.assertRaises(ValueError) as ctx:
