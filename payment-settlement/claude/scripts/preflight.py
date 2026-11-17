@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
+from launch import USER_PROXY_MODEL            # agreed protocol constant (claude-opus-5-5)
+
 REQUIRED = ("actual_model", "baseline_sha", "contract_sha256", "image_digests")
 FLAGS = ("isolation_verified", "usage_collector_verified", "harness_adapter_verified",
          "acceptance_suite_verified", "pilot_passed", "oauth_token_source_verified",
@@ -41,9 +44,9 @@ def blockers(manifest, stage="cycle"):
         failures.append("arm 3 requires verified native hook enforcement inside the container")
     if manifest.get("arm") == 3 and not manifest.get("requested_worker_model"):
         failures.append("arm 3 requires an explicit worker model")
-    # arm 3 consults a user proxy; its model must be frozen like every other input (no default anywhere)
-    if manifest.get("arm") == 3 and not manifest.get("user_proxy_model"):
-        failures.append("arm 3 requires the frozen user_proxy_model")
+    # arm 3 consults a user proxy; the frozen value must be the agreed model (absolute comparison)
+    if manifest.get("arm") == 3 and manifest.get("user_proxy_model") != USER_PROXY_MODEL:
+        failures.append(f"arm 3 requires user_proxy_model {USER_PROXY_MODEL}")
     policy = manifest.get("cache_policy")
     if policy not in ("strict-zero-cache", "observed-cache"):
         failures.append("cache policy must be explicit")

@@ -74,7 +74,8 @@ def clean_baseline():
 # Agreed model per (arm, role) — absolute ids from the protocol (launch.MODELS, launch.REVIEWER_MODEL), never the
 # ids a run happened to request.
 AGREED = {(1, 'implementer'): launch.MODELS[1][0], (2, 'implementer'): launch.MODELS[2][0],
-          (3, 'pm'): launch.MODELS[3][0], (3, 'worker'): launch.MODELS[3][1], (3, 'reviewer'): launch.REVIEWER_MODEL}
+          (3, 'pm'): launch.MODELS[3][0], (3, 'worker'): launch.MODELS[3][1], (3, 'reviewer'): launch.REVIEWER_MODEL,
+          (3, 'user-proxy'): launch.USER_PROXY_MODEL}
 # Roles each kind of evidence must show. Smoke runs prove the main role of every arm; the arm 3 pilot proves the rest.
 SMOKE_ROLES = {1: ('implementer',), 2: ('implementer',), 3: ('pm',)}
 PILOT_ROLES = ('pm', 'worker', 'reviewer')
@@ -86,10 +87,29 @@ def model_matches(observed, agreed):
             and (observed[0] == agreed or observed[0].startswith(agreed + '-')))
 
 
-def role_check(arm, observed, required):
+def worker_requests_check(events):
+    """Arm 3 workers, per request: an explorer request (agentType 'explorer' from its transcript .meta.json) must be on a
+    Sonnet model as the harness defines it; every other worker request, including one whose type is unknown, must be on
+    the agreed worker model. A Sonnet request that is not identified as explorer fails."""
+    workers = [e for e in events if e.get('role') == 'worker']
+    def ok(event):
+        if event.get('agent_type') == launch.EXPLORER_AGENT:
+            return isinstance(event.get('model'), str) and event['model'].startswith(launch.EXPLORER_MODEL_PREFIX)
+        return model_matches([event.get('model')], AGREED[(3, 'worker')])
+    return bool(workers) and all(ok(e) for e in workers)
+
+
+def role_check(arm, observed, required, run=None):
     """Every required role observed with its agreed model, and no observed role outside the agreed set or off-model.
-    A required role that was not observed is reported as False, never as verified."""
+    A required role that was not observed is reported as False, never as verified. Arm 3 workers are checked per request
+    from the run's events when the run directory is given (explorer may differ from the other workers)."""
     check = {role: model_matches(observed.get(role), AGREED.get((arm, role))) for role in observed}
+    if arm == 3 and run is not None and ('worker' in observed or 'worker' in required):
+        events, _ = launch.reconcile_events(Path(run)) if (Path(run) / 'turns').is_dir() else ([], [])
+        if any(e.get('role') == 'worker' for e in events):
+            # per request; and the manifest's observed worker models must be exactly those of the collected requests
+            check['worker'] = worker_requests_check(events) and \
+                set(observed.get('worker') or []) == {e['model'] for e in events if e.get('role') == 'worker'}
     for role in required:
         check.setdefault(role, False)
     return check
@@ -121,7 +141,7 @@ def smoke_evidence(runs, run_ids):
         cache_seen = cache_seen or any(all(isinstance(((r.get('usage_cross_check') or {}).get('reported') or {}).get(k), int)
                                            for k in launch.USAGE_KEYS) for r in good)
         observed = manifest.get('actual_role_models') or {}
-        checks = role_check(arm, observed, SMOKE_ROLES.get(arm, ()))
+        checks = role_check(arm, observed, SMOKE_ROLES.get(arm, ()), run)
         roles_ok = roles_ok and bool(checks) and all(checks.values())
         main_role = SMOKE_ROLES.get(arm, ('',))[0]
         if checks.get(main_role):
@@ -151,7 +171,10 @@ def pilot_evidence(runs, run_id):
     ok = [r for r in results if r.get('status') == 'ok']
     ledger = launch.run_ledger(run)
     roles = ledger['roles']
-    models = role_check(3, manifest.get('actual_role_models') or {}, PILOT_ROLES)
+    models = role_check(3, manifest.get('actual_role_models') or {}, PILOT_ROLES, run)
+    proxy_models = sorted({e['model'] for e in launch.reconcile_events(run)[0] if e.get('role') == 'user-proxy'})
+    if proxy_models:                                    # consultations made during the pilot must use the agreed proxy model
+        models['user-proxy'] = all(model_matches([m], AGREED[(3, 'user-proxy')]) for m in proxy_models)
     checks = {
         'arm_3': manifest.get('arm') == 3,
         # carried to its end: not censored and the last turn finished ok (quality acceptance is not part of the pilot gate)
@@ -196,8 +219,7 @@ def main():
     p.add_argument('--runs', type=Path, default=ROOT / '.runs')
     p.add_argument('--attest', type=Path, help='JSON attestation for ' + ', '.join(ATTESTABLE))
     p.add_argument('--pilot-run', help='launch.py run id of the finished arm 3 pilot; pilot_passed is derived from it')
-    p.add_argument('--user-proxy-model', required=True,
-                   help='user proxy model chosen by the user (no default); consult_contract.py refuses any other model')
+
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp)')
     a = p.parse_args()
@@ -221,7 +243,7 @@ def main():
     readiness = dict(
         protocol=PROTOCOL, provider='claude-code', auth='subscription-oauth-token', cli_version=launch.CLI_VERSION,
         requested_models={str(arm): dict(zip(('model', 'worker_model'), m)) for arm, m in launch.MODELS.items()},
-        requested_reviewer_model=launch.REVIEWER_MODEL, user_proxy_model=a.user_proxy_model,
+        requested_reviewer_model=launch.REVIEWER_MODEL, user_proxy_model=launch.USER_PROXY_MODEL,
         actual_models=actual, reasoning_effort='high', cache_policy='observed-cache', billed_cost=None,
         baseline_sha=head, harness_sha=prepare.HARNESS_SHA,
         contract_sha256=hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest(),

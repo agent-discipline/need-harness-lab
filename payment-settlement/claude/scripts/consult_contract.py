@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fresh isolated Claude user proxy: frozen contract + questions only, no tools, its own session and config.
 
-The proxy model has no default: readiness.json must carry the frozen user_proxy_model and --model must equal it.
+The proxy model is the agreed launch.USER_PROXY_MODEL; readiness must carry it and --model must equal it.
 Output goes to <runs>/<run-id>/consults/NNNN so the run ledger counts the proxy with every other role.
 """
 import argparse
@@ -68,7 +68,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run-id', required=True, help='arm 3 run the consultation belongs to (its cost is that condition\'s cost)')
     p.add_argument('--questions', type=Path, required=True)
-    p.add_argument('--model', required=True, help='must equal the frozen readiness user_proxy_model')
+    p.add_argument('--model', required=True, help='must equal the agreed and frozen user_proxy_model (%s)' % launch.USER_PROXY_MODEL)
     p.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
     p.add_argument('--readiness', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--runs', type=Path, default=ROOT / '.runs')
@@ -76,10 +76,10 @@ def main():
     p.add_argument('--dry-run', action='store_true')
     a = p.parse_args()
     ready = json.loads(a.readiness.read_text())
-    if not ready.get('user_proxy_model'):
-        p.error('readiness has no frozen user_proxy_model; freeze it before any proxy call')
-    if ready['user_proxy_model'] != a.model:
-        p.error('--model differs from the frozen user_proxy_model')
+    if ready.get('user_proxy_model') != launch.USER_PROXY_MODEL:
+        p.error('readiness does not carry the agreed user_proxy_model %s; freeze it before any proxy call' % launch.USER_PROXY_MODEL)
+    if a.model != launch.USER_PROXY_MODEL:
+        p.error('--model must be the agreed user proxy model %s' % launch.USER_PROXY_MODEL)
     try:
         run, out = consult_dir(a.runs, a.run_id)
         # the run's caps cover the proxy too (same gate as the runner's turns; a censored run gets no consultation)

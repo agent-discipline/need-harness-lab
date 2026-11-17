@@ -32,7 +32,7 @@ def ready(**extra):
                 contract_sha256='def', image_digests={'runner': 'sha256:1'}, token_limit=20000000,
                 time_limit_seconds=28800, feedback_limit=30,
                 actual_models={'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'},
-                user_proxy_model='decided-model', **READY_FLAGS)
+                user_proxy_model='claude-opus-5-5', **READY_FLAGS)
     data.update(extra)
     return data
 
@@ -48,9 +48,10 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(preflight.blockers(base), [])
         self.assertIn('protocol must be payment-settlement-v3-claude', preflight.blockers(dict(base, protocol='payment-settlement-v1')))
         self.assertIn('token_limit must be 20000000', preflight.blockers(dict(base, token_limit=2000000)))
-        arm3 = dict(base, arm=3, requested_worker_model='claude-opus-5-5', user_proxy_model='decided-model')
+        arm3 = dict(base, arm=3, requested_worker_model='claude-opus-5-5', user_proxy_model='claude-opus-5-5')
         self.assertEqual(preflight.blockers(arm3), [])
-        self.assertIn('arm 3 requires the frozen user_proxy_model', preflight.blockers(dict(arm3, user_proxy_model=None)))
+        for other in (None, 'claude-fable-5-2', 'claude-opus-5-5-x'):
+            self.assertIn('arm 3 requires user_proxy_model claude-opus-5-5', preflight.blockers(dict(arm3, user_proxy_model=other)))
         self.assertEqual(preflight.blockers(dict(base, user_proxy_model=None)), [])     # arms 1/2 never consult a proxy
         self.assertTrue(preflight.blockers(dict(arm3, hook_enforcement_verified='yes')))
 
@@ -139,7 +140,8 @@ class FreezeTest(unittest.TestCase):
             t = run / 'turns' / ('%04d' % n)
             write(t / 'result.json', dict(status=status, usage_complete=status == 'ok', reviewer_usage_pending=pending,
                                          cost={'pinned_session_usd': 0.1, 'reviewer_usd': 0.0, 'reviewer_applicable': True}))
-            (t / 'events.jsonl').write_text(''.join(json.dumps(dict(type='message', id='%s-%d' % (r, n), model='m', role=r,
+            agreed = {'pm': 'claude-fable-5-2', 'worker': 'claude-opus-5-5', 'reviewer': 'claude-fable-5-2'}
+            (t / 'events.jsonl').write_text(''.join(json.dumps(dict(type='message', id='%s-%d' % (r, n), model=agreed[r], role=r,
                                                                     turn=t.name, usage=USAGE)) + '\n' for r in roles))
         if censored:
             write(run / 'censored.json', {'status': 'CENSORED_TIME'})
@@ -158,6 +160,40 @@ class FreezeTest(unittest.TestCase):
                 passed, detail = freeze_readiness.pilot_evidence(Path(tmp), self.pilot(Path(tmp), **kw))
                 self.assertIs(passed, expected, detail['checks'])
 
+    def test_arm3_workers_explorer_on_sonnet_others_on_opus(self):
+        def events(*rows):
+            return [dict(role='worker', model=m, agent_type=t) for m, t in rows]
+        check = freeze_readiness.worker_requests_check
+        self.assertTrue(check(events(('claude-opus-5-5', 'general-purpose'), ('claude-sonnet-5', 'explorer'), ('claude-opus-5-5', None))))
+        self.assertFalse(check(events(('claude-sonnet-5', None))))                 # unidentified Sonnet is not an explorer
+        self.assertFalse(check(events(('claude-sonnet-5', 'general-purpose'))))
+        self.assertFalse(check(events(('claude-opus-5-5', 'explorer'))))           # explorer keeps the harness definition
+        self.assertFalse(check([]))
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / 'pilot'
+            self.pilot(Path(tmp))
+            t = run / 'turns/0003'
+            write(t / 'result.json', dict(status='ok', usage_complete=True, cost={'pinned_session_usd': 0.1, 'reviewer_usd': 0.0, 'reviewer_applicable': True}))
+            (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='ex', model='claude-sonnet-5', role='worker',
+                                                           agent_type='explorer', turn='0003', usage=USAGE)) + '\n')
+            manifest = json.loads((run / 'manifest.json').read_text())
+            manifest['actual_role_models']['worker'] = ['claude-opus-5-5', 'claude-sonnet-5']
+            write(run / 'manifest.json', manifest)
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot')
+            self.assertTrue(passed, detail)
+            (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='ex', model='claude-sonnet-5', role='worker',
+                                                           agent_type=None, turn='0003', usage=USAGE)) + '\n')
+            self.assertFalse(freeze_readiness.pilot_evidence(Path(tmp), 'pilot')[0])
+            (t / 'events.jsonl').write_text('')
+            consult = run / 'consults/0001'
+            consult.mkdir(parents=True)
+            write(consult / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0})
+            (consult / 'events.jsonl').write_text(json.dumps(dict(type='message', id='px', model='claude-fable-5-2',
+                                                                 role='user-proxy', turn='p', usage=USAGE)) + '\n')
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot')
+            self.assertFalse(passed)
+            self.assertFalse(detail['role_model_check']['user-proxy'])
+
     def test_model_match(self):
         self.assertTrue(freeze_readiness.model_matches(['claude-opus-5-5'], 'claude-opus-5-5'))
         self.assertTrue(freeze_readiness.model_matches(['claude-opus-5-5-20261101'], 'claude-opus-5-5'))
@@ -169,12 +205,13 @@ class FreezeTest(unittest.TestCase):
 
 
 class FreezeArgumentsTest(unittest.TestCase):
-    def test_freeze_requires_the_user_proxy_model(self):
+    def test_user_proxy_model_is_the_agreed_constant_not_an_argument(self):
+        self.assertEqual(freeze_readiness.AGREED[(3, 'user-proxy')], 'claude-opus-5-5')
         err = io.StringIO()
-        with patch.object(sys, 'argv', ['freeze_readiness.py', '--output', '/nonexistent/r.json']), \
+        with patch.object(sys, 'argv', ['freeze_readiness.py', '--user-proxy-model', 'other']), \
              contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             freeze_readiness.main()
-        self.assertIn('--user-proxy-model', err.getvalue())
+        self.assertIn('unrecognized arguments', err.getvalue())
 
 
 class StartCycleTest(unittest.TestCase):
@@ -368,14 +405,14 @@ class CaptureTurnTest(unittest.TestCase):
 
 
 class ConsultContractTest(unittest.TestCase):
-    def setup_run(self, tmp, arm=3, proxy_model='decided-model'):
+    def setup_run(self, tmp, arm=3, proxy_model='claude-opus-5-5'):
         env = Path(tmp) / 'claude.env'
         env.write_text('CLAUDE_CODE_OAUTH_TOKEN=DO-NOT-PRINT-0123456789\n')
         os.chmod(env, 0o600)
         questions = Path(tmp) / 'q.txt'
         questions.write_text('질문')
         path = Path(tmp) / 'readiness.json'
-        write(path, ready(**({'user_proxy_model': proxy_model} if proxy_model else {})))
+        write(path, ready(user_proxy_model=proxy_model))
         runs = Path(tmp) / 'runs'
         write(runs / 'claude-arm3-core01' / 'manifest.json', {'arm': arm, 'run_id': 'claude-arm3-core01'})
         (runs / 'claude-arm3-core01' / 'turns').mkdir()
@@ -409,7 +446,7 @@ class ConsultContractTest(unittest.TestCase):
                 target.mkdir(parents=True)
                 (target / (state['session'] + '.jsonl')).write_text(json.dumps(
                     {'type': 'assistant', 'requestId': 'req-proxy', 'sessionId': state['session'],
-                     'message': {'model': 'decided-model', 'usage': USAGE}}) + '\n')
+                     'message': {'model': 'claude-opus-5-5', 'usage': USAGE}}) + '\n')
             return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
         return run
 
@@ -421,7 +458,7 @@ class ConsultContractTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index('--model') + 1], 'proxy-model')
         with tempfile.TemporaryDirectory() as tmp:
             argv, run_dir = self.setup_run(tmp)
-            code, run, out = self.call(argv + ['--model', 'decided-model', '--dry-run'])
+            code, run, out = self.call(argv + ['--model', 'claude-opus-5-5', '--dry-run'])
             self.assertEqual(code, 0, out)
             run.assert_not_called()
             self.assertNotIn('DO-NOT-PRINT', out)
@@ -431,18 +468,21 @@ class ConsultContractTest(unittest.TestCase):
     def test_proxy_model_must_be_frozen_and_only_arm3_consults(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv, _ = self.setup_run(tmp, proxy_model=None)
-            code, run, out = self.call(argv + ['--model', 'any-model', '--dry-run'])
+            code, run, out = self.call(argv + ['--model', 'claude-opus-5-5', '--dry-run'])
             self.assertNotEqual(code, 0)
             self.assertIn('user_proxy_model', out)
+        with tempfile.TemporaryDirectory() as tmp:                     # a readiness frozen with another model is refused too
+            argv, _ = self.setup_run(tmp, proxy_model='claude-fable-5-2')
+            self.assertNotEqual(self.call(argv + ['--model', 'claude-fable-5-2', '--dry-run'])[0], 0)
         with tempfile.TemporaryDirectory() as tmp:
             argv, _ = self.setup_run(tmp, arm=1)
-            self.assertNotEqual(self.call(argv + ['--model', 'decided-model', '--dry-run'])[0], 0)
+            self.assertNotEqual(self.call(argv + ['--model', 'claude-opus-5-5', '--dry-run'])[0], 0)
 
     def test_proxy_call_passes_the_run_cap_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv, run_dir = self.setup_run(tmp)
             (run_dir / 'censored.json').write_text(json.dumps({'status': 'CENSORED_TIME'}))
-            code, run, out = self.call(argv + ['--model', 'decided-model'], self.fake())
+            code, run, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake())
             self.assertNotEqual(code, 0)
             self.assertIn('CENSORED_TIME', out)
             run.assert_not_called()
@@ -451,7 +491,7 @@ class ConsultContractTest(unittest.TestCase):
     def test_proxy_usage_lands_in_the_run_ledger_and_unobserved_usage_is_not_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv, run_dir = self.setup_run(tmp)
-            code, _, out = self.call(argv + ['--model', 'decided-model'], self.fake())
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake())
             self.assertEqual(code, 0, out)
             usage = json.loads((run_dir / 'consults/0001/usage.json').read_text())
             self.assertEqual(usage['usage'], USAGE)
@@ -460,7 +500,7 @@ class ConsultContractTest(unittest.TestCase):
             ledger = json.loads((run_dir / 'ledger.json').read_text())
             self.assertEqual(ledger['roles']['user-proxy']['requests'], 1)
             self.assertEqual(ledger['cost_usd'], 0.07)
-            code, _, out = self.call(argv + ['--model', 'decided-model'], self.fake(copy_ok=False))
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake(copy_ok=False))
             usage = json.loads((run_dir / 'consults/0002/usage.json').read_text())
             self.assertIsNone(usage['usage'])
             self.assertTrue(usage['usage_unobserved'])
