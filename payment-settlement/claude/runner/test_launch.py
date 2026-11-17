@@ -871,7 +871,7 @@ class FableReviewWrapperTest(unittest.TestCase):
     """runner/fable-review.sh with a fake `claude` on PATH (no model call)."""
     WRAPPER = Path(__file__).with_name('fable-review.sh')
 
-    def run_wrapper(self, tmp, env_extra, args=(), fake_rc=0):
+    def run_wrapper(self, tmp, env_extra, args=(), fake_rc=0, reply='{"type":"result","result":"REVIEW TEXT"}'):
         bin_dir = Path(tmp) / 'bin'
         bin_dir.mkdir(exist_ok=True)
         fake = bin_dir / 'claude'
@@ -879,7 +879,7 @@ class FableReviewWrapperTest(unittest.TestCase):
                         'printf "%s\\n" "$@" > "$FAKE_OUT/args"\n'
                         'printf "%s" "$CLAUDE_CONFIG_DIR" > "$FAKE_OUT/config"\n'
                         'cat > "$FAKE_OUT/stdin"\n'
-                        'echo \'{"type":"result","result":"REVIEW TEXT"}\'\n'
+                        "echo '" + reply + "'\n"
                         'exit ' + str(fake_rc) + '\n')
         os.chmod(fake, 0o755)
         out = Path(tmp) / 'fake-out'
@@ -920,6 +920,16 @@ class FableReviewWrapperTest(unittest.TestCase):
             done, _ = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, fake_rc=3)
             self.assertEqual(done.returncode, 3)
             self.assertTrue((cfg / 'reviewer-calls.log').read_text().splitlines()[-1].endswith(' exit=3'))
+
+    def test_empty_or_error_review_is_a_failure(self):
+        for reply in ('{"type":"result","result":""}', '{"type":"result","result":"  "}',
+                      '{"type":"result","is_error":true,"result":"rate limited"}', 'not json'):
+            with tempfile.TemporaryDirectory() as tmp:
+                cfg = Path(tmp) / 'reviewer-cfg'
+                done, _ = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, reply=reply)
+                self.assertEqual(done.returncode, 96, reply)
+                self.assertIn('no review text', done.stderr)
+                self.assertTrue((cfg / 'reviewer-calls.log').read_text().splitlines()[-1].endswith(' exit=96'))
 
     def test_refuses_without_reviewer_config_arguments_or_log(self):
         with tempfile.TemporaryDirectory() as tmp:

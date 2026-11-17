@@ -34,7 +34,15 @@ RAW="$DIR/raw/$SID.json"
 CLAUDE_CONFIG_DIR="$DIR" claude -p --model "$MODEL" --effort high --session-id "$SID" \
   --tools Read,Grep,Glob --output-format json > "$RAW"
 rc=$?
+# final text for the caller. An unreadable result, an error result or an empty review is a failure (exit 96), never a
+# silent success: the raw output goes to stderr so the PM sees why.
+TEXT="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(3) if d.get("is_error") else print(d.get("result") or "")' "$RAW" 2>/dev/null)"
+prc=$?
+if [ "$rc" = 0 ] && { [ "$prc" != 0 ] || [ -z "${TEXT//[[:space:]]/}" ]; }; then
+  echo "[fable-review] the reviewer returned no review text (empty, error or unreadable result); raw output follows" >&2
+  cat "$RAW" >&2
+  rc=96
+fi
 printf '%s exit=%s\n' "$CALL" "$rc" >> "$LOG" 2>/dev/null
-# final text for the caller; if the JSON cannot be read, show the raw output instead of hiding the failure
-python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("result") or "")' "$RAW" 2>/dev/null || cat "$RAW"
+[ "$prc" = 0 ] && printf '%s\n' "$TEXT" || cat "$RAW"
 exit "$rc"
