@@ -1,0 +1,58 @@
+스타터 빌드는 확인했고, 인터뷰 질문을 만들기 전에 공용 DB fixture의 실제 스키마(읽기 전용 조회)와 은행 모의 서버 동작을 실확인하는 중입니다.
+
+환경 실확인을 마쳤습니다(DB fixture 원본 상태·은행 모의 서버 응답·빌드). 작업 log를 만들고 인터뷰 질문을 정리해 드리겠습니다.
+
+구현 전 인터뷰입니다. 아직 코드는 건드리지 않았고(게이트 `SPEC=0 / MODE=UNSET`), 답변을 받은 뒤 `requirement-spec.md`를 작성해 합의를 요청하겠습니다.
+
+## 실확인한 환경
+
+- **빌드**: 스타터 `./gradlew compileKotlin` 성공.
+- **DB**: `db:5432`는 fixture 원본 상태입니다. users 1,000,000행(잔액 합 1조), agencies 1,000행, 업무 테이블과 Flyway 이력은 없습니다. 접속 계정은 superuser입니다.
+- **은행**: `bank:8081` 응답 정상, HTTP/1.0입니다.
+- **없는 도구**: docker, psql, k6.
+
+각 질문의 "제안"은 답이 없으면 그대로 명세에 넣을 기본값입니다.
+
+## A. 환경·절차
+
+1. **테스트 DB**: 공용 `payment` DB는 건드리지 않고, 같은 서버에 `payment_test` DB를 만들어(동일 users/agencies DDL + 소량 seed) 통합 테스트를 돌리는 것을 제안합니다. 가능한가요?
+2. **공용 `payment` DB 스모크**: 앱을 실제 `payment` DB에 띄우면 Flyway V1+가 적용되고 스모크 결제로 일부 잔액이 바뀝니다. 허용인가요, 아니면 `payment`는 평가자 전용이라 일절 변경 금지인가요?
+3. **은행 테스트 대상**: 회귀 테스트는 FIXTURE 계약을 재현한 인프로세스 스텁 은행으로 돌리고, 실제 `bank:8081`은 고유 키 몇 건의 스모크에만 쓰는 것을 제안합니다. journal에 행이 남는데 허용인가요?
+4. **Dockerfile과 테스트 분리**: Dockerfile이 DB 없이 `./gradlew clean test bootJar`를 실행합니다. `test`는 DB 없는 단위 테스트만, DB 의존 테스트는 별도 `integrationTest` 태스크로 나누고 Dockerfile은 그대로 두는 것을 제안합니다. 괜찮은가요?
+5. **부하 검증 범위**: acceptance 부하(50RPS 5분, spike, soak)는 외부 평가기 소관으로 보고, 저는 동시성 회귀 테스트(동일키 100, 동일사용자 100, 정산 50)와 짧은 스모크 부하만 수행한 뒤 미실행 항목을 보고하면 되나요?
+6. **실험 프로필 활성화**: `X-Bank-Fault` 전달을 어떻게 켜나요? 평가기가 Spring 프로필이나 환경변수를 지정하나요? 지정이 없다면 `bank.fault-injection-enabled`(환경변수 `BANK_FAULT_INJECTION_ENABLED`, 기본 true)를 제안합니다.
+7. **git**: 브랜치 `feature/payment-settlement-v1`에서 의미 단위로 커밋하고, main 병합은 하지 않고 브랜치에 남기는 것을 제안합니다. 하네스 규칙에 따라 커밋에 AI attribution은 넣지 않습니다. 맞나요?
+8. **stakes·자율성**: stakes는 높음(결제, tenant, public 계약)으로 판정하고 자율성은 auto로 진행합니다. 맞나요?
+9. **사이클 마감**: `docs/measurement-log.md`와 `docs/plans/NEXT.md`는 작성합니다. CS 이슈 아카이브는 대상 repo(study-note)가 이 환경에 없어 보류로 기록하려 합니다. 괜찮은가요?
+10. **수정 가능 파일**: `application.yml`에 복구 스케줄러와 은행 설정 키를 추가하고, `build.gradle.kts`와 `.gitignore`를 고쳐도 되나요? Hikari, Tomcat, heap 값은 그대로 둡니다.
+
+## B. 결제 API
+
+11. **응답 body**: POST 201/200/202의 body는 GET과 같은 7필드, `paymentId`는 UUID 문자열, 미확정 시 `bankTransferId`는 null로 제안합니다.
+12. **거절된 결제의 재전송**: 첫 응답은 422입니다. 같은 키 재전송 시 200 + `status:FAILED` body인가요, 다시 422 에러 body인가요? 제안은 422 재현입니다.
+13. **잔액 부족(409)**: 결제 행을 만들지 않고 키도 소비하지 않아, 같은 키 재전송 시 다시 평가하는 것을 제안합니다. 아니면 FAILED로 영속해 409를 고정 재현해야 하나요? 없는 사용자/대행사 404도 같은 질문입니다.
+14. **차감 시점**: 동시 다른 키의 초과 방지를 위해 은행 호출 전에 조건부 UPDATE로 잔액을 선차감(hold)하고, 거절 확정 시 복원하는 것을 제안합니다. PENDING 동안 `users.balance_minor`가 줄어 보이는 것이 허용되나요? 원장은 SUCCEEDED 확정 트랜잭션에서만 기록합니다.
+15. **결과 불명의 수렴 방향**: timeout이나 5xx 후에는 복구 워커가 `GET /transfers/{key}`로 조회하고, 404면 같은 은행 키로 fault 없이 재POST해 SUCCEEDED로 수렴시키는 것을 제안합니다. 자동 FAILED 종결은 하지 않고, 은행 장애가 지속되면 상한 있는 백오프로 PENDING을 유지합니다. 맞나요?
+16. **5xx 즉시 응답**: 503을 받은 첫 요청은 요청 안에서 재시도하지 않고 202 PENDING을 반환한 뒤 복구에 맡기는 것을 제안합니다.
+17. **PENDING 중 클라이언트 재전송**: 은행을 다시 호출하지 않고 현재 상태만 반환(202, 확정 후 200)하며, 재전송의 `X-Bank-Fault`는 무시하는 것을 제안합니다.
+18. **은행의 예상 밖 응답**: 우리 키에 대해 400이나 409가 오면 성공/실패로 확정하지 않고 PENDING 유지 + 에러 로그 + 최대 간격 백오프를 제안합니다.
+19. **은행 키 형식**: 평가기가 특정 형식을 기대하나요? 없다면 `payment:{agencyId}:{clientKey}`를 `payments.bank_idempotency_key`에 저장하고 문서화하겠습니다.
+20. **Idempotency-Key 검증**: 출력 가능한 ASCII(0x21..0x7E) 1..128자, 누락이나 위반은 400으로 제안합니다.
+21. **X-Agency-Id**: 누락이나 비숫자는 400, body와 불일치는 403, 존재하지 않는 대행사는 404로 제안합니다.
+22. **검증 우선순위**: 400 → 403 → 멱등 재전송 판정(200/202/409 payload 불일치) → 404 → 409 잔액 부족 → 은행 순으로 제안합니다.
+23. **입력 엄격성**: `currency≠"KRW"`, 금액 범위 밖, 소수·문자열 숫자, 필수 필드 누락은 400이고 알 수 없는 추가 필드는 무시하는 것을 제안합니다.
+24. **에러 code 값**: 평가기가 특정 문자열에 의존하나요? 없다면 `INVALID_REQUEST`, `AGENCY_MISMATCH`, `NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `INSUFFICIENT_BALANCE`, `BANK_DECLINED`, `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR`를 쓰겠습니다.
+25. **DB 장애 시 응답**: 업무 요청은 503 `SERVICE_UNAVAILABLE`로 제안합니다. `/health`는 DB 불가 시 200 + `database:false`인가요, 503인가요? 계약 문구대로 200 + `status:"DOWN", database:false`를 제안합니다.
+26. **GET의 잘못된 paymentId 형식**: UUID가 아니면 404로 제안합니다.
+
+## C. 정산
+
+27. **상태 어휘와 응답 코드**: 정산은 단일 DB 트랜잭션으로 동기 처리하고 status는 `SUCCEEDED` 하나만 쓰는 것을 제안합니다. 최초 201, 같은 키 재전송 200, 다른 payload 409입니다.
+28. **동일 키 동시 정산**: 한 건만 생성하고 나머지는 대기 후 같은 결과를 200으로 받는 것을 제안합니다(202 없음).
+29. **businessDate 범위**: 형식 오류는 400입니다. 미래 날짜나 당일도 허용하고, 대상이 없으면 0/0 성공으로 제안합니다.
+30. **성공 확정 시각**: 은행이 시각을 주지 않으므로, 우리 시스템이 SUCCEEDED로 전이한 트랜잭션 시각을 KST 날짜로 변환해 `business_date`로 저장하는 것을 제안합니다. 복구로 늦게 확정된 결제는 확정된 날의 일자에 속합니다.
+31. **회계 모델**: 스키마는 자유로 이해했습니다. 결제 성공 시 사용자 차변 amount / 대행사 미정산 채무 대변 net / 수수료 대변 fee, 정산 시 미정산 채무 차변 net / 정산 잔액 대변 net + `settlement_balance_minor += net`으로 제안합니다. 이견이 있나요?
+
+## D. 그 밖
+
+32. 위 목록에 없지만 동결 계약상 확정된 제약이 있으면 알려 주세요(패키지명, 문서 위치, 로그 형식 등). 문서는 `docs/`에 스키마 의미와 record-level 검증 SQL을 두려 합니다.

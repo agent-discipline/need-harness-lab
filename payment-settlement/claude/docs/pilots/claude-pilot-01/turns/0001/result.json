@@ -1,0 +1,284 @@
+{
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "3f545958-a56c-441a-b045-10079708505b",
+    "total_cost_usd": 1.9925464,
+    "usage": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 69866,
+      "cache_read_input_tokens": 540252,
+      "output_tokens": 19162,
+      "output_tokens_details": {
+        "thinking_tokens": 10928
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 69866,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3671,
+          "cache_read_input_tokens": 79054,
+          "cache_creation_input_tokens": 1355,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1355
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-fable-5-2": {
+        "inputTokens": 20,
+        "outputTokens": 19162,
+        "cacheReadInputTokens": 540252,
+        "cacheCreationInputTokens": 69866,
+        "webSearchRequests": 0,
+        "costUSD": 1.9925464,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 10928,
+        "cacheCreationEphemeral5mInputTokens": 0,
+        "cacheCreationEphemeral1hInputTokens": 69866,
+        "canonicalModel": "claude-fable-5-2",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "num_turns": 14,
+    "duration_ms": 381878,
+    "duration_api_ms": 212385
+  },
+  "assistant_messages": 23,
+  "stream_models": [
+    "claude-fable-5-2"
+  ],
+  "result_count": 1,
+  "unparsed_lines": 0,
+  "exit_code": 0,
+  "finished_at": "2026-11-17T16:46:35.322104+00:00",
+  "session_id": "3f545958-a56c-441a-b045-10079708505b",
+  "session_id_confirmed": true,
+  "request_ids": [
+    "req_011Ch8qAvNuEi19knjkBaQ28",
+    "req_011Ch8qBMfv63d8VEtqQ6TeJ",
+    "req_011Ch8qBka4pGjGEZvx2oAtT",
+    "req_011Ch8qCSRhX9auFP4aGT4RB",
+    "req_011Ch8qD43KuqMNiEnGTwP9n",
+    "req_011Ch8qS37saftXPi641kNhZ",
+    "req_011Ch8qT5kQxMcwqhVNfJpeL",
+    "req_011Ch8qTjhgQ66p45o7jN7nN",
+    "req_011Ch8qbFYFBtj345fDRDY4V",
+    "req_011Ch8qcQ7hjACVu2Xb2Pkwp"
+  ],
+  "event_count": 10,
+  "incomplete": [],
+  "transcript_stats": {
+    "files": 1,
+    "unparsable_lines": 0,
+    "assistant_lines": 23,
+    "assistant_without_requestId": 0,
+    "session_ids": [
+      "3f545958-a56c-441a-b045-10079708505b"
+    ]
+  },
+  "reviewer": {
+    "log_rc": 1,
+    "log_absent": true,
+    "log_unknown": false,
+    "calls_total": 0,
+    "calls_this_turn": 0,
+    "calls_finished_total": 0,
+    "transcript_files": 0,
+    "projects_rc": 1,
+    "projects_absent": true,
+    "reviewer_dir_rc": 0,
+    "reviewer_dir_names": [],
+    "reviewer_dir_leftover": null,
+    "transcript_stats": {},
+    "event_count": 0,
+    "incomplete": 0,
+    "raw_rc": 1,
+    "call_costs_usd": {},
+    "cost_unobserved": [],
+    "cost_usd": 0
+  },
+  "cost": {
+    "pinned_session_usd": 1.9925464,
+    "reviewer_usd": 0,
+    "reviewer_applicable": true,
+    "cost_complete": true
+  },
+  "reviewer_usage_pending": false,
+  "web_requests": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+  },
+  "observed_tools_and_effort": {
+    "by_role": {
+      "pm": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    "web_tool_uses_complete": true,
+    "source": "transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort"
+  },
+  "usage_complete": true,
+  "usage_complete_note": "arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)",
+  "usage_cross_check": {
+    "reported": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 69866,
+      "cache_read_input_tokens": 540252,
+      "output_tokens": 19162,
+      "output_tokens_details": {
+        "thinking_tokens": 10928
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 69866,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3671,
+          "cache_read_input_tokens": 79054,
+          "cache_creation_input_tokens": 1355,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1355
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "main_sum": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 69866,
+      "cache_read_input_tokens": 540252,
+      "output_tokens": 19162
+    },
+    "all_sum": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 69866,
+      "cache_read_input_tokens": 540252,
+      "output_tokens": 19162
+    },
+    "main_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "all_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "reviewer_sum": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "sums_are_lower_bounds": false,
+    "note": "observation only until the smoke fixes whether result.usage includes sidechains; reviewer_sum is outside reported (None in arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)"
+  },
+  "role_files": {
+    "pm": "events.role-pm.jsonl"
+  },
+  "transcript_models": [
+    "claude-fable-5-2"
+  ],
+  "roles": [
+    "pm"
+  ],
+  "config_volume": {
+    "rc": 0,
+    "entries": [
+      "d .",
+      "d ./agents",
+      "d ./backups",
+      "d ./hooks",
+      "d ./hooks/tests",
+      "d ./hooks/tests/cases",
+      "d ./playbooks",
+      "d ./plugins",
+      "d ./plugins/store",
+      "d ./projects",
+      "d ./session-env",
+      "d ./session-env/3f545958-a56c-441a-b045-10079708505b",
+      "d ./sessions",
+      "d ./shell-snapshots",
+      "d ./templates",
+      "f ./.claude.json",
+      "f ./.last-cleanup",
+      "f ./CLAUDE.md",
+      "f ./HISTORY.md",
+      "f ./agents/explorer.md",
+      "f ./backups/.claude.json.backup.1794933609408",
+      "f ./core.md",
+      "f ./hooks/capture-prompt.sh",
+      "f ./hooks/codex-scan.sh",
+      "f ./hooks/deploy.sh",
+      "f ./hooks/detect-layer.sh",
+      "f ./hooks/gate-guard.sh",
+      "f ./hooks/git-guard.sh",
+      "f ./hooks/reinject-mode.sh",
+      "f ./hooks/session-mode-guard.sh",
+      "f ./hooks/set-state.sh",
+      "f ./hooks/state-lib.sh",
+      "f ./hooks/task-mode-guard.sh",
+      "f ./hooks/tests/baseline.manifest",
+      "f ./hooks/tests/lib.sh",
+      "f ./hooks/tests/run.sh",
+      "f ./hooks/tests/tests.lock",
+      "f ./playbooks/design-taste.md",
+      "f ./playbooks/implementation-lazymode.md",
+      "f ./playbooks/issue-archive.md",
+      "f ./playbooks/open-source.md",
+      "f ./playbooks/refactoring.md",
+      "f ./playbooks/review.md",
+      "f ./plugins/store/cc-plugin-agents-md_builtin-b049b47b3618.json",
+      "f ./policy-limits.json",
+      "f ./policy-limits.json.signature.json",
+      "f ./policy-limits.json.stamp.json",
+      "f ./remote-settings.json",
+      "f ./remote-settings.json.synced-at",
+      "f ./settings.json",
+      "f ./templates/log.md",
+      "f ./templates/measurement-log.md",
+      "f ./templates/next.md",
+      "f ./templates/requirement-spec.md"
+    ],
+    "credentials_file_in_volume": false
+  },
+  "actual_model": null,
+  "actual_model_note": "transcript models/modelUsage are client-observed; requested model is not proof.",
+  "cli_status": "ok",
+  "status": "ok",
+  "secret_redactions": []
+}

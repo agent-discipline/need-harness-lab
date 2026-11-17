@@ -1,0 +1,87 @@
+{
+  "turn_kinds": {
+    "delivered": {
+      "initial": 1,
+      "feedback": 0,
+      "answer": 1
+    },
+    "declared": {
+      "initial": 1,
+      "feedback": 0,
+      "answer": 1,
+      "recovery": 0
+    }
+  },
+  "turn_kinds_error": null,
+  "roles": {
+    "pm": {
+      "requests": 23,
+      "usage": {
+        "input_tokens": 50,
+        "cache_creation_input_tokens": 166093,
+        "cache_read_input_tokens": 2296408,
+        "output_tokens": 92944
+      },
+      "total_tokens": 2555495
+    },
+    "user-proxy": {
+      "requests": 1,
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 13987,
+        "cache_read_input_tokens": 649,
+        "output_tokens": 14128
+      },
+      "total_tokens": 28766
+    },
+    "worker": {
+      "requests": 4,
+      "usage": {
+        "input_tokens": 8,
+        "cache_creation_input_tokens": 46093,
+        "cache_read_input_tokens": 88805,
+        "output_tokens": 38258
+      },
+      "total_tokens": 173164
+    }
+  },
+  "total_tokens": 2757425,
+  "usage_complete": false,
+  "tokens_are_lower_bound": true,
+  "incomplete_calls": [
+    "turn/0002"
+  ],
+  "observed_tools_and_effort": {
+    "by_role": {
+      "pm": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "user-proxy": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "worker": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    "web_tool_uses_complete": false,
+    "source": "transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort"
+  },
+  "conflicts": [],
+  "turns": 2,
+  "consults": 1,
+  "consults_completed": 1,
+  "consults_not_completed": [],
+  "cost_usd": 10.235488,
+  "cost_unobserved": [],
+  "cost_note": "CLI total_cost_usd estimates (subscription: billed_cost null); whether a resumed session reports per-invocation or cumulative cost is not verified before the pilot",
+  "updated_at": "2026-11-17T17:08:26.313774+00:00"
+}

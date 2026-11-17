@@ -1,0 +1,66 @@
+{
+  "run_id": "claude-pilot-01",
+  "pilot": true,
+  "scope": "PILOT_EXCLUDED",
+  "counts_toward_30_runs": false,
+  "arm": 3,
+  "core": 1,
+  "status": "INVALID_INFRA",
+  "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+  "contract_sha256": "de0e95980328db685da0e57f98c52d9331d7bce2f358cc29dc50d058cc533804",
+  "created_at": "2026-11-17T16:49:26.448301+00:00",
+  "verdict": null,
+  "invalid_infra": {
+    "reason": "두 번째 리뷰어가 컨테이너 안에서 인증되지 않아(Not logged in) 3번 조건의 듀얼 리뷰가 성립하지 않음 — 실행 환경 결함, 명세 승인 전 중단",
+    "evidence": {
+      "reviewer-failure/reviewer-calls.log": "3debb6c1685d22b070571355c66b0abda5dc8f86b55fcb1329f446b5418b483f",
+      "reviewer-failure/e3e55516-d389-4a9c-9949-3d21f7cdcad2.json": "a2c09d1dac1c330940ad8f61a53c13a3c9dfbd4448333dd3aa8a67fe38130daa",
+      "reviewer-failure/5846a3e0-94da-4ba4-a798-452809d5cb06.json": "09488e35a89b19a88612281298b60b22f3eff64188a1a28079fb903f9d8a295e"
+    }
+  },
+  "cap_reached": false,
+  "cap": null,
+  "cap_status": null,
+  "cap_when": null,
+  "cap_call": null,
+  "cap_overshoot": null,
+  "finished_at": "2026-11-17T19:22:20.667969+00:00",
+  "evidence_derivation": {
+    "all_acceptance_passed": {
+      "source": "verdict.json",
+      "all_pass": false,
+      "evidence_missing": null
+    },
+    "usage_complete": {
+      "source": ".runs/<run> ledger computed at finish",
+      "incomplete_calls": [
+        "turn/0002"
+      ],
+      "conflicts": 0
+    },
+    "all_role_models_verified": {
+      "source": "manifest actual_role_models + request events (freeze_readiness.run_role_check)",
+      "checks": {
+        "pm": true,
+        "worker": true,
+        "reviewer": false,
+        "user-proxy": true
+      }
+    },
+    "isolation_verified": {
+      "source": "manifest self-tests + readiness evidence.smoke_runs tool surface (freeze_readiness.run_isolation_check)",
+      "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+      "checks": {
+        "init_selftest_passed": true,
+        "call_selftests_passed": true,
+        "no_selftest_failed_before_a_turn": true,
+        "tools_equal_frozen": true
+      }
+    }
+  },
+  "turns_not_capturable": [],
+  "all_acceptance_passed": false,
+  "usage_complete": false,
+  "all_role_models_verified": false,
+  "isolation_verified": true
+}
