@@ -311,10 +311,15 @@ def default_readiness():
 
 def runner_image(args):
     """The image a new run uses. Before the freeze (smoke runs): --image or the CLI-version tag. Once readiness exists
-    (pilot and cycles): the frozen runner digest, and any other --image is refused. Returns (image, readiness or None)."""
-    path = Path(getattr(args, 'readiness', None) or default_readiness())
+    (pilot and cycles): the frozen runner digest, and any other --image is refused. Returns (image, readiness or None).
+    A pre-freeze run is possible only when the DEFAULT readiness file is absent: an explicitly named readiness that does
+    not exist is refused (a mistyped path never turns a frozen run into an unfrozen one)."""
+    explicit = getattr(args, 'readiness', None)
+    path = Path(explicit or default_readiness())
     requested = getattr(args, 'image', None)
     if not path.exists():
+        if explicit:
+            raise ValueError('readiness %s does not exist; omit --readiness only for a run before the freeze' % path)
         return requested or 'payment-claude-runner:' + CLI_VERSION, None
     ready = json.loads(path.read_text())
     digest = (ready.get('image_digests') or {}).get('runner') if isinstance(ready, dict) else None
@@ -325,8 +330,46 @@ def runner_image(args):
                          'new protocol version' % (requested, digest, path))
     return digest, dict(ready, path=path.resolve())
 
+PILOT_RUN = re.compile(r'claude-pilot-\d{2}')
+
+def pilot_run_id(run_id, pilot):
+    """A pilot (init --pilot) is named claude-pilot-NN; no other run may carry that prefix."""
+    if pilot and not PILOT_RUN.fullmatch(run_id):
+        raise ValueError('a pilot run id must be claude-pilot-NN, not %s' % run_id)
+    if not pilot and run_id.startswith('claude-pilot-'):
+        raise ValueError('run id %s is a pilot id; use init --pilot' % run_id)
+
+def record_folder(manifest, root=None):
+    """Where the run's records live, chosen by the manifest: a pilot under docs/pilots/<run id>/, a measured run under
+    docs/experiments/<arm>/core<N>/."""
+    root = Path(root or ROOT)
+    if manifest.get('pilot') is True:
+        return root / 'docs/pilots' / valid_run(manifest['run_id'])
+    return root / 'docs/experiments' / str(manifest['arm']) / ('core%d' % manifest['core'])
+
+def open_record(manifest, run_id, root=None):
+    """The record folder of run_id, refused when its run.json belongs to another run. A pilot's folder and run.json are
+    created on first use; a measured run's run.json must already exist (scripts/prepare.py)."""
+    if manifest.get('run_id') != run_id:
+        raise ValueError('manifest belongs to %s, not %s' % (manifest.get('run_id'), run_id))
+    folder = record_folder(manifest, root)
+    plan = folder / 'run.json'
+    if not plan.exists() and manifest.get('pilot') is True:
+        folder.mkdir(parents=True, exist_ok=True)
+        plan.write_text(json.dumps({'run_id': run_id, 'pilot': True, 'scope': 'PILOT_EXCLUDED', 'counts_toward_30_runs': False,
+                                    'arm': manifest.get('arm'), 'core': manifest.get('core'), 'status': 'RUNNING',
+                                    'readiness': manifest.get('readiness'), 'contract_sha256': manifest.get('contract_sha256'),
+                                    'created_at': utc()}, ensure_ascii=False, indent=2) + '\n')
+    if not plan.is_file():
+        raise ValueError('record %s does not exist' % plan)
+    owner = json.loads(plan.read_text()).get('run_id')
+    if owner != run_id:
+        raise ValueError('record folder %s belongs to %s, not %s' % (folder, owner, run_id))
+    return folder
+
 def initialize(args):
     dest = location(args)
+    pilot_run_id(args.run_id, bool(getattr(args, 'pilot', False)))
     harness = Path(args.harness) if getattr(args, 'harness', None) else None
     args.harness = harness
     if harness and (args.arm != 3 or harness.resolve() != ROOT / 'harness-source' or not harness.is_dir()):
@@ -357,6 +400,7 @@ def initialize(args):
         model, worker = MODELS[args.arm]
         manifest = {
             'run_id': args.run_id, 'arm': args.arm, 'core': args.core, 'provider': 'claude-code',
+            'pilot': bool(getattr(args, 'pilot', False)),     # records go to docs/pilots/<run id>/ (record_folder)
             'cli_version': CLI_VERSION, 'requested_model': model, 'requested_worker_model': worker,
             'context_variant': 'default', 'subagents': 'opus-high' if worker else 'disabled',
             'actual_model': None, 'effort': 'high', 'session_id': str(uuid.uuid4()),
@@ -1005,20 +1049,26 @@ def limit_state(dest, next_is_feedback=False, now=None):
             'answer_turns': counts['delivered']['answer'], 'turn_kinds': counts,
             'overshoot': {k: used[k] - LIMITS[k] for k in LIMITS if used[k] > LIMITS[k]}, 'reached': reached, 'at': utc()}
 
-def censor(dest, state, when):
-    """Write censored.json once (the first cap reached decides the status); later overshoot is appended, never erased."""
+CALL_KINDS = ('turn', 'user-proxy')                   # the kinds of paid call a cap record names (censored.json 'call')
+
+def censor(dest, state, when, call):
+    """Write censored.json once (the first cap reached decides the status); later overshoot is appended, never erased.
+    call names the kind of paid call that was refused or went past the cap ('turn' or 'user-proxy'): only a turn that
+    went past the cap can end in "completed + overshoot" (scripts/finish_run.py)."""
+    if call not in CALL_KINDS:
+        raise ValueError('call must be one of ' + ', '.join(CALL_KINDS))
     path = dest / 'censored.json'
     if path.exists():
         record = json.loads(path.read_text())
-        record.setdefault('later', []).append(dict(state, when=when))
+        record.setdefault('later', []).append(dict(state, when=when, call=call))
     else:
-        record = {'status': state['reached'][0], 'first': dict(state, when=when)}
+        record = {'status': state['reached'][0], 'first': dict(state, when=when, call=call)}
     tmp = dest / 'censored.json.tmp'
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(path)
     return record
 
-def limit_gate(dest, next_is_feedback, write=True):
+def limit_gate(dest, next_is_feedback, write=True, call='turn'):
     """Single gate before every paid call of a run (turns and user-proxy consultations). A censored run accepts no
     further call; reaching a cap now censors the run. Artifacts are never removed."""
     if (dest / 'censored.json').exists():
@@ -1026,7 +1076,7 @@ def limit_gate(dest, next_is_feedback, write=True):
     state = limit_state(dest, next_is_feedback)
     if state['reached']:
         if write:
-            censor(dest, state, 'before call')
+            censor(dest, state, 'before call', call)
         raise RuntimeError('run cap reached before the call: %s %s' % (state['reached'][0], json.dumps(state['used'])))
     return state
 
@@ -1034,13 +1084,25 @@ def call_timeout(requested, state):
     """A single paid call never runs past the run's wall-clock cap: the requested timeout reduced to the remainder."""
     return max(1, min(requested, int(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
 
-def record_overshoot(dest):
-    """After a call: if the run went past a cap during it, censor the run and record by how much."""
+def record_overshoot(dest, call):
+    """After a call of kind call ('turn' or 'user-proxy'): if the run went past a cap during it, censor the run and
+    record by how much and in which kind of call."""
     state = limit_state(dest)
     if state['overshoot']:
         state['reached'] = [status for key, status in CENSORED if key in state['overshoot']]
-        return censor(dest, state, 'after call')
+        return censor(dest, state, 'after call', call)
     return None
+
+def recovery_prompt_check(dest, records, prompt):
+    """A recovery turn continues the turn before it, so it sends exactly that turn's prompt (same sha256)."""
+    previous = dest / 'turns' / records[-1][0] / 'invocation.json'
+    try:
+        expected = json.loads(previous.read_text()).get('prompt_sha256')
+    except (OSError, ValueError, AttributeError) as exc:
+        raise ValueError('cannot read the prompt hash of the turn being recovered (%s): %s' % (previous, exc))
+    if not expected or hashlib.sha256(prompt).hexdigest() != expected:
+        raise ValueError('a recovery turn sends the prompt of the turn it continues (%s, sha256 %s); this prompt differs'
+                         % (records[-1][0], expected))
 
 def turn(args):
     dest = location(args)
@@ -1061,7 +1123,11 @@ def turn(args):
         except ValueError as broken:
             print('unreadable result treated as failed: %s (%s)' % (p / 'result.json', broken), file=sys.stderr)
     # the turn's kind decides whether it is a capped feedback delivery; validated before any paid call
-    kind, counts_as = next_turn_kind(manifest, dest, turn_records(dest), args.resume, getattr(args, 'kind', None))
+    records = turn_records(dest)
+    kind, counts_as = next_turn_kind(manifest, dest, records, args.resume, getattr(args, 'kind', None))
+    prompt = Path(args.prompt).read_bytes()
+    if kind == 'recovery':
+        recovery_prompt_check(dest, records, prompt)
     if args.dry_run:
         exists = bool(successes)
     else:
@@ -1076,7 +1142,6 @@ def turn(args):
     turn_id = f'{len(turn_dirs) + 1:04d}'   # failed turns keep their directory and number; retries get a new one
     name = 'payment-claude-call-' + uuid.uuid4().hex
     command = docker_command(manifest, env_file, name, args.resume, args.max_turns, args.max_budget_usd)
-    prompt = Path(args.prompt).read_bytes()
     if args.dry_run:
         print(json.dumps({'create': command, 'start': ['docker', 'start', '--attach', '--interactive', name],
                           'prompt_bytes': len(prompt), 'session_id': manifest['session_id'], 'resume': args.resume,
@@ -1216,7 +1281,7 @@ def turn(args):
         try:
             finalize_result(output, result, final, error, hits)
             write_ledger(dest)
-            record_overshoot(dest)
+            record_overshoot(dest, 'turn')
         finally:
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')
@@ -1315,14 +1380,16 @@ def main():
     init.add_argument('--network', help='Own run Compose network; never host networking')
     init.add_argument('--image', help='default: the frozen runner digest of --readiness once it exists (any other image '
                       'is refused), else payment-claude-runner:' + CLI_VERSION + ' (smoke runs before the freeze)')
-    init.add_argument('--readiness', type=Path, help='default: claude/docs/results/readiness.json')
+    init.add_argument('--readiness', type=Path, help='default: claude/docs/results/readiness.json (a run before the freeze '
+                      'only when that default is absent; a named readiness that does not exist is refused)')
+    init.add_argument('--pilot', action='store_true', help='pilot run: id claude-pilot-NN, records under docs/pilots/<run id>/')
     run = sub.add_parser('turn')
     run.add_argument('--run-id', required=True)
     run.add_argument('--prompt', type=Path, required=True)
     run.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
     run.add_argument('--timeout-seconds', type=int, default=7200)
     run.add_argument('--max-turns', type=int)
-    run.add_argument('--max-budget-usd', type=float)
+    run.add_argument('--max-budget-usd', type=cost_value)
     run.add_argument('--resume', action='store_true')
     run.add_argument('--kind', choices=TURN_KINDS, help='required with --resume: feedback (evaluator judging result; '
                      'capped at 30) | answer (arm 3: user-proxy answers to the PM) | recovery (continue the preceding '

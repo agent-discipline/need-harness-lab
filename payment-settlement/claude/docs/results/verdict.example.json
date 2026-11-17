@@ -1,0 +1,166 @@
+{
+  "_example": "EXAMPLE ONLY - not a result. Shape of <record folder>/verdict.json read by scripts/finish_run.py (runbook: 판정표)",
+  "run_id": "claude-arm1-core01",
+  "judged_by": "main supervising session (예: 세션 id 또는 이름)",
+  "judged_at": "2026-11-18T00:00:00+00:00",
+  "criteria": {
+    "C01": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C02": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C03": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C04": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C05": {
+      "result": "FAIL",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "예: 관측 위반 내용"
+    },
+    "C06": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C07": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C08": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C09": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C10": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C11": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C12": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C13": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-faults.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C14": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-faults.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C15": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C16": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C17": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-faults.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C18": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-http.json",
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C19": {
+      "result": "PASS",
+      "evidence": [
+        "acceptance-audit.json"
+      ],
+      "note": "판정 근거 요지(메인이 산출물을 직접 읽고 쓴다)"
+    },
+    "C20": {
+      "result": "NOT_RUN",
+      "evidence": [
+        "load-check.json"
+      ],
+      "note": "예: 부하 측정을 실행하지 못함(통과 아님)"
+    }
+  }
+}

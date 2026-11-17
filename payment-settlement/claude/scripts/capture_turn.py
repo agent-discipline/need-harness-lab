@@ -31,10 +31,21 @@ def main_text(stdout):
     return "\n\n".join(texts)
 
 
+def load_recorder():
+    spec = importlib.util.spec_from_file_location("record", ROOT.parent / "recording/record.py")
+    recorder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(recorder)
+    return recorder
+
+
 def capture(run_id, turn, analysis, status, runs=None):
     source = Path(runs or ROOT / ".runs") / run_id
     manifest = json.loads((source / "manifest.json").read_text())
-    records = ROOT / "docs/experiments" / str(manifest["arm"]) / f"core{manifest['core']}"
+    # the manifest decides the location (pilot: docs/pilots/<run id>/); a folder of another run is refused
+    records = launch.open_record(manifest, run_id, ROOT)
+    recorder = load_recorder()
+    if manifest.get("pilot") is True:
+        recorder.init_run(records)                     # idempotent; measured runs were initialized by prepare.py
     raw = source / "turns" / f"{turn:04d}"
     result = json.loads((raw / "result.json").read_text())
     if result.get("status") not in ("ok", "failed") or result.get("session_id") != manifest["session_id"]:
@@ -76,9 +87,6 @@ def capture(run_id, turn, analysis, status, runs=None):
     # The run's single ledger (every role: pm/implementer/worker/reviewer and user-proxy consultations) goes with the
     # records; usage-summary.json above covers only the captured turns.
     (records / "ledger.json").write_text(json.dumps(launch.write_ledger(source), ensure_ascii=False, indent=2) + "\n")
-    spec = importlib.util.spec_from_file_location("record", ROOT.parent / "recording/record.py")
-    recorder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(recorder)
     recorder.record_turn(records, destination / "prompt.txt", destination / "analysis.md",
                          "pm" if manifest["arm"] == 3 else "implementer", manifest["session_id"], status,
                          destination / "response.txt", [destination / "result.json", destination / "usage.jsonl"])

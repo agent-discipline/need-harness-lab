@@ -64,6 +64,14 @@ def consult_dir(runs, run_id):
     return run, folder / ('%04d' % number)
 
 
+def run_image(run):
+    """The proxy runs only on the image pinned in its run's manifest at init (the run's own image, never another)."""
+    image = json.loads((Path(run) / 'manifest.json').read_text()).get('image')
+    if not isinstance(image, str) or not image.strip():
+        raise ValueError('run manifest %s pins no image; the user proxy runs only on the run\'s own image' % run)
+    return image
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run-id', required=True, help='arm 3 run the consultation belongs to (its cost is that condition\'s cost)')
@@ -82,12 +90,12 @@ def main():
         p.error('--model must be the agreed user proxy model %s' % launch.USER_PROXY_MODEL)
     try:
         run, out = consult_dir(a.runs, a.run_id)
+        image = run_image(run)
         # the run's caps cover the proxy too (same gate as the runner's turns; a censored run gets no consultation)
-        limits = launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run)
+        limits = launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run, call='user-proxy')
     except (OSError, ValueError, RuntimeError) as exc:
         p.error(str(exc))
     timeout = launch.call_timeout(a.timeout_seconds, limits)      # never past the run's wall-clock cap
-    image = ready['image_digests']['runner']
     env_file = a.env_file.resolve()
     token = launch.read_token(env_file)
     prompt, packet = build_prompt(a.questions)
@@ -95,7 +103,7 @@ def main():
     name = 'payment-claude-proxy-' + uuid.uuid4().hex
     command = proxy_command(image, name, env_file, a.model, session_id)
     invocation = {'create': command, 'start': ['docker', 'start', '--attach', '--interactive', name],
-                  'run_id': a.run_id, 'role': 'user-proxy', 'model': a.model, 'session_id': session_id,
+                  'run_id': a.run_id, 'role': 'user-proxy', 'model': a.model, 'session_id': session_id, 'image': image,
                   'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(), 'env_file': str(env_file),
                   'timeout_seconds': a.timeout_seconds, 'effective_timeout_seconds': timeout, 'limits_before_call': limits}
     if a.dry_run:
@@ -162,7 +170,7 @@ def main():
         completed = final['completed'] = launch.consult_completed(out)
         (out / 'usage.json').write_text(json.dumps(final, indent=2, ensure_ascii=False) + '\n')
         launch.write_ledger(run)
-        launch.record_overshoot(run)
+        launch.record_overshoot(run, 'user-proxy')
     if error or hits:
         print('user proxy failed: ' + (error or 'credential leak redacted; rotate the token'), file=sys.stderr)
         return 1

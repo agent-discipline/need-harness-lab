@@ -115,6 +115,50 @@ def role_check(arm, observed, required, run=None):
     return check
 
 
+def run_role_check(run, manifest, required):
+    """role_check over one run's own records: the manifest's observed role models (turns) plus, per request, the
+    user-proxy consultations of the run, which must be on the agreed proxy model. Used at the freeze (pilot) and at
+    each run's finish (scripts/finish_run.py)."""
+    arm = manifest.get('arm')
+    models = role_check(arm, manifest.get('actual_role_models') or {}, required, run)
+    proxy_models = sorted({e['model'] for e in launch.reconcile_events(Path(run))[0] if e.get('role') == 'user-proxy'})
+    if proxy_models:                                    # consultations made during the run must use the agreed proxy model
+        models['user-proxy'] = all(model_matches([m], AGREED.get((arm, 'user-proxy'))) for m in proxy_models)
+    return models
+
+
+def frozen_tools(readiness, arm):
+    """The tool surface frozen for an arm: what the smoke runs of that arm observed (readiness evidence.smoke_runs,
+    written by smoke_evidence). None when the freeze recorded no smoke run of the arm."""
+    runs = ((readiness or {}).get('evidence') or {}).get('smoke_runs') or {}
+    surfaces = [set(d.get('observed_tools') or []) for d in runs.values() if isinstance(d, dict) and d.get('arm') == arm]
+    return set().union(*surfaces) if surfaces and all(surfaces) else None
+
+
+def tools_match(observed, frozen):
+    """A run's observed tool surface (its init self-test) equals the surface frozen for its arm. The cross-arm
+    comparison is made once at the freeze (isolation_verified of smoke_evidence), not per run."""
+    observed = {t for t in observed or [] if t}
+    return bool(observed) and frozen is not None and observed == set(frozen)
+
+
+def run_isolation_check(run, manifest, readiness):
+    """isolation_verified of one run: its init self-test passed, every hook self-test it ran before a call (arm 3)
+    passed, and its observed tool surface equals the surface frozen for its arm."""
+    pre = []
+    for path in sorted(Path(run).glob('turns/*/invocation.json')):
+        try:
+            pre.append(json.loads(path.read_text()).get('hook_selftest_before_call'))
+        except (OSError, ValueError):
+            pre.append({'passed': False, 'unreadable': str(path)})
+    checks = {'init_selftest_passed': (manifest.get('selftest') or {}).get('passed') is True,
+              # a harness run (arm 3) self-tests before every call; arms 1/2 record None
+              'call_selftests_passed': all((p is None and not manifest.get('harness')) or
+                                           (isinstance(p, dict) and p.get('passed') is True) for p in pre),
+              'tools_equal_frozen': tools_match(manifest.get('observed_tools'), frozen_tools(readiness, manifest.get('arm')))}
+    return all(checks.values()), checks
+
+
 def smoke_evidence(runs, run_ids):
     """Derive flags from paid smoke runs made by launch.py (manifest + finalized turns)."""
     flags = {k: False for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
@@ -173,10 +217,7 @@ def pilot_evidence(runs, run_id, contract_sha256, runner_image):
     ok = [r for r in results if r.get('status') == 'ok']
     ledger = launch.run_ledger(run)
     roles = ledger['roles']
-    models = role_check(3, manifest.get('actual_role_models') or {}, PILOT_ROLES, run)
-    proxy_models = sorted({e['model'] for e in launch.reconcile_events(run)[0] if e.get('role') == 'user-proxy'})
-    if proxy_models:                                    # consultations made during the pilot must use the agreed proxy model
-        models['user-proxy'] = all(model_matches([m], AGREED[(3, 'user-proxy')]) for m in proxy_models)
+    models = run_role_check(run, dict(manifest, arm=3), PILOT_ROLES)
     checks = {
         'arm_3': manifest.get('arm') == 3,
         'same_contract': bool(contract_sha256) and manifest.get('contract_sha256') == contract_sha256,

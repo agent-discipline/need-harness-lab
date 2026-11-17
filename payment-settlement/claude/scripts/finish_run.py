@@ -1,77 +1,221 @@
 #!/usr/bin/env python3
-"""Write a run's terminal status into its record (docs/experiments/<arm>/core<N>/run.json) from the evaluator's verdict
-and the runner's cap record (.runs/<run>/censored.json).
+"""Write a run's terminal status and its four evidence fields into its record run.json, derived only from fixed sources
+(spec 10.2): the verdict table verdict.json in the record folder (written by the main supervising session), the run
+directory .runs/<run> (ledger computed on the spot, manifest, request events, self-tests), the freeze (readiness.json
+named in the manifest) and the cap record censored.json.
 
-Decision 2026-11-17 (spec 0, 상한 초과 완료 run): a cap is the rule that stops the NEXT paid call. A run whose final state
-passed the acceptance criteria although its last call went past the token or time cap is PASSED with the overshoot
-recorded next to it (cap_overshoot); a run that did not pass and reached a cap is CENSORED_* as before.
-censored.json is never changed or removed, so the runner keeps refusing every further paid call of a capped run.
+PASSED/FAILED are never arguments: PASSED only when all of C01..C20 are PASS in verdict.json. INVALID_INFRA (an
+execution-environment failure unrelated to the implementation) is the only status given by argument, with a reason and
+evidence files. A run is finished once; a correction needs --supersede --reason and keeps the previous run.json beside
+the new one. A passed run whose last call went past the token or time cap is PASSED with the overshoot recorded, only
+when that call was a turn (censored.json 'call'); censored.json is never changed, so the run stays closed to new calls.
 """
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runner'))
+sys.path.insert(0, str(ROOT / 'scripts'))
 import launch
+import commit_run
+import freeze_readiness
 
-VERDICTS = ('PASSED', 'FAILED', 'INVALID_INFRA')
-# caps a passing last call may have run past (the feedback cap stops the 31st delivery before it is sent)
+CRITERIA = tuple('C%02d' % n for n in range(1, 21))
+RESULTS = ('PASS', 'FAIL', 'PARTIAL', 'NOT_RUN')       # PARTIAL and NOT_RUN are not a pass (evaluation/README.md)
+VERDICT = 'verdict.json'
+# caps a passing last turn may have run past (the feedback cap stops the 31st delivery before it is sent)
 OVERSHOOT_CAPS = ('CENSORED_BUDGET', 'CENSORED_TIME')
+NOT_FINISHABLE = ('NOT_STARTED', 'SETUP_FAILED')        # setup failures follow the runbook's recovery, not this script
+# roles each arm must show with its agreed model (the same sets the freeze uses: smoke runs and the arm 3 pilot)
+RUN_ROLES = {1: freeze_readiness.SMOKE_ROLES[1], 2: freeze_readiness.SMOKE_ROLES[2], 3: freeze_readiness.PILOT_ROLES}
 
 
-def terminal(verdict, censored):
-    """(status, cap_overshoot) for the evaluator's verdict and the run's censored.json content (or None)."""
-    if verdict not in VERDICTS:
-        raise ValueError('verdict must be one of ' + ', '.join(VERDICTS))
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def inside(folder, rel):
+    """A path written relative to the record folder that stays inside it; anything else is a malformed reference."""
+    if not isinstance(rel, str) or not rel.strip() or Path(rel).is_absolute():
+        raise ValueError('evidence path must be relative to the record folder: %r' % (rel,))
+    path = (folder / rel).resolve()
+    if folder.resolve() not in path.parents:
+        raise ValueError('evidence path leaves the record folder: %s' % rel)
+    return path
+
+
+def read_verdict(folder, run_id):
+    """Validate the verdict table's shape and hash its evidence files. A malformed table is refused; a listed evidence
+    file that does not exist is recorded as missing (hash None) and makes all_acceptance_passed false."""
+    path = folder / VERDICT
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or data.get('run_id') != run_id:
+        raise ValueError('%s is not the verdict of %s (run_id %r)' % (path, run_id, data.get('run_id') if isinstance(data, dict) else None))
+    if '_example' in data:
+        raise ValueError('%s is the example file (docs/results/verdict.example.json), not a verdict' % path)
+    if not isinstance(data.get('judged_by'), str) or not data['judged_by'].strip():
+        raise ValueError('%s needs judged_by (who read the judging artifacts and wrote the table)' % path)
+    criteria = data.get('criteria')
+    if not isinstance(criteria, dict) or set(criteria) != set(CRITERIA):
+        raise ValueError('%s must judge exactly C01..C20 under "criteria"' % path)
+    results, evidence, unsupported = {}, {}, []
+    for cid in CRITERIA:
+        item = criteria[cid]
+        if not isinstance(item, dict) or item.get('result') not in RESULTS:
+            raise ValueError('%s %s: result must be one of %s' % (path, cid, ', '.join(RESULTS)))
+        files = item.get('evidence')
+        if not isinstance(files, list):
+            raise ValueError('%s %s: evidence must be a list of paths relative to the record folder' % (path, cid))
+        results[cid] = item['result']
+        for rel in files:
+            file = inside(folder, rel)
+            evidence.setdefault(rel, sha(file) if file.is_file() else None)
+        if not files:
+            unsupported.append(cid)
+    passed = all(results[c] == 'PASS' for c in CRITERIA)
+    missing = sorted(rel for rel, digest in evidence.items() if digest is None)
+    counts = {r: sum(1 for v in results.values() if v == r) for r in RESULTS}
+    return {'file': VERDICT, 'sha256': sha(path), 'judged_by': data['judged_by'], 'judged_at': data.get('judged_at'),
+            'results': results, 'counts': counts, 'passed': passed, 'evidence': evidence, 'evidence_missing': missing,
+            'criteria_without_evidence': unsupported,
+            'evidence_complete': not missing and not unsupported}
+
+
+def terminal(passed, censored):
+    """(status, cap_overshoot) from the verdict table's outcome and the run's censored.json content (or None)."""
     if censored is None:
-        return verdict, None
+        return ('PASSED' if passed else 'FAILED'), None
+    if not passed:
+        return censored['status'], None                 # not passed and capped: censored as before
     first = censored.get('first') or {}
-    if verdict == 'PASSED':
-        if censored.get('status') not in OVERSHOOT_CAPS or first.get('when') != 'after call':
-            raise ValueError('a run censored %s (%s) cannot be PASSED: only a last call that went past the token or time '
-                             'cap counts as completed with overshoot' % (censored.get('status'), first.get('when')))
-        return 'PASSED', {'censored_status': censored['status'], 'overshoot': first.get('overshoot') or {},
-                          'used': first.get('used'), 'limits': first.get('limits'), 'when': first['when'],
-                          'at': first.get('at'), 'record': 'censored.json (runner run directory, unchanged)',
-                          'rule': 'cap stops the next paid call; acceptance passed on the last call (decision 2026-11-17)'}
-    if verdict == 'INVALID_INFRA':
-        return verdict, None
-    return censored['status'], None                     # not passed and capped: censored as before
+    if censored.get('status') not in OVERSHOOT_CAPS or first.get('when') != 'after call' or first.get('call') != 'turn':
+        raise ValueError('a run censored %s (%s, call %s) cannot be PASSED: only a last TURN that went past the token or '
+                         'time cap counts as completed with overshoot; a cap record without the call kind does not'
+                         % (censored.get('status'), first.get('when'), first.get('call')))
+    return 'PASSED', {'censored_status': censored['status'], 'overshoot': first.get('overshoot') or {},
+                      'used': first.get('used'), 'limits': first.get('limits'), 'when': first['when'],
+                      'call': first['call'], 'at': first.get('at'),
+                      'record': 'censored.json (runner run directory, unchanged)',
+                      'rule': 'cap stops the next paid call; acceptance passed on the last turn (decision 2026-11-17)'}
 
 
-def finish(run_id, verdict, runs=None, root=None):
+def readiness_of(manifest):
+    path = manifest.get('readiness')
+    try:
+        return json.loads(Path(path).read_text()) if path else None
+    except (OSError, ValueError):
+        return None
+
+
+def evidence_fields(run, manifest, verdict):
+    """The four fields commit_run.py requires for a PASSED run, each from its fixed source only (false when the source
+    is absent or false), plus how each was derived."""
+    ledger = launch.run_ledger(run)                     # computed now from the run directory, not a copy
+    roles = freeze_readiness.run_role_check(run, manifest, RUN_ROLES.get(manifest.get('arm'), ()))
+    isolated, isolation = freeze_readiness.run_isolation_check(run, manifest, readiness_of(manifest))
+    fields = {
+        'all_acceptance_passed': bool(verdict) and verdict['passed'] and verdict['evidence_complete'],
+        'usage_complete': ledger['usage_complete'] is True,
+        'all_role_models_verified': bool(roles) and all(roles.values()),
+        'isolation_verified': isolated,
+    }
+    derivation = {
+        'all_acceptance_passed': {'source': VERDICT, 'all_pass': bool(verdict) and verdict['passed'],
+                                  'evidence_missing': verdict['evidence_missing'] if verdict else None,
+                                  'criteria_without_evidence': verdict['criteria_without_evidence'] if verdict else None},
+        'usage_complete': {'source': '.runs/<run> ledger computed at finish', 'incomplete_calls': ledger['incomplete_calls'],
+                           'conflicts': len(ledger['conflicts'])},
+        'all_role_models_verified': {'source': 'manifest actual_role_models + request events (freeze_readiness.run_role_check)',
+                                     'checks': roles},
+        'isolation_verified': {'source': 'manifest self-tests + readiness evidence.smoke_runs tool surface '
+                                         '(freeze_readiness.run_isolation_check)', 'readiness': manifest.get('readiness'),
+                               'checks': isolation},
+    }
+    return fields, derivation
+
+
+def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), supersede_reason=None):
     root = Path(root or ROOT)
     run = Path(runs or root / '.runs').resolve() / launch.valid_run(run_id)
     manifest = json.loads((run / 'manifest.json').read_text())
-    record_path = root / 'docs/experiments' / str(manifest['arm']) / ('core%d' % manifest['core']) / 'run.json'
+    folder = launch.open_record(manifest, run_id, root)
+    record_path = folder / 'run.json'
     record = json.loads(record_path.read_text())
-    if record.get('run_id') not in (None, run_id):
-        raise ValueError('record %s belongs to %s, not %s' % (record_path, record.get('run_id'), run_id))
+    if record.get('status') in NOT_FINISHABLE:
+        raise ValueError('record status %s: a run that never started is recovered per the runbook, not finished'
+                         % record['status'])
+    if not launch.turn_records(run):
+        raise ValueError('run %s sent no turn; nothing to finish' % run_id)
+    finished = record.get('status') in commit_run.TERMINAL or bool(record.get('finished_at'))
+    if finished and supersede_reason is None:
+        raise ValueError('run %s is already finished (%s); a correction needs --supersede --reason' % (run_id, record.get('status')))
+    if supersede_reason is not None and (not finished or not supersede_reason.strip()):
+        raise ValueError('--supersede needs a finished record and a non-empty --reason')
     censored = json.loads((run / 'censored.json').read_text()) if (run / 'censored.json').exists() else None
-    status, overshoot = terminal(verdict, censored)
-    record.update(status=status, verdict=verdict, cap_overshoot=overshoot, cap_reached=censored is not None,
-                  finished_at=datetime.now(timezone.utc).isoformat())
+    verdict = read_verdict(folder, run_id) if (folder / VERDICT).exists() else None
+    invalid = None
+    if infra_reason is not None:
+        if not infra_reason.strip() or not infra_evidence:
+            raise ValueError('INVALID_INFRA needs a reason and at least one evidence file')
+        if verdict and verdict['passed']:
+            raise ValueError('verdict.json passes every criterion; that is not an infrastructure failure')
+        hashes = {}
+        for rel in infra_evidence:
+            file = inside(folder, rel)
+            if not file.is_file():
+                raise ValueError('INVALID_INFRA evidence does not exist: ' + rel)
+            hashes[rel] = sha(file)
+        status, overshoot = 'INVALID_INFRA', None
+        invalid = {'reason': infra_reason, 'evidence': hashes}
+    elif verdict is None:
+        raise ValueError('%s missing: the main session writes the verdict table before the finish' % (folder / VERDICT))
+    else:
+        status, overshoot = terminal(verdict['passed'], censored)
+    fields, derivation = evidence_fields(run, manifest, verdict)
+    if invalid:
+        fields['all_acceptance_passed'] = False
+    now = datetime.now(timezone.utc).isoformat()
+    if supersede_reason is not None:
+        kept = folder / ('run.superseded-%s.json' % now.replace(':', '-'))
+        shutil.copy2(record_path, kept)
+        record['supersedes'] = {'file': kept.name, 'sha256': sha(kept), 'previous_status': record.get('status'),
+                                'reason': supersede_reason, 'at': now}
+    record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_overshoot=overshoot,
+                  cap_reached=censored is not None, finished_at=now, evidence_derivation=derivation, **fields)
     tmp = record_path.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(record_path)
-    return record_path, status, overshoot
+    return record_path, status, overshoot, fields
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run-id', required=True)
-    p.add_argument('--verdict', required=True, choices=VERDICTS,
-                   help='evaluator verdict on the final state: PASSED = every acceptance criterion passed')
     p.add_argument('--runs', type=Path)
+    p.add_argument('--invalid-infra', metavar='REASON', help='execution-environment failure unrelated to the implementation '
+                   '(Docker, host, the judging tool itself); confirmed by the main session before it is recorded')
+    p.add_argument('--evidence', action='append', default=[], help='INVALID_INFRA evidence file, relative to the record '
+                   'folder (repeat)')
+    p.add_argument('--supersede', action='store_true', help='correct an already finished record (the old run.json is kept)')
+    p.add_argument('--reason', help='why the finished record is superseded (required with --supersede)')
     a = p.parse_args()
+    if a.supersede and not a.reason:
+        p.error('--supersede requires --reason')
+    if a.reason and not a.supersede:
+        p.error('--reason belongs to --supersede (INVALID_INFRA takes its reason as --invalid-infra REASON)')
+    if a.evidence and a.invalid_infra is None:
+        p.error('--evidence belongs to --invalid-infra')
     try:
-        path, status, overshoot = finish(a.run_id, a.verdict, a.runs)
-    except (OSError, ValueError, KeyError) as exc:
+        path, status, overshoot, fields = finish(a.run_id, a.runs, infra_reason=a.invalid_infra, infra_evidence=a.evidence,
+                                                 supersede_reason=a.reason if a.supersede else None)
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
         p.error(str(exc))
-    print(json.dumps({'record': str(path), 'status': status, 'cap_overshoot': overshoot}, ensure_ascii=False))
+    print(json.dumps({'record': str(path), 'status': status, 'cap_overshoot': overshoot, **fields}, ensure_ascii=False))
     return 0
 
 

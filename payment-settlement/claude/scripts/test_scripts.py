@@ -1,5 +1,6 @@
 """No-cost tests for the Claude-arm scripts (no docker, no model call)."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -418,9 +419,10 @@ class CaptureTurnTest(unittest.TestCase):
             spec_record.loader.exec_module(record)
             records = root / 'docs/experiments/3/core1'
             record.init_run(records)
+            write(records / 'run.json', {'run_id': 'claude-arm3-core01', 'status': 'RUNNING'})
             run = root / '.runs/claude-arm3-core01'
             session = '11111111-2222-4333-8444-555555555555'
-            write(run / 'manifest.json', dict(arm=3, core=1, session_id=session, requested_model='claude-fable-5-2',
+            write(run / 'manifest.json', dict(run_id='claude-arm3-core01', arm=3, core=1, session_id=session, requested_model='claude-fable-5-2',
                                               requested_worker_model='claude-opus-5-5', requested_reviewer_model='claude-fable-5-2'))
             events = [dict(type='message', id='r-pm', model='claude-fable-5-2', usage=USAGE, role='pm'),
                       dict(type='message', id='r-wk', model='claude-opus-5-5', usage=USAGE, role='worker'),
@@ -478,7 +480,7 @@ class ConsultContractTest(unittest.TestCase):
         path = Path(tmp) / 'readiness.json'
         write(path, ready(user_proxy_model=proxy_model))
         runs = Path(tmp) / 'runs'
-        write(runs / 'claude-arm3-core01' / 'manifest.json', {'arm': arm, 'run_id': 'claude-arm3-core01'})
+        write(runs / 'claude-arm3-core01' / 'manifest.json', {'arm': arm, 'run_id': 'claude-arm3-core01', 'image': 'sha256:run-image'})
         (runs / 'claude-arm3-core01' / 'turns').mkdir()
         return ['consult_contract.py', '--run-id', 'claude-arm3-core01', '--questions', str(questions), '--env-file', str(env),
                 '--readiness', str(path), '--runs', str(runs)], runs / 'claude-arm3-core01'
@@ -684,70 +686,311 @@ class EvaluationCostLedgerTest(unittest.TestCase):
             self.assertNotEqual(self.cli(ledger, *ok)[0], 0)
 
 
+def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results=None, tools=None, models=None,
+                   usage_complete=True, selftest=True, readiness=True, record_status='RUNNING', censored=None, turns=1,
+                   proxy_model=None):
+    """A run directory, its frozen readiness and its record folder with verdict.json and evidence files."""
+    launch = finish_run.launch
+    root = Path(tmp) / 'claude'
+    run = root / '.runs' / run_id
+    base = list(launch.ALLOWED_TOOLS_ARM3 if arm == 3 else launch.ALLOWED_TOOLS_ARM12)
+    ready_path = root / 'docs/results/readiness.json'
+    write(ready_path, {'evidence': {'smoke_runs': {'s%d' % a: {'arm': a, 'observed_tools': sorted(
+        launch.ALLOWED_TOOLS_ARM3 if a == 3 else launch.ALLOWED_TOOLS_ARM12)} for a in (1, 2, 3)}}})
+    observed = models or ({'implementer': ['claude-opus-5-5']} if arm != 3 else
+                          {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5'], 'reviewer': ['claude-fable-5-2']})
+    write(run / 'manifest.json', {'run_id': run_id, 'arm': arm, 'core': 1, 'pilot': pilot, 'harness': '/h' if arm == 3 else None,
+                                  'selftest': {'passed': selftest}, 'observed_tools': tools if tools is not None else base,
+                                  'actual_role_models': observed, 'readiness': str(ready_path) if readiness else None})
+    events = []
+    for role, models_ in observed.items():
+        events += [dict(type='message', id='r-%s-%s' % (role, m), model=m, role=role, turn='0001', agent_type=None,
+                        usage=dict(USAGE)) for m in models_]
+    for n in range(1, turns + 1):
+        t = run / 'turns' / ('%04d' % n)
+        write(t / 'invocation.json', {'turn_kind': 'initial' if n == 1 else 'feedback', 'started_at': launch.utc(),
+                                      'hook_selftest_before_call': {'passed': True} if arm == 3 else None})
+        write(t / 'result.json', {'status': 'ok', 'usage_complete': usage_complete,
+                                  'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}})
+        (t / 'events.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in (events if n == 1 else [])))
+    if proxy_model:
+        c = run / 'consults/0001'
+        write(c / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0})
+        (c / 'events.jsonl').write_text(json.dumps(dict(type='message', id='px', model=proxy_model, role='user-proxy',
+                                                        turn='p', usage=dict(USAGE))) + '\n')
+    if censored:
+        write(run / 'censored.json', censored)
+    folder = root / ('docs/pilots/%s' % run_id if pilot else 'docs/experiments/%d/core1' % arm)
+    if not pilot:
+        write(folder / 'run.json', {'run_id': run_id, 'status': record_status, 'isolation_verified': True})
+    results = results or {}
+    criteria = {c: {'result': results.get(c, 'PASS'), 'evidence': ['acceptance-http.json']} for c in finish_run.CRITERIA}
+    write(folder / 'verdict.json', {'run_id': run_id, 'judged_by': 'main session', 'judged_at': launch.utc(),
+                                    'criteria': criteria})
+    write(folder / 'acceptance-http.json', {'cases': {}})
+    return root, run, folder
+
+
 class FinishRunTest(unittest.TestCase):
-    """Decision 2026-11-17: passed + last call over the token/time cap = PASSED with the overshoot recorded."""
+    """Spec 10.2: terminal status from the verdict table; the four evidence fields from fixed sources only."""
 
-    def make(self, tmp, tokens):
-        root = Path(tmp) / 'claude'
-        run = root / '.runs/claude-arm1-core01'
-        write(run / 'manifest.json', {'run_id': 'claude-arm1-core01', 'arm': 1, 'core': 1})
-        t = run / 'turns/0001'
-        write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': finish_run.launch.utc()})
-        write(t / 'result.json', {'status': 'ok', 'usage_complete': True})
-        (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r1', model='m', role='implementer', turn='0001',
-            usage=dict(input_tokens=tokens, cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=0))) + '\n')
-        write(root / 'docs/experiments/1/core1/run.json', {'run_id': 'claude-arm1-core01', 'status': 'RUNNING'})
-        return root, run
+    def finish(self, root, run_id='claude-arm1-core01', **kw):
+        return finish_run.finish(run_id, root / '.runs', root, **kw)
 
-    def finish(self, root, verdict):
-        return finish_run.finish('claude-arm1-core01', verdict, root / '.runs', root)
+    def record(self, folder):
+        return json.loads((folder / 'run.json').read_text())
 
-    def record(self, root):
-        return json.loads((root / 'docs/experiments/1/core1/run.json').read_text())
-
-    def test_passed_run_that_overshot_on_its_last_call_is_passed_with_the_overshoot_kept(self):
-        launch = finish_run.launch
+    def test_status_comes_from_the_verdict_table_never_from_an_argument(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root, run = self.make(tmp, 20_000_500)
-            launch.record_overshoot(run)                                  # what the runner does after the last call
-            before = (run / 'censored.json').read_bytes()
-            _, status, overshoot = self.finish(root, 'PASSED')
+            root, _, folder = finish_fixture(tmp)
+            _, status, _, fields = self.finish(root)
             self.assertEqual(status, 'PASSED')
-            record = self.record(root)
-            self.assertEqual((record['status'], record['cap_reached'], record['verdict']), ('PASSED', True, 'PASSED'))
-            self.assertEqual(record['cap_overshoot']['censored_status'], 'CENSORED_BUDGET')
-            self.assertEqual(record['cap_overshoot']['overshoot'], {'token_limit': 500})
-            self.assertIn('PASSED', __import__('commit_run').TERMINAL)
-            self.assertEqual((run / 'censored.json').read_bytes(), before)   # the cap record is kept as it was
-            with self.assertRaises(RuntimeError):                         # and still blocks every further paid call
-                launch.limit_gate(run, next_is_feedback=False)
-            self.finish(root, 'FAILED')                                   # not passed: censored as before
-            record = self.record(root)
-            self.assertEqual((record['status'], record['cap_overshoot']), ('CENSORED_BUDGET', None))
+            self.assertEqual(fields, {'all_acceptance_passed': True, 'usage_complete': True,
+                                      'all_role_models_verified': True, 'isolation_verified': True})
+            record = self.record(folder)
+            self.assertEqual(record['verdict']['judged_by'], 'main session')
+            self.assertEqual(record['verdict']['evidence']['acceptance-http.json'],
+                             hashlib.sha256((folder / 'acceptance-http.json').read_bytes()).hexdigest())
+            self.assertEqual(record['verdict']['sha256'], hashlib.sha256((folder / 'verdict.json').read_bytes()).hexdigest())
+        for other in ('FAIL', 'PARTIAL', 'NOT_RUN'):                             # anything but PASS is not a pass
+            with tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp, results={'C07': other})
+                _, status, _, fields = self.finish(root)
+                self.assertEqual((status, fields['all_acceptance_passed']), ('FAILED', False), other)
+        with patch.object(sys, 'argv', ['finish_run.py', '--run-id', 'x', '--verdict', 'PASSED']), \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            finish_run.main()
 
-    def test_without_a_cap_the_verdict_is_the_status_and_a_before_call_censor_cannot_pass(self):
-        launch = finish_run.launch
+    def test_each_evidence_field_is_false_when_its_source_is_absent_or_false(self):
+        cases = {'all_acceptance_passed': dict(),
+                 'usage_complete': dict(usage_complete=False),
+                 'all_role_models_verified': dict(models={'implementer': ['claude-opus-5']}),
+                 'isolation_verified': dict(tools=list(finish_run.launch.ALLOWED_TOOLS_ARM12) + ['Task'])}
+        for field, kw in cases.items():
+            with self.subTest(field), tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp, **kw)
+                if field == 'all_acceptance_passed':
+                    (folder / 'acceptance-http.json').unlink()                   # listed evidence does not exist
+                _, status, _, fields = self.finish(root)
+                self.assertEqual(status, 'PASSED')                               # passed; commit_run then blocks
+                self.assertIs(fields[field], False)
+                self.assertEqual([k for k, v in fields.items() if not v], [field])
+                record = self.record(folder)
+                self.assertIs(record[field], False)                              # a hand-written true is overwritten
+                if field == 'all_acceptance_passed':
+                    self.assertEqual(record['verdict']['evidence_missing'], ['acceptance-http.json'])
+        for kw in (dict(selftest=False), dict(readiness=False)):                 # isolation: self-test, frozen surface
+            with tempfile.TemporaryDirectory() as tmp:
+                root, _, _ = finish_fixture(tmp, **kw)
+                self.assertIs(self.finish(root)[3]['isolation_verified'], False, kw)
+        with tempfile.TemporaryDirectory() as tmp:                              # arm 3 role that was never observed
+            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01',
+                                        models={'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5']})
+            self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], False)
+        with tempfile.TemporaryDirectory() as tmp:                              # proxy on another model
+            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-sonnet-4')
+            self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], False)
+        with tempfile.TemporaryDirectory() as tmp:                              # criterion judged without evidence
+            root, _, folder = finish_fixture(tmp)
+            verdict = json.loads((folder / 'verdict.json').read_text())
+            verdict['criteria']['C03']['evidence'] = []
+            write(folder / 'verdict.json', verdict)
+            self.assertIs(self.finish(root)[3]['all_acceptance_passed'], False)
+
+    def test_evidence_fields_use_the_freeze_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root, run = self.make(tmp, 10)
-            for verdict in ('PASSED', 'FAILED', 'INVALID_INFRA'):
-                self.finish(root, verdict)
-                self.assertEqual((self.record(root)['status'], self.record(root)['cap_overshoot'], self.record(root)['cap_reached']),
-                                 (verdict, None, False))
+            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01')
+            fr = finish_run.freeze_readiness
+            with patch.object(fr, 'run_role_check', wraps=fr.run_role_check) as roles, \
+                 patch.object(fr, 'run_isolation_check', wraps=fr.run_isolation_check) as isolation:
+                fields = self.finish(root, 'claude-arm3-core01')[3]
+            self.assertTrue(all(fields.values()), fields)
+            roles.assert_called_once()
+            isolation.assert_called_once()
+
+    def test_malformed_or_missing_verdict_is_refused_and_nothing_is_written(self):
+        edits = {'other run': lambda v: v.update(run_id='claude-arm2-core01'),
+                 'no judge': lambda v: v.update(judged_by=' '),
+                 'missing C20': lambda v: v['criteria'].pop('C20'),
+                 'unknown result': lambda v: v['criteria']['C01'].update(result='OK'),
+                 'escaping path': lambda v: v['criteria']['C01'].update(evidence=['../../../x.json']),
+                 'absolute path': lambda v: v['criteria']['C01'].update(evidence=['/etc/hostname']),
+                 'example file': lambda v: v.update(_example='EXAMPLE ONLY')}
+        for name, edit in edits.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp)
+                verdict = json.loads((folder / 'verdict.json').read_text())
+                edit(verdict)
+                write(folder / 'verdict.json', verdict)
+                with self.assertRaises(ValueError):
+                    self.finish(root)
+                self.assertEqual(self.record(folder)['status'], 'RUNNING')
         with tempfile.TemporaryDirectory() as tmp:
-            root, run = self.make(tmp, 20_000_000)                        # exactly at the cap: refused before the next call
-            with self.assertRaises(RuntimeError):
-                launch.limit_gate(run, next_is_feedback=True)
+            root, _, folder = finish_fixture(tmp)
+            (folder / 'verdict.json').unlink()
             with self.assertRaises(ValueError):
-                self.finish(root, 'PASSED')
-            self.assertEqual(self.record(root)['status'], 'RUNNING')
-            self.finish(root, 'FAILED')
-            self.assertEqual(self.record(root)['status'], 'CENSORED_BUDGET')
-        turns = {'status': 'CENSORED_TURNS', 'first': {'when': 'before call'}}
-        with self.assertRaises(ValueError):
-            finish_run.terminal('PASSED', turns)
-        self.assertEqual(finish_run.terminal('FAILED', turns), ('CENSORED_TURNS', None))
-        timed = {'status': 'CENSORED_TIME', 'first': {'when': 'after call', 'overshoot': {'time_limit_seconds': 4.2}}}
-        self.assertEqual(finish_run.terminal('PASSED', timed)[1]['overshoot'], {'time_limit_seconds': 4.2})
+                self.finish(root)
+        example = json.loads((finish_run.ROOT / 'docs/results/verdict.example.json').read_text())
+        self.assertEqual(sorted(example['criteria']), list(finish_run.CRITERIA))   # the shipped example has the shape
+        self.assertTrue(all(c['result'] in finish_run.RESULTS for c in example['criteria'].values()))
+
+    def test_finish_once_and_supersede_keeps_the_previous_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _, folder = finish_fixture(tmp)
+            self.finish(root)
+            first = (folder / 'run.json').read_bytes()
+            with self.assertRaises(ValueError):
+                self.finish(root)
+            with self.assertRaises(ValueError):
+                self.finish(root, supersede_reason=' ')
+            verdict = json.loads((folder / 'verdict.json').read_text())
+            verdict['criteria']['C02']['result'] = 'FAIL'
+            write(folder / 'verdict.json', verdict)
+            _, status, _, _ = self.finish(root, supersede_reason='C02 re-read: idempotency violated')
+            self.assertEqual(status, 'FAILED')
+            kept = list(folder.glob('run.superseded-*.json'))
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(kept[0].read_bytes(), first)
+            self.assertEqual(self.record(folder)['supersedes']['reason'], 'C02 re-read: idempotency violated')
+            for argv in (['--supersede'], ['--reason', 'r']):
+                with patch.object(sys, 'argv', ['finish_run.py', '--run-id', 'claude-arm1-core01', '--runs',
+                                                str(root / '.runs')] + argv), \
+                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                    finish_run.main()
+        with tempfile.TemporaryDirectory() as tmp:                              # nothing to supersede yet
+            root, _, _ = finish_fixture(tmp)
+            with self.assertRaises(ValueError):
+                self.finish(root, supersede_reason='r')
+
+    def test_runs_that_never_sent_a_turn_are_refused(self):
+        for kw in (dict(record_status='NOT_STARTED'), dict(record_status='SETUP_FAILED'), dict(turns=0)):
+            with self.subTest(**kw), tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp, **kw)
+                with self.assertRaises(ValueError):
+                    self.finish(root)
+                self.assertEqual(self.record(folder)['status'], kw.get('record_status', 'RUNNING'))
+
+    def test_invalid_infra_needs_reason_and_evidence_and_never_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _, folder = finish_fixture(tmp, results={'C13': 'FAIL'})
+            (folder / 'docker-error.txt').write_text('daemon died')
+            for kw in (dict(infra_reason='docker daemon died'), dict(infra_reason=' ', infra_evidence=['docker-error.txt']),
+                       dict(infra_reason='x', infra_evidence=['absent.txt'])):
+                with self.assertRaises(ValueError):
+                    self.finish(root, **kw)
+            _, status, _, fields = self.finish(root, infra_reason='docker daemon died', infra_evidence=['docker-error.txt'])
+            self.assertEqual(status, 'INVALID_INFRA')
+            self.assertIs(fields['all_acceptance_passed'], False)
+            self.assertEqual(self.record(folder)['invalid_infra']['evidence']['docker-error.txt'],
+                             hashlib.sha256(b'daemon died').hexdigest())
+        with tempfile.TemporaryDirectory() as tmp:                              # a table that passes everything is no infra failure
+            root, _, folder = finish_fixture(tmp)
+            (folder / 'e.txt').write_text('e')
+            with self.assertRaises(ValueError):
+                self.finish(root, infra_reason='x', infra_evidence=['e.txt'])
+
+    def test_overshoot_completion_only_when_the_capped_call_was_a_turn(self):
+        after = lambda call, status='CENSORED_BUDGET': {'status': status, 'first': dict(
+            {'when': 'after call', 'overshoot': {'token_limit': 500}, 'used': {}, 'limits': {}},
+            **({'call': call} if call else {}))}
+        with tempfile.TemporaryDirectory() as tmp:
+            root, run, folder = finish_fixture(tmp, censored=after('turn'))
+            before = (run / 'censored.json').read_bytes()
+            _, status, overshoot, _ = self.finish(root)
+            self.assertEqual((status, overshoot['censored_status'], overshoot['call'], overshoot['overshoot']),
+                             ('PASSED', 'CENSORED_BUDGET', 'turn', {'token_limit': 500}))
+            self.assertIs(self.record(folder)['cap_reached'], True)
+            self.assertEqual((run / 'censored.json').read_bytes(), before)
+            with self.assertRaises(RuntimeError):
+                finish_run.launch.limit_gate(run, next_is_feedback=False)
+        for censored in (after('user-proxy'), after(None), after('turn', 'CENSORED_TURNS'),
+                         {'status': 'CENSORED_TIME', 'first': {'when': 'before call', 'call': 'turn'}}):
+            with self.subTest(censored=censored), tempfile.TemporaryDirectory() as tmp:
+                root, _, folder = finish_fixture(tmp, censored=censored)
+                with self.assertRaises(ValueError):
+                    self.finish(root)
+                self.assertEqual(self.record(folder)['status'], 'RUNNING')
+        with tempfile.TemporaryDirectory() as tmp:                              # not passed and capped: censored
+            root, _, _ = finish_fixture(tmp, censored=after('user-proxy', 'CENSORED_TIME'), results={'C01': 'FAIL'})
+            self.assertEqual(self.finish(root)[1:3], ('CENSORED_TIME', None))
+
+    def test_pilot_records_go_to_the_pilot_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _, folder = finish_fixture(tmp, arm=3, run_id='claude-pilot-01', pilot=True)
+            self.assertEqual(folder, root / 'docs/pilots/claude-pilot-01')
+            path, status, _, _ = self.finish(root, 'claude-pilot-01')
+            self.assertEqual((path, status), (folder / 'run.json', 'PASSED'))
+            record = self.record(folder)
+            self.assertEqual((record['run_id'], record['pilot'], record['scope']), ('claude-pilot-01', True, 'PILOT_EXCLUDED'))
+            self.assertFalse((root / 'docs/experiments').exists())
+            write(folder / 'run.json', dict(record, run_id='claude-pilot-02'))   # folder of another run: refused
+            with self.assertRaises(ValueError):
+                self.finish(root, 'claude-pilot-01', supersede_reason='r')
+
+
+class CloseoutRecordsTest(unittest.TestCase):
+    """Spec 10.3 for capture_turn and 10.2/U10 for the user proxy."""
+
+    def test_capture_picks_the_pilot_folder_and_refuses_another_runs_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shared = Path(tmp)
+            root = shared / 'claude'
+            shutil.copytree(capture_turn.ROOT.parent / 'recording', shared / 'recording',
+                            ignore=shutil.ignore_patterns('__pycache__'))
+            session = '11111111-2222-4333-8444-555555555555'
+            run = root / '.runs/claude-pilot-01'
+            write(run / 'manifest.json', dict(run_id='claude-pilot-01', pilot=True, arm=3, core=1, session_id=session,
+                                              requested_model='claude-fable-5-2'))
+            raw = run / 'turns/0001'
+            write(raw / 'result.json', dict(status='ok', session_id=session, event_count=1, usage_complete=True))
+            write(raw / 'invocation.json', {'turn_kind': 'initial', 'started_at': '2026-11-18T00:00:00+00:00'})
+            for name in ('prompt.txt', 'stderr.txt'):
+                (raw / name).write_text('x')
+            (raw / 'stdout.jsonl').write_text('')
+            (raw / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r1', model='claude-fable-5-2', usage=USAGE,
+                                                              role='pm')) + '\n')
+            analysis = shared / 'analysis.md'
+            analysis.write_text('analysis')
+            with patch.object(capture_turn, 'ROOT', root), contextlib.redirect_stdout(io.StringIO()):
+                capture_turn.capture('claude-pilot-01', 1, analysis, 'ITERATING')
+                folder = root / 'docs/pilots/claude-pilot-01'
+                self.assertTrue((folder / 'turns/0001/usage.jsonl').is_file())
+                self.assertEqual(json.loads((folder / 'run.json').read_text())['run_id'], 'claude-pilot-01')
+                self.assertTrue((folder / 'events.jsonl').is_file())             # journal initialized for the pilot
+                self.assertFalse((root / 'docs/experiments').exists())
+                # a measured-run manifest pointing at a folder that belongs to another run is refused
+                write(run / 'manifest.json', dict(run_id='claude-pilot-01', pilot=False, arm=3, core=1, session_id=session))
+                write(root / 'docs/experiments/3/core1/run.json', {'run_id': 'claude-arm3-core01'})
+                with self.assertRaises(ValueError):
+                    capture_turn.capture('claude-pilot-01', 1, analysis, 'ITERATING')
+                self.assertFalse((root / 'docs/experiments/3/core1/turns').exists())
+
+    def test_proxy_runs_on_the_runs_own_image_and_names_its_call_kind_in_the_cap_record(self):
+        t = ConsultContractTest()
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = t.setup_run(tmp)
+            seen = []
+            inner = t.fake()
+            def fake(cmd, **kw):
+                if cmd[:2] == ['docker', 'create']:
+                    seen.append(cmd)
+                return inner(cmd, **kw)
+            code, _, out = t.call(argv + ['--model', 'claude-opus-5-5'], fake)
+            self.assertEqual(code, 0, out)
+            self.assertIn('sha256:run-image', seen[0])                           # manifest image, not readiness digest
+            self.assertNotIn('sha256:1', seen[0])
+            usage = dict(input_tokens=20_000_001, cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=0)
+            (run_dir / 'consults/0001/events.jsonl').write_text(json.dumps(dict(type='message', id='big', model='m',
+                                                                               role='user-proxy', turn='p', usage=usage)) + '\n')
+            consult_contract.launch.record_overshoot(run_dir, 'user-proxy')
+            self.assertEqual(json.loads((run_dir / 'censored.json').read_text())['first']['call'], 'user-proxy')
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = t.setup_run(tmp)
+            write(run_dir / 'manifest.json', {'arm': 3, 'run_id': 'claude-arm3-core01'})
+            code, run, out = t.call(argv + ['--model', 'claude-opus-5-5'], t.fake())
+            self.assertNotEqual(code, 0)
+            self.assertIn('pins no image', out)
+            run.assert_not_called()
 
 
 class LoadCheckTest(unittest.TestCase):

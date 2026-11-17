@@ -905,12 +905,15 @@ class RunLimitTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dest = self.make_run(root, tokens_per_turn=20_000_123)
-            record = launch.record_overshoot(dest)
+            record = launch.record_overshoot(dest, 'turn')
             self.assertEqual(record['status'], 'CENSORED_BUDGET')
             self.assertEqual(record['first']['overshoot'], {'token_limit': 123})
             self.assertEqual(record['first']['when'], 'after call')
+            self.assertEqual(record['first']['call'], 'turn')              # which kind of call went past the cap
             (root / 'b').mkdir()
-            self.assertIsNone(launch.record_overshoot(self.make_run(root / 'b', tokens_per_turn=5)))
+            self.assertIsNone(launch.record_overshoot(self.make_run(root / 'b', tokens_per_turn=5), 'turn'))
+            with self.assertRaises(ValueError):                            # the call kind is never left out
+                launch.censor(dest, launch.limit_state(dest), 'after call', None)
 
 class TurnKindTest(unittest.TestCase):
     """Only evaluator feedback deliveries count toward the 30 cap; arm 3 answer turns are counted separately."""
@@ -925,7 +928,7 @@ class TurnKindTest(unittest.TestCase):
         for n, (kind, status) in enumerate(turns, 1):
             t = dest / 'turns' / ('%04d' % n)
             t.mkdir()
-            invocation = {'started_at': now}
+            invocation = {'started_at': now, 'prompt_sha256': launch.hashlib.sha256(b'next').hexdigest()}
             if kind:
                 invocation['turn_kind'] = kind
             (t / 'invocation.json').write_text(json.dumps(invocation))
@@ -1123,6 +1126,100 @@ class TurnKindTest(unittest.TestCase):
             self.assertEqual((invocation['turn_kind'], invocation['counts_as']), ('answer', 'answer'))
             self.assertEqual(launch.limit_state(dest)['turn_kinds']['declared']['answer'], 1)
             self.assertEqual(launch.limit_state(dest)['answer_turns'], 0)  # failed delivery: not delivered yet
+
+class CloseoutRunnerTest(unittest.TestCase):
+    """Spec 10.2-10.5 on the runner side: cap call kind, pilot location, no run-level evaluation cost, U1/U9/U6."""
+
+    def init(self, root, run_id, pilot=False, readiness=None):
+        (root / '3/core1').mkdir(parents=True, exist_ok=True)
+        (root / '3/core1/starter.kt').write_text('starter')
+        args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=3, core=1, image=None, harness=None, network=None,
+                               readiness=readiness, pilot=pilot)
+        with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
+             patch.object(launch, 'selftest', return_value=SELFTEST_OK), patch.object(launch, 'seed_harness', return_value=''), \
+             contextlib.redirect_stdout(io.StringIO()):
+            args.harness = root / 'harness-source'
+            (root / 'harness-source').mkdir(exist_ok=True)
+            launch.initialize(args)
+        return json.loads((root / '.runs' / run_id / 'manifest.json').read_text())
+
+    def test_named_readiness_that_does_not_exist_is_refused(self):           # U1
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(ValueError) as ctx:
+                self.init(root, 'x', readiness=root / 'docs/results/readiness.json')
+            self.assertIn('does not exist', str(ctx.exception))
+            self.assertFalse((root / '.runs/x').exists())
+            self.assertFalse(self.init(root, 'smoke')['image_frozen'])       # default location absent: before the freeze
+
+    def test_pilot_run_id_location_and_record_owner(self):                     # 10.3
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for run_id, pilot in (('claude-pilot-1', True), ('pilot', True), ('claude-pilot-01', False)):
+                with self.assertRaises(ValueError):
+                    self.init(root, run_id, pilot=pilot)
+            m = self.init(root, 'claude-pilot-01', pilot=True)
+            self.assertIs(m['pilot'], True)
+            self.assertEqual(launch.record_folder(m, root), root / 'docs/pilots/claude-pilot-01')
+            folder = launch.open_record(m, 'claude-pilot-01', root)            # created on first use
+            self.assertEqual(json.loads((folder / 'run.json').read_text())['run_id'], 'claude-pilot-01')
+            measured = dict(m, pilot=False)
+            self.assertEqual(launch.record_folder(measured, root), root / 'docs/experiments/3/core1')
+            with self.assertRaises(ValueError):                                # a measured run's record must exist
+                launch.open_record(measured, 'claude-pilot-01', root)
+            (root / 'docs/experiments/3/core1').mkdir(parents=True)
+            (root / 'docs/experiments/3/core1/run.json').write_text(json.dumps({'run_id': 'claude-arm3-core01'}))
+            with self.assertRaises(ValueError) as ctx:                         # the folder of another run is refused
+                launch.open_record(measured, 'claude-pilot-01', root)
+            self.assertIn('belongs to claude-arm3-core01', str(ctx.exception))
+            (folder / 'run.json').write_text(json.dumps({'run_id': 'claude-pilot-02'}))
+            with self.assertRaises(ValueError):
+                launch.open_record(m, 'claude-pilot-01', root)
+            with self.assertRaises(ValueError):                                # manifest of another run
+                launch.open_record(m, 'claude-pilot-02', root)
+
+    def test_cap_record_names_the_call_kind_before_and_after(self):           # 10.2
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = RunLimitTest().make_run(Path(tmp), tokens_per_turn=20_000_000)
+            with self.assertRaises(RuntimeError):
+                launch.limit_gate(dest, next_is_feedback=False, call='user-proxy')
+            first = json.loads((dest / 'censored.json').read_text())['first']
+            self.assertEqual((first['when'], first['call']), ('before call', 'user-proxy'))
+
+    def test_run_ledger_carries_no_evaluation_cost(self):                     # 10.4
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = RunLimitTest().make_run(Path(tmp))
+            self.assertNotIn('evaluation_cost', launch.run_ledger(dest))
+            self.assertFalse(hasattr(launch, 'evaluation_cost'))
+
+    def test_recovery_sends_exactly_the_prompt_of_the_turn_it_continues(self):  # U9
+        for dry in (True, False):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                dest = TurnKindTest().make(root, [('initial', 'ok'), ('feedback', 'failed')])
+                (root / 'prompt').write_text('a different prompt')
+                error, run, _, _ = TurnKindTest().call(root, 'recovery', dry_run=dry)
+                self.assertIn('prompt of the turn it continues', str(error))
+                run.assert_not_called()
+                self.assertEqual(sorted(p.name for p in (dest / 'turns').iterdir()), ['0001', '0002'])
+                (root / 'prompt').write_text('next')                           # the same bytes: accepted
+                self.assertIsNone(TurnKindTest().call(root, 'recovery')[0])
+                invocation = dest / 'turns/0002/invocation.json'
+                invocation.write_text(json.dumps({'turn_kind': 'feedback', 'started_at': launch.utc()}))
+                self.assertIn('prompt', str(TurnKindTest().call(root, 'recovery')[0]))   # no recorded hash: refused
+
+    def test_cost_arguments_are_finite_and_not_negative(self):                # U6
+        for good in ('0', '1.5', 3):
+            self.assertEqual(launch.cost_value(good), float(good))
+        for bad in ('nan', 'inf', '-inf', '-0.01', 'x', None):
+            with self.assertRaises(Exception):
+                launch.cost_value(bad)
+        for bad in ('nan', 'inf', '-1'):
+            argv = ['launch.py', 'turn', '--run-id', 'a', '--prompt', '/p', '--env-file', '/e', '--max-budget-usd', bad]
+            with patch.object(launch.sys, 'argv', argv), contextlib.redirect_stderr(io.StringIO()), \
+                 patch.object(launch, 'turn') as turn, self.assertRaises(SystemExit):
+                launch.main()
+            turn.assert_not_called()
 
 class DiscardTest(unittest.TestCase):
     def run_discard(self, dest, reviewer_entries, rm_rc=0):
