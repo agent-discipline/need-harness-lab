@@ -1,5 +1,5 @@
 {
-  "protocol": "payment-settlement-v1",
+  "protocol": "payment-settlement-v3-claude",
   "status": "PREPARATION",
   "run_id": null,
   "arm": null,
@@ -29,7 +29,7 @@
   "resource_profile": "budget-v1",
   "image_digests": {},
   "seed": 20260923,
-  "token_limit": 2000000,
+  "token_limit": 20000000,
   "time_limit_seconds": 28800,
   "feedback_limit": 30,
   "controller": "external-print-resume",

@@ -25,9 +25,11 @@ CODEX_DST = HOME_DST + '/.codex'
 TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN'
 USAGE_KEYS = ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens')
 EXPECTED_UID = 1000                                   # image USER node; workspace .git must be owned by the same uid
-# Agreed model control (2026-09-23): implementers Opus high; arm 3 PM Fable high with Opus workers.
-# Arms 1/2 have no subagents (parity with the Codex runner, which disables multi_agent there).
-MODELS = {1: ('claude-opus-5', None), 2: ('claude-opus-5', None), 3: ('claude-fable-5-1', 'claude-opus-5')}
+# Agreed model control (protocol payment-settlement-v3-claude, 2026-11-17): implementers Opus 5.5 high;
+# arm 3 PM Fable 5.2 high with Opus 5.5 workers (CLAUDE_CODE_SUBAGENT_MODEL). Requested ids are aliases;
+# the provider-reported model per request is recorded separately (record_models / transcript_models).
+# Arms 1/2 have no subagents.
+MODELS = {1: ('claude-opus-5-5', None), 2: ('claude-opus-5-5', None), 3: ('claude-fable-5-2', 'claude-opus-5-5')}
 HARNESS_SEED = [('src/core.md', 'core.md'), ('hooks', 'hooks'), ('playbooks', 'playbooks'), ('templates', 'templates')]
 RUNNER_SEED = [('harness-bootstrap-CLAUDE.md', 'CLAUDE.md'), ('harness-settings.json', 'settings.json')]
 ROLES = ('pm', 'implementer', 'worker')

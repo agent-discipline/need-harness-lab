@@ -12,12 +12,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import lab
 
 HARNESS_SHA = "1754f16e0e4f54ad1a81d05beff15b895a26a1d5"
-# Agreed model control (2026-09-23): implementers Opus, arm 3 PM Fable with Opus workers, effort high everywhere.
+# Agreed model control (v3-claude, 2026-11-17): implementers Opus 5.5, arm 3 PM Fable 5.2 with Opus 5.5 workers,
+# effort high everywhere. Must stay equal to runner/launch.py MODELS.
 MODELS = {
-    1: {"requested_model": "claude-opus-5"},
-    2: {"requested_model": "claude-opus-5"},
-    3: {"requested_model": "claude-fable-5-1", "requested_pm_model": "claude-fable-5-1",
-        "requested_worker_model": "claude-opus-5"},
+    1: {"requested_model": "claude-opus-5-5"},
+    2: {"requested_model": "claude-opus-5-5"},
+    3: {"requested_model": "claude-fable-5-2", "requested_pm_model": "claude-fable-5-2",
+        "requested_worker_model": "claude-opus-5-5"},
 }
 
 def load(path, name):
