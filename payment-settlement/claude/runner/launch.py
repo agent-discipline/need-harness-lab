@@ -785,16 +785,40 @@ def write_role_files(output, events):
 CALL_STARTED = re.compile(r'(\S+) started session=([0-9a-f-]{36}) model=(\S+)')
 CALL_EXIT = re.compile(r'(\S+) exit=(-?\d+)')
 
+def reviewer_dir_names(name, output):
+    """Names directly inside the reviewer directory of the stopped container, or None when they cannot be established.
+    The directory is the mount point of the run's reviewer volume (and is created in the image), so it exists in every
+    arm 3 container and copying it succeeds whether or not the reviewer was ever called: a name missing from the copy
+    is absent. The answer never depends on the wording of docker's error for a missing path (it differs between Docker
+    versions). The copy is temporary and removed at once; it sits inside the turn folder so the secret scan covers any
+    leftover."""
+    probe = Path(tempfile.mkdtemp(prefix='.reviewer-dir-', dir=output))
+    try:
+        copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/.', str(probe)], capture_output=True, check=False)
+        names = sorted(p.name for p in probe.iterdir()) if copied.returncode == 0 else None
+        return names, copied.returncode, copied.stderr
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
 def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
     """Arm 3: copy the second reviewer's call log and transcripts out of the stopped container and account for every
     attempt made this turn. Reviewer requests become role 'reviewer' events (request-level usage, never mixed into
-    the PM's or workers' sums). Returns (events, new_ids, incomplete, summary, calls_seen)."""
+    the PM's or workers' sums). A log or transcript folder that could not be copied counts as absent only when the
+    reviewer directory itself was read and does not hold it; otherwise it is unknown and the turn stays incomplete.
+    Returns (events, new_ids, incomplete, summary, calls_seen)."""
     incomplete = []
     log = output / 'reviewer-calls.log'
     calls = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/reviewer-calls.log', str(log)],
                            capture_output=True, check=False)
-    log_absent = calls.returncode != 0 and b'No such file' in calls.stderr
+    copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/projects', str(output / 'reviewer-projects')],
+                            capture_output=True, check=False)
+    names, dir_rc, dir_stderr = (None, None, b'')
+    if calls.returncode != 0 or copied.returncode != 0:
+        names, dir_rc, dir_stderr = reviewer_dir_names(name, output)
+    (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr + dir_stderr)
+    log_absent = calls.returncode != 0 and names is not None and 'reviewer-calls.log' not in names
     log_unknown = calls.returncode != 0 and not log_absent
+    projects_absent = copied.returncode != 0 and names is not None and 'projects' not in names
     started, finished = {}, set()
     for line in (log.read_text().splitlines() if calls.returncode == 0 else []):
         hit = CALL_STARTED.fullmatch(line)
@@ -806,10 +830,6 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
     ledger = dest / 'reviewer-calls.json'
     recorded = set(json.loads(ledger.read_text())['calls']) if ledger.exists() else set()
     new_calls = sorted(set(started) - recorded)
-    copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/projects', str(output / 'reviewer-projects')],
-                            capture_output=True, check=False)
-    (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr)
-    projects_absent = copied.returncode != 0 and b'No such file' in copied.stderr
     events, new_ids, stats, transcripts = [], [], {}, set()
     if copied.returncode == 0:
         events, new_ids, found, stats = build_events(output / 'reviewer-projects', seen, run_id, turn_id, arm, role='reviewer')
@@ -834,7 +854,8 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
     summary = {'log_rc': calls.returncode, 'log_absent': log_absent, 'log_unknown': log_unknown,
                'calls_total': len(started), 'calls_this_turn': len(new_calls),
                'calls_finished_total': len(finished & set(started)), 'transcript_files': len(transcripts),
-               'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'transcript_stats': stats,
+               'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
+               'reviewer_dir_names': names, 'transcript_stats': stats,
                'event_count': len(events), 'incomplete': len(incomplete), **costs}
     return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
 

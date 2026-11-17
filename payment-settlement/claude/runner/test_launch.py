@@ -17,6 +17,9 @@ launch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launch)
 USAGE = {'input_tokens': 1, 'cache_creation_input_tokens': 2, 'cache_read_input_tokens': 3, 'output_tokens': 4, 'extra': 9}
 SELFTEST_OK = {'passed': True, 'selftest_failed': '0'}
+# docker cp's stderr for a missing source path: Docker 29.1.3 (observed in the 2026-11-17 arm 3 smoke) and older clients
+DOCKER29_MISSING = 'Error response from daemon: Could not find the file %s in container payment-claude-call-0'
+OLD_MISSING = b'Error: No such container:path: payment-claude-call-0:/home/node/.fable-review/x: No such file or directory'
 
 def manifest(arm=1, **extra):
     data = {'run_id': 'r', 'arm': arm, 'workspace': '/tmp/run/workspace', 'config_volume': 'cfg-vol', 'image': 'runner:test',
@@ -436,11 +439,29 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(launch.limit_state(dest)['turn_kinds']['declared'], {'initial': 2, 'feedback': 0, 'answer': 0, 'recovery': 1})
             self.assertFalse((dest / 'request-ids.txt').exists())
 
-    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1, kind='feedback'):
-        """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts."""
+    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1, kind='feedback',
+                  wording=None, reviewer_dir_readable=True):
+        """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts.
+        wording: docker's stderr for a missing path (default: the Docker 29 text); reviewer_dir_readable=False makes the
+        copy of the reviewer directory itself fail, so absence cannot be established."""
         dest = root / 'a'
         reported = pm_requests[-1]['message']['usage']
+        def missing(cmd):
+            text = wording if wording is not None else (DOCKER29_MISSING % cmd[2].split(':', 1)[1]).encode()
+            return SimpleNamespace(returncode=1, stdout=b'', stderr=text)
         def fake_run(cmd, **kw):
+            if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/.'):
+                # the reviewer directory (volume mount point): it holds exactly what the reviewer left
+                if not reviewer_dir_readable:
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error response from daemon: unexpected failure')
+                target = Path(cmd[-1])
+                if reviewer_log is not None:
+                    (target / 'reviewer-calls.log').write_text('' if reviewer_log in ('UNREADABLE', 'NOT_COPIED') else reviewer_log)
+                if reviewer_sessions:
+                    (target / 'projects').mkdir()
+                if reviewer_raw:
+                    (target / 'raw').mkdir()
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'create']:
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'start']:
@@ -451,21 +472,21 @@ class RunnerTest(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/raw'):
                 if not reviewer_raw:
-                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                    return missing(cmd)
                 Path(cmd[-1]).mkdir(parents=True)
                 for sid, body in reviewer_raw.items():
                     (Path(cmd[-1]) / (sid + '.json')).write_text(body if isinstance(body, str) else json.dumps(body))
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/reviewer-calls.log'):
-                if reviewer_log is None:
-                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                if reviewer_log is None or reviewer_log == 'NOT_COPIED':      # NOT_COPIED: present, yet the copy says missing
+                    return missing(cmd)
                 if reviewer_log == 'UNREADABLE':
                     return SimpleNamespace(returncode=1, stdout=b'', stderr=b'permission denied')
                 Path(cmd[-1]).write_text(reviewer_log)
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/projects'):
                 if not reviewer_sessions:
-                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                    return missing(cmd)
                 target = Path(cmd[-1]) / '-tmp-mirror'
                 target.mkdir(parents=True)
                 for sid, lines in reviewer_sessions.items():
@@ -611,6 +632,43 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(result2['incomplete'], [])
             self.assertTrue(result2['usage_complete'])
             self.assertTrue(result2['reviewer']['log_absent'])
+
+    def test_arm3_reviewer_absence_is_read_from_the_directory_not_from_the_error_text(self):
+        sid = 'dddddddd-0000-4000-8000-000000000004'
+        pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+        rev = [{'type': 'assistant', 'requestId': 'req-rv', 'sessionId': sid, 'message': {'model': 'r', 'usage': USAGE}}]
+        log = 'T1-1 started session=%s model=reviewer-z\nT1-1 exit=0\n' % sid
+        no_transcript = 'reviewer attempt without transcript (usage unobservable)'
+        log_unknown = 'reviewer call log copy failed; reviewer attempts unknown (docker cp rc=1)'
+        copy_failed = 'reviewer transcript copy failed (docker cp rc=1)'
+        # (reviewer log, reviewer transcripts, reviewer directory readable) -> (usage_complete, incomplete reasons)
+        cases = {
+            'no reviewer call': (None, {}, True, True, []),
+            'reviewer called and collected': (log, {sid: rev}, True, True, []),
+            'reviewer called, transcript missing': (log, {}, True, False, [no_transcript]),
+            'no reviewer call, directory unreadable': (None, {}, False, False, [copy_failed, log_unknown]),
+        }
+        for wording in (None, OLD_MISSING, b''):                 # Docker 29 text, older text, no text at all
+            for name, (rlog, sessions, readable, complete, reasons) in cases.items():
+                with self.subTest(case=name, wording=wording), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self.arm3_dest(root)
+                    result, out = self.arm3_turn(root, False, pm, rlog, sessions, wording=wording, reviewer_dir_readable=readable)
+                    self.assertEqual(result['usage_complete'], complete)
+                    self.assertEqual(sorted(i['reason'] for i in result['incomplete']), sorted(reasons))
+                    self.assertEqual(result['reviewer_usage_pending'], not complete)
+                    self.assertEqual(result['reviewer']['log_absent'], rlog is None and readable)
+                    self.assertEqual(result['reviewer']['log_unknown'], rlog is None and not readable)
+                    self.assertEqual(result['status'], 'ok')
+                    self.assertFalse([p for p in out.iterdir() if p.name.startswith('.reviewer-dir-')])   # probe removed
+        # the "No such file" text no longer decides anything: a log the directory does hold is unknown, not absent
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.arm3_dest(root)
+            result, _ = self.arm3_turn(root, False, pm, 'NOT_COPIED', {}, wording=OLD_MISSING)
+            self.assertTrue(result['reviewer']['log_unknown'])
+            self.assertIn(log_unknown, [i['reason'] for i in result['incomplete']])
+            self.assertFalse(result['usage_complete'])
 
     def test_forked_session_is_incomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
