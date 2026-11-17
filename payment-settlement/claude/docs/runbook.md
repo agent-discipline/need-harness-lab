@@ -25,8 +25,10 @@ python3 $L init --run-id claude-arm3-core01 --arm 3 --core 1 --harness payment-s
 python3 payment-settlement/claude/scripts/lab.py prompt --arm 1 > /tmp/first-prompt.txt
 python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --dry-run
 python3 $L turn --run-id claude-arm1-core01 --prompt /tmp/first-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
-# 평가자가 판정·피드백을 쓴 뒤 같은 세션으로 재개
-python3 $L turn --run-id claude-arm1-core01 --resume --prompt /tmp/next-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
+# 평가자가 판정·피드백(prompts/feedback.md 형식)을 쓴 뒤 같은 세션으로 재개 — 재개 턴은 반드시 --kind를 선언한다
+python3 $L turn --run-id claude-arm1-core01 --resume --kind feedback --prompt /tmp/next-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
+# 3번만: 대리 사용자 답(scripts/consult_contract.py → consults/NNNN/response.txt)을 PM에게 전하는 턴
+python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt /tmp/answer-prompt.txt --env-file ~/.config/payment-lab/claude.env --cache-policy observed-cache
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
 
@@ -40,13 +42,25 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 - 토큰: input + cache read + cache creation + output 합 ≥ 20,000,000 → `CENSORED_BUDGET`
 - 시간: 첫 턴 시작부터 벽시계 ≥ 28,800초 → `CENSORED_TIME`(턴 하나의 timeout도 남은 시간으로 줄인다)
-- 피드백: 외부 피드백 = run 세션에 전달된 후속 프롬프트 = 첫 성공 턴 이후의 성공 턴 수. 30회를 쓴 run의 31번째 후속 턴은 `CENSORED_TURNS`(대리 사용자 호출 자체는 후속 프롬프트가 아니다 — 그 답을 PM에게 전하는 재개 턴이 1회로 센다)
+- 피드백: 외부 피드백 = **평가자가 판정 결과를 전하는 턴만**(2026-11-17 결정, `docs/experiment-plan.md:51`). 성공(`status: ok`)한 `feedback` 턴(그 복구 포함) 수가 30이면 31번째 `feedback` 전달은 `CENSORED_TURNS`
+- 질의응답(3번만): 대리 사용자 답을 PM에게 전하는 `answer` 턴은 상한에 넣지 않고 따로 센다(`experiment-plan.md:25` "질문 횟수·답변 길이를 별도 기록"). 대리 사용자 호출(`consult_contract.py`) 자체는 세션 턴이 아니다
+
+턴 종류는 매 턴 `turns/NNNN/invocation.json`의 `turn_kind`(+`counts_as`)에 남고, 셈은 이 파일들과 `result.json`의 `status`에서 다시 계산된다:
+
+| `turn_kind` | 언제 | 상한 |
+|---|---|---|
+| `initial` | 첫 턴(`--resume` 없음, `--kind`를 주면 거부) | — |
+| `feedback` | 평가자 판정 결과 전달(`prompts/feedback.md`) | 30회 |
+| `answer` | 3번: 대리 사용자 답 전달. 1·2번은 거부. 아직 전달하지 않은 `consults/NNNN`이 있어야 한다(consult 수 > `answer` 턴 수) | 별도 기록 |
+| `recovery` | 바로 앞 턴이 `ok`로 끝나지 않았을 때 그 턴을 이어 감. 앞 턴이 `ok`면 거부 | 이어 가는 턴의 종류로 센다 |
+
+`--kind` 없는 재개 턴은 유료 호출 전에 거부된다. `turn_kind`가 없는(또는 `invocation.json`이 없는) 턴 디렉터리가 있으면 상한 계산이 실패하고(건너뛰지 않음) 그 run의 다음 호출은 막힌다. `limit_gate` 결과(`invocation.json`의 `limits_before_call`)와 `ledger.json`에 `turn_kinds`(`delivered`: 성공 전달 수 `initial`·`feedback`·`answer` / `declared`: 시도별 선언 종류 수)와 `answer_turns`(limit 상태)가 남는다. 실패한 `feedback` 턴은 세지 않고, 그 `recovery`가 성공하면 1회로 센다(종전 "성공 턴만 센다" 규칙 유지).
 
 상한에 닿으면 `censored.json`(상태·그때의 사용량)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)을 기록한다. 산출물은 지우지 않는다. 진행자는 `censored.json`의 상태를 그 run의 `run.json` `status`로 옮긴 뒤 종료 절차를 밟는다. 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
 
 ## 실패한 턴의 복구
 
-`turn`이 유료 호출 이후 예외로 끝나면 `turns/NNNN/`에 원문과 `result.json{status:"failed"}`가 남는다(`cli_status`는 CLI exit code, `status`는 수집·토큰 스캔까지 끝난 뒤의 최종 판정). 다음 `turn`은 새 번호를 받는다. **첫 턴/재개 판정은 config volume에 그 session id의 transcript가 존재하는지로 한다**: 실패한 호출이라도 transcript를 남겼으면 다음 턴은 `--resume`이어야 하고, 남기지 않았으면 `--session-id` 첫 턴이다(실행기가 실측해 반대 지정을 거부한다). 실패 턴에서 완전히 수집된 요청은 `request-ids.txt`에 들어가고, 원장에 들어가기 전에 중단된 요청은 다음 턴에서 다시 집계된다. `normalize`는 모든 턴의 이벤트를 requestId로 병합해(첫 등장 usage, worker 역할은 단조) 중복을 막는다. 디렉터리를 손으로 지우지 않는다.
+`turn`이 유료 호출 이후 예외로 끝나면 `turns/NNNN/`에 원문과 `result.json{status:"failed"}`가 남는다(`cli_status`는 CLI exit code, `status`는 수집·토큰 스캔까지 끝난 뒤의 최종 판정). 다음 `turn`은 새 번호를 받는다. 실패한 턴을 이어 가는 재개 턴은 `--kind recovery`로 선언한다(위 상한 절의 표 — 실패한 `feedback`의 복구는 성공 시 피드백 1회). **첫 턴/재개 판정은 config volume에 그 session id의 transcript가 존재하는지로 한다**: 실패한 호출이라도 transcript를 남겼으면 다음 턴은 `--resume`이어야 하고, 남기지 않았으면 `--session-id` 첫 턴이다(실행기가 실측해 반대 지정을 거부한다). 실패 턴에서 완전히 수집된 요청은 `request-ids.txt`에 들어가고, 원장에 들어가기 전에 중단된 요청은 다음 턴에서 다시 집계된다. `normalize`는 모든 턴의 이벤트를 requestId로 병합해(첫 등장 usage, worker 역할은 단조) 중복을 막는다. 디렉터리를 손으로 지우지 않는다.
 
 ## 종료와 커밋
 
@@ -56,7 +70,7 @@ run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ② `lau
 
 ## 사이클 준비 실패 복구
 
-`start_cycle.py`는 세 조건의 init·Compose를 모두 끝낸 뒤에만 첫 턴을 함께 시작한다. 한 조건이라도 실패하면 그 run의 `run.json`이 `SETUP_FAILED`(+`setup_error`), `cycles.json`의 해당 사이클이 `SETUP_FAILED`(+`setup_failures`·`prepared_runs`)가 되고 유료 호출은 0건이다. 복구: 원인 확인 → 준비된 run마다 `docker compose -p payment-claude-cNN-aN -f payment-settlement/claude/compose.yaml down -v`와 `launch.py discard --run-id <id>` → 그 run 디렉터리(`.runs/<id>`, 유료 호출 없음)를 `.runs/aborted-<id>-<시각>`으로 옮겨 보존 → 각 `run.json`의 `status`를 `NOT_STARTED`로 되돌리고 실패 내용을 `issues.md`에 기록 → `cycles.json` 해당 행을 `NOT_STARTED`로 되돌린 뒤 `start_cycle.py` 재실행. 첫 턴이 실패한 run은 `initial_turn_exit`·`initial_turn_failed`가 `run.json`에 남고 상태는 `RUNNING`이다 — 위 "실패한 턴의 복구"대로 같은 세션으로 이어 간다.
+`start_cycle.py`는 세 조건의 init·Compose를 모두 끝낸 뒤에만 첫 턴을 함께 시작한다. 한 조건이라도 실패하면 그 run의 `run.json`이 `SETUP_FAILED`(+`setup_error`), `cycles.json`의 해당 사이클이 `SETUP_FAILED`(+`setup_failures`·`prepared_runs`)가 되고 유료 호출은 0건이다. 복구: 원인 확인 → 준비된 run마다 `docker compose -p payment-claude-cNN-aN -f payment-settlement/claude/compose.yaml down -v`와 `launch.py discard --run-id <id>` → 그 run 디렉터리(`.runs/<id>`, 유료 호출 없음)를 `.runs/aborted-<id>-<시각>`으로 옮겨 보존 → 각 `run.json`의 `status`를 `NOT_STARTED`로 되돌리고 실패 내용을 `issues.md`에 기록 → `cycles.json` 해당 행을 `NOT_STARTED`로 되돌린 뒤 `start_cycle.py` 재실행. 첫 턴이 실패한 run은 `initial_turn_exit`·`initial_turn_failed`가 `run.json`에 남고 상태는 `RUNNING`이다 — 위 "실패한 턴의 복구"대로 같은 세션으로 이어 간다(세션 transcript가 남았으면 `--resume --kind recovery`, 없으면 `--resume` 없는 첫 턴).
 
 ## 알려진 경계
 

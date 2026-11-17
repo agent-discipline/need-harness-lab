@@ -59,9 +59,15 @@ ALLOWED_TOOLS_ARM3 = ALLOWED_TOOLS_ARM12 + SUBAGENT_TOOLS
 def allowed_tools(manifest):
     return ALLOWED_TOOLS_ARM3 if manifest.get('arm') == 3 else ALLOWED_TOOLS_ARM12
 # Run caps (protocol v3-claude): every role of the run counts (pm/implementer/worker/reviewer/user-proxy), tokens are
-# input + cache read + cache creation + output. Feedback = follow-up prompts delivered to the run's session (successful
-# turns after the first one). Whichever cap is reached first ends the run as CENSORED_* (censored.json).
+# input + cache read + cache creation + output. Feedback = evaluator feedback deliveries only (decision 2026-11-17):
+# successful turns declared 'feedback' (or a recovery of one). Arm 3 answer turns (the user proxy's answers delivered to
+# the PM) are counted separately and never capped. Whichever cap is reached first ends the run as CENSORED_* (censored.json).
 LIMITS = {'token_limit': 20000000, 'time_limit_seconds': 28800, 'feedback_limit': 30}
+# Every turn records its kind in invocation.json (turn_kind). The first turn is 'initial'; a --resume turn must declare
+# one of TURN_KINDS: 'feedback' (evaluator judging result, prompts/feedback.md), 'answer' (arm 3: proxy answers to the
+# PM's questions, consults/), 'recovery' (continues the directly preceding turn that did not end ok; it counts as the
+# kind of the turn it recovers, so a recovered feedback delivery is still one feedback).
+TURN_KINDS = ('feedback', 'answer', 'recovery')
 CENSORED = (('token_limit', 'CENSORED_BUDGET'), ('time_limit_seconds', 'CENSORED_TIME'), ('feedback_limit', 'CENSORED_TURNS'))
 HELPER_TIMEOUT = 900                                  # seconds for any no-cost helper container (selftest, seeding, listing)
 MIN_HOOKS = 8                                         # hooks wired in runner/harness-settings.json (fail if fewer are extracted)
@@ -828,7 +834,12 @@ def run_ledger(dest):
         else:
             costs += parts
     complete = (not conflicts and not unreadable and all(data.get('usage_complete') is True for _, _, data in calls))
+    try:                                                # feedback (capped) and answer (arm 3, separate) deliveries
+        kinds, kinds_error = turn_counts(turn_records(dest)), None
+    except RuntimeError as exc:                         # never a zero count: the limit gate raises on the same records
+        kinds, kinds_error = None, str(exc)
     return {
+        'turn_kinds': kinds, 'turn_kinds_error': kinds_error,
         'roles': {role: {'requests': len(evs), 'usage': sum_usage(evs), 'total_tokens': total_tokens(sum_usage(evs))}
                   for role, evs in sorted(roles.items())},
         'total_tokens': total_tokens(sum_usage(events)), 'usage_complete': complete, 'tokens_are_lower_bound': not complete,
@@ -854,25 +865,81 @@ def parse_time(value):
     except (TypeError, ValueError):
         return None
 
+def turn_records(dest):
+    """(turn id, kind, final status, started_at) of every turn directory in order. A turn without a readable
+    invocation.json carrying a known turn_kind makes the count irreproducible: fail loudly, never skip it."""
+    records = []
+    for folder in sorted(p for p in (dest / 'turns').iterdir() if p.is_dir()) if (dest / 'turns').is_dir() else []:
+        try:
+            invocation = json.loads((folder / 'invocation.json').read_text())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError('turn %s has no readable invocation.json; turn kinds cannot be counted (%s)' % (folder.name, exc))
+        kind = invocation.get('turn_kind') if isinstance(invocation, dict) else None
+        if kind not in ('initial',) + TURN_KINDS:
+            raise RuntimeError('turn %s does not record a known turn_kind (%r); turn kinds cannot be counted' % (folder.name, kind))
+        try:
+            status = json.loads((folder / 'result.json').read_text()).get('status')
+        except (OSError, ValueError):
+            status = None                               # cut short or unreadable: not a successful delivery
+        records.append((folder.name, kind, status, parse_time(invocation.get('started_at'))))
+    return records
+
+def turn_counts(records):
+    """Successful deliveries per effective kind (a recovery counts as the kind of the turn it continues) and the
+    declared kinds of every attempt. Only delivered['feedback'] is capped."""
+    delivered = {'initial': 0, 'feedback': 0, 'answer': 0}
+    declared = {k: 0 for k in ('initial',) + TURN_KINDS}
+    effective = None
+    for ident, kind, status, _ in records:
+        declared[kind] += 1
+        if kind != 'recovery':
+            effective = kind
+        elif effective is None:
+            raise RuntimeError('recovery turn %s has no earlier turn to recover' % ident)
+        if status == 'ok':
+            delivered[effective] += 1
+    return {'delivered': delivered, 'declared': declared}
+
+def next_turn_kind(manifest, dest, records, resume, kind):
+    """Validate the declared kind of the next turn before any paid call; return (kind, kind it counts as)."""
+    if not resume:
+        if kind:
+            raise ValueError('a first turn is always initial; --kind applies to --resume turns only')
+        return 'initial', 'initial'
+    if kind not in TURN_KINDS:
+        raise ValueError('a --resume turn must declare --kind %s (feedback = evaluator judging result; answer = arm 3 '
+                         'proxy answers; recovery = continue the preceding turn that did not end ok)' % '|'.join(TURN_KINDS))
+    if kind == 'answer':
+        if manifest.get('arm') != 3:
+            raise ValueError('answer turns exist only in arm 3 (user proxy); this run is arm %s' % manifest.get('arm'))
+        consults = len([p for p in (dest / 'consults').iterdir() if p.is_dir()]) if (dest / 'consults').is_dir() else 0
+        answers = turn_counts(records)['declared']['answer']
+        if consults <= answers:
+            raise ValueError('answer turn without an undelivered user-proxy consultation (%d consults, %d answer turns); '
+                             'a failed answer delivery is continued with --kind recovery' % (consults, answers))
+        return kind, kind
+    if kind == 'recovery':
+        if not records or records[-1][2] == 'ok':
+            raise ValueError('recovery continues only a preceding turn that did not end ok; the last turn is %s'
+                             % ('absent' if not records else records[-1][0] + ' (ok)'))
+        effective = next(k for _, k, _, _ in reversed(records) if k != 'recovery')
+        return kind, effective
+    return kind, kind
+
 def limit_state(dest, next_is_feedback=False, now=None):
     """Where the run stands against its caps, from the run ledger (all roles) and the turn records."""
     ledger = run_ledger(dest)
-    starts, ok_turns = [], 0
-    for folder in sorted(p for p in (dest / 'turns').iterdir() if p.is_dir()) if (dest / 'turns').is_dir() else []:
-        try:
-            start = parse_time(json.loads((folder / 'invocation.json').read_text()).get('started_at'))
-            if start:
-                starts.append(start)
-            ok_turns += json.loads((folder / 'result.json').read_text()).get('status') == 'ok'
-        except (OSError, ValueError):
-            continue
+    records = turn_records(dest)
+    counts = turn_counts(records)
+    starts = [start for _, _, _, start in records if start]
     now = now or datetime.now(timezone.utc)
     elapsed = (now - min(starts)).total_seconds() if starts else 0.0
-    used = {'token_limit': ledger['total_tokens'], 'time_limit_seconds': elapsed, 'feedback_limit': max(ok_turns - 1, 0)}
-    # tokens/time: a run that has used its whole budget gets no further call; feedback: only a follow-up prompt counts
+    used = {'token_limit': ledger['total_tokens'], 'time_limit_seconds': elapsed, 'feedback_limit': counts['delivered']['feedback']}
+    # tokens/time: a run that has used its whole budget gets no further call; feedback: only a next feedback delivery counts
     reached = [status for key, status in CENSORED
                if used[key] >= LIMITS[key] and (key != 'feedback_limit' or next_is_feedback)]
     return {'used': used, 'limits': dict(LIMITS), 'tokens_are_lower_bound': ledger['tokens_are_lower_bound'],
+            'answer_turns': counts['delivered']['answer'], 'turn_kinds': counts,
             'overshoot': {k: used[k] - LIMITS[k] for k in LIMITS if used[k] > LIMITS[k]}, 'reached': reached, 'at': utc()}
 
 def censor(dest, state, when):
@@ -926,6 +993,8 @@ def turn(args):
                 successes.append(p)
         except ValueError as broken:
             print('unreadable result treated as failed: %s (%s)' % (p / 'result.json', broken), file=sys.stderr)
+    # the turn's kind decides whether it is a capped feedback delivery; validated before any paid call
+    kind, counts_as = next_turn_kind(manifest, dest, turn_records(dest), args.resume, getattr(args, 'kind', None))
     if args.dry_run:
         exists = bool(successes)
     else:
@@ -934,7 +1003,7 @@ def turn(args):
         raise ValueError('first turn requires no --resume; subsequent turns require --resume '
                          '(session transcript %s in the config volume; %d turn dirs, %d successful)'
                          % ('present' if exists else 'absent', len(turn_dirs), len(successes)))
-    limits = limit_gate(dest, next_is_feedback=args.resume, write=not args.dry_run)
+    limits = limit_gate(dest, next_is_feedback=counts_as == 'feedback', write=not args.dry_run)
     # a single call never runs past the run's wall-clock cap
     timeout = max(1, min(args.timeout_seconds, int(LIMITS['time_limit_seconds'] - limits['used']['time_limit_seconds'])))
     seen = read_seen(dest)
@@ -944,7 +1013,8 @@ def turn(args):
     prompt = Path(args.prompt).read_bytes()
     if args.dry_run:
         print(json.dumps({'create': command, 'start': ['docker', 'start', '--attach', '--interactive', name],
-                          'prompt_bytes': len(prompt), 'session_id': manifest['session_id'], 'resume': args.resume}, indent=2))
+                          'prompt_bytes': len(prompt), 'session_id': manifest['session_id'], 'resume': args.resume,
+                          'turn_kind': kind, 'counts_as': counts_as}, indent=2))
         return
     if args.cache_policy != 'observed-cache':
         raise ValueError('explicit --cache-policy observed-cache required; strict cache control unavailable')
@@ -955,7 +1025,7 @@ def turn(args):
     output.mkdir()
     (output / 'prompt.txt').write_bytes(prompt)
     write_json(output / 'invocation.json', {'create': command, 'session_id': manifest['session_id'], 'resume': args.resume,
-        'prompt_sha256': hashlib.sha256(prompt).hexdigest(), 'cache_policy': args.cache_policy,
+        'turn_kind': kind, 'counts_as': counts_as, 'prompt_sha256': hashlib.sha256(prompt).hexdigest(), 'cache_policy': args.cache_policy,
         'env_file': str(env_file), 'started_at': utc(), 'timeout_seconds': args.timeout_seconds,
         'max_turns': args.max_turns, 'max_budget_usd': args.max_budget_usd, 'hook_selftest_before_call': pre,
         'effective_timeout_seconds': timeout, 'limits_before_call': limits})
@@ -1182,6 +1252,9 @@ def main():
     run.add_argument('--max-turns', type=int)
     run.add_argument('--max-budget-usd', type=float)
     run.add_argument('--resume', action='store_true')
+    run.add_argument('--kind', choices=TURN_KINDS, help='required with --resume: feedback (evaluator judging result; '
+                     'capped at 30) | answer (arm 3: user-proxy answers to the PM) | recovery (continue the preceding '
+                     'turn that did not end ok; counts as that turn\'s kind)')
     run.add_argument('--dry-run', action='store_true')
     run.add_argument('--cache-policy', choices=('observed-cache',))
     norm = sub.add_parser('normalize')

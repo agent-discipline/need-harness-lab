@@ -317,9 +317,10 @@ class RunnerTest(unittest.TestCase):
             with patch.object(launch.subprocess, 'run') as run:
                 launch.turn(args)
                 run.assert_not_called()
-            args.resume = True
+            args.resume, args.kind = True, 'feedback'               # no session yet: resume is refused
             with self.assertRaises(ValueError):
                 launch.turn(args)
+            args.kind = None
             os.chmod(env, 0o644)
             args.resume = False
             with self.assertRaises(ValueError):
@@ -395,14 +396,16 @@ class RunnerTest(unittest.TestCase):
             args.resume = False
             with patch.object(launch, 'session_exists', return_value=True), self.assertRaises(ValueError):
                 launch.turn(args)
-            args.resume = True
+            args.resume, args.kind = True, 'recovery'               # continues the failed first turn
             with patch.object(launch.subprocess, 'run', side_effect=failing_create), patch.object(launch, 'volume_listing', return_value={}), patch.object(launch, 'session_exists', return_value=True):
                 with self.assertRaises(RuntimeError):
                     launch.turn(args)
             self.assertTrue((dest / 'turns/0003/result.json').exists())
+            self.assertEqual(json.loads((dest / 'turns/0003/invocation.json').read_text())['turn_kind'], 'recovery')
+            self.assertEqual(launch.limit_state(dest)['turn_kinds']['declared'], {'initial': 2, 'feedback': 0, 'answer': 0, 'recovery': 1})
             self.assertFalse((dest / 'request-ids.txt').exists())
 
-    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1):
+    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1, kind='feedback'):
         """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts."""
         dest = root / 'a'
         reported = pm_requests[-1]['message']['usage']
@@ -444,6 +447,7 @@ class RunnerTest(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
         args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume,
+                               kind=kind if resume else None,
                                dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
         with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'volume_listing', return_value={}), \
              patch.object(launch, 'session_exists', return_value=resume), patch.object(launch, 'selftest', return_value=SELFTEST_OK):
@@ -752,7 +756,7 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(result['role_files'], {'implementer': 'events.role-implementer.jsonl', 'worker': 'events.role-worker.jsonl'})
 
 class RunLimitTest(unittest.TestCase):
-    """One gate before every paid call: tokens of all roles, wall clock since the first call, follow-up prompts."""
+    """One gate before every paid call: tokens of all roles, wall clock since the first call, evaluator feedback deliveries."""
 
     def make_run(self, root, ok_turns=1, tokens_per_turn=10, started=None, arm=1):
         dest = root / 'a'
@@ -763,7 +767,7 @@ class RunLimitTest(unittest.TestCase):
         for n in range(1, ok_turns + 1):
             t = dest / 'turns' / ('%04d' % n)
             t.mkdir()
-            (t / 'invocation.json').write_text(json.dumps({'started_at': start.isoformat()}))
+            (t / 'invocation.json').write_text(json.dumps({'started_at': start.isoformat(), 'turn_kind': 'initial' if n == 1 else 'feedback'}))
             (t / 'result.json').write_text(json.dumps({'status': 'ok', 'usage_complete': True,
                                                        'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}}))
             usage = {'input_tokens': tokens_per_turn, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}
@@ -772,8 +776,8 @@ class RunLimitTest(unittest.TestCase):
         (root / 'prompt').write_text('next')
         return dest
 
-    def call(self, root, resume=True, dry_run=False):
-        args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume,
+    def call(self, root, resume=True, dry_run=False, kind='feedback'):
+        args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume, kind=kind,
                                dry_run=dry_run, cache_policy='observed-cache', timeout_seconds=7200, max_turns=None, max_budget_usd=None)
         with patch.object(launch.subprocess, 'run') as run, patch.object(launch, 'session_exists', return_value=resume), \
              contextlib.redirect_stdout(io.StringIO()):
@@ -824,12 +828,12 @@ class RunLimitTest(unittest.TestCase):
     def test_feedback_cap_is_thirty_follow_up_prompts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dest = self.make_run(root, ok_turns=30)                      # initial prompt + 29 follow-ups
-            self.assertIsNone(self.call(root, dry_run=True)[0])          # the 30th follow-up is allowed
+            dest = self.make_run(root, ok_turns=30)                      # initial + 29 feedback turns
+            self.assertIsNone(self.call(root, dry_run=True)[0])          # the 30th feedback is allowed
             self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 29)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dest = self.make_run(root, ok_turns=31)                      # 30 follow-ups delivered
+            dest = self.make_run(root, ok_turns=31)                      # 30 feedbacks delivered
             error, run = self.call(root)
             self.assertIn('CENSORED_TURNS', str(error))
             run.assert_not_called()
@@ -845,6 +849,150 @@ class RunLimitTest(unittest.TestCase):
             self.assertEqual(record['first']['when'], 'after call')
             (root / 'b').mkdir()
             self.assertIsNone(launch.record_overshoot(self.make_run(root / 'b', tokens_per_turn=5)))
+
+class TurnKindTest(unittest.TestCase):
+    """Only evaluator feedback deliveries count toward the 30 cap; arm 3 answer turns are counted separately."""
+
+    def make(self, root, turns, arm=3, consults=0):
+        """turns: [(turn_kind or None, final status or None)]; one tiny implementer request per turn."""
+        dest = root / 'a'
+        (dest / 'workspace').mkdir(parents=True)
+        launch.write_json(dest / 'manifest.json', manifest(arm, run_id='a', workspace=str(dest / 'workspace')))
+        (dest / 'turns').mkdir()
+        now = launch.datetime.now(launch.timezone.utc).isoformat()
+        for n, (kind, status) in enumerate(turns, 1):
+            t = dest / 'turns' / ('%04d' % n)
+            t.mkdir()
+            invocation = {'started_at': now}
+            if kind:
+                invocation['turn_kind'] = kind
+            (t / 'invocation.json').write_text(json.dumps(invocation))
+            if status:
+                (t / 'result.json').write_text(json.dumps({'status': status, 'usage_complete': True,
+                                                           'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}}))
+        for n in range(1, consults + 1):
+            c = dest / 'consults' / ('%04d' % n)
+            c.mkdir(parents=True)
+            (c / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0}))
+        (root / 'prompt').write_text('next')
+        return dest
+
+    def call(self, root, kind, resume=True, dry_run=True):
+        args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume, kind=kind,
+                               dry_run=dry_run, cache_policy='observed-cache', timeout_seconds=60, max_turns=None, max_budget_usd=None)
+        out = io.StringIO()
+        with patch.object(launch.subprocess, 'run') as run, patch.object(launch, 'session_exists', return_value=resume) as exists, \
+             contextlib.redirect_stdout(out):
+            try:
+                launch.turn(args)
+                error = None
+            except (RuntimeError, ValueError) as exc:
+                error = exc
+        return error, run, exists, out.getvalue()
+
+    def test_resume_without_kind_is_refused_before_any_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make(root, [('initial', 'ok')])
+            for dry in (True, False):
+                error, run, exists, _ = self.call(root, None, dry_run=dry)
+                self.assertIn('--kind', str(error))
+                run.assert_not_called()
+                exists.assert_not_called()                              # refused before even inspecting the volume
+            error, *_ = self.call(root, 'feedback', resume=False)        # a first turn never carries a kind
+            self.assertIn('first turn is always initial', str(error))
+
+    def test_answer_is_refused_in_arms_1_and_2_and_without_a_consultation(self):
+        for arm in (1, 2):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.make(root, [('initial', 'ok')], arm=arm, consults=1)
+                error, run, _, _ = self.call(root, 'answer', dry_run=False)
+                self.assertIn('only in arm 3', str(error))
+                run.assert_not_called()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make(root, [('initial', 'ok'), ('answer', 'ok')], consults=1)   # the only consultation was delivered
+            error, run, _, _ = self.call(root, 'answer', dry_run=False)
+            self.assertIn('undelivered user-proxy consultation', str(error))
+            run.assert_not_called()
+
+    def test_answer_turns_do_not_count_and_are_reported_separately(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            turns = [('initial', 'ok')] + [('answer', 'ok')] * 5 + [('feedback', 'ok')] * 30
+            dest = self.make(root, turns, consults=6)
+            state = launch.limit_state(dest)
+            self.assertEqual(state['used']['feedback_limit'], 30)
+            self.assertEqual(state['answer_turns'], 5)
+            self.assertEqual(launch.run_ledger(dest)['turn_kinds']['delivered'], {'initial': 1, 'feedback': 30, 'answer': 5})
+            error, _, _, printed = self.call(root, 'answer')             # an answer after 30 feedbacks is not capped
+            self.assertIsNone(error)
+            self.assertEqual(json.loads(printed)['counts_as'], 'answer')
+            error, run, _, _ = self.call(root, 'feedback', dry_run=False)   # the 31st feedback is censored, no call
+            self.assertIn('CENSORED_TURNS', str(error))
+            run.assert_not_called()
+            self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TURNS')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.make(root, [('initial', 'ok')] + [('feedback', 'ok')] * 29)
+            self.assertIsNone(self.call(root, 'feedback')[0])           # the 30th feedback is allowed
+
+    def test_recovery_counts_as_the_turn_it_continues_and_only_after_a_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            turns = [('initial', 'failed'), ('recovery', 'ok')] + [('feedback', 'ok')] * 28 + [('feedback', 'failed'), ('recovery', None)]
+            dest = self.make(root, turns)
+            counts = launch.limit_state(dest)['turn_kinds']
+            self.assertEqual(counts['delivered'], {'initial': 1, 'feedback': 28, 'answer': 0})
+            self.assertEqual(counts['declared'], {'initial': 1, 'feedback': 29, 'answer': 0, 'recovery': 2})
+            error, _, _, printed = self.call(root, 'recovery')           # the 29th feedback delivery is still open
+            self.assertIsNone(error)
+            self.assertEqual(json.loads(printed)['counts_as'], 'feedback')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make(root, [('initial', 'ok')] + [('feedback', 'ok')] * 29 + [('feedback', 'failed'), ('recovery', 'ok')])
+            self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 30)   # recovered delivery counted once
+            error, run, _, _ = self.call(root, 'recovery', dry_run=False)            # last turn ended ok: nothing to recover
+            self.assertIn('recovery continues only', str(error))
+            run.assert_not_called()
+            self.assertIn('CENSORED_TURNS', str(self.call(root, 'feedback', dry_run=False)[0]))
+
+    def test_turn_record_without_kind_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make(root, [('initial', 'ok'), (None, 'ok')])
+            with self.assertRaises(RuntimeError) as ctx:
+                launch.limit_state(dest)
+            self.assertIn('turn_kind', str(ctx.exception))
+            ledger = launch.run_ledger(dest)
+            self.assertIsNone(ledger['turn_kinds'])                      # never a zero count
+            self.assertIn('0002', ledger['turn_kinds_error'])
+            error, run, _, _ = self.call(root, 'feedback', dry_run=False)
+            self.assertIn('turn_kind', str(error))
+            run.assert_not_called()
+            self.assertFalse((dest / 'censored.json').exists())
+            shutil.rmtree(dest / 'turns/0002')
+            (dest / 'turns/0002').mkdir()                                # a turn directory without invocation.json
+            with self.assertRaises(RuntimeError):
+                launch.limit_state(dest)
+
+    def test_kind_is_stored_with_the_turn_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make(root, [('initial', 'ok')], consults=1)
+            def failing_create(cmd, **kw):
+                return SimpleNamespace(returncode=125, stdout=b'', stderr=b'no image')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='answer',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=60, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=failing_create), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'selftest', return_value=SELFTEST_OK), patch.object(launch, 'volume_listing', return_value={}):
+                with self.assertRaises(RuntimeError):
+                    launch.turn(args)
+            invocation = json.loads((dest / 'turns/0002/invocation.json').read_text())
+            self.assertEqual((invocation['turn_kind'], invocation['counts_as']), ('answer', 'answer'))
+            self.assertEqual(launch.limit_state(dest)['turn_kinds']['declared']['answer'], 1)
+            self.assertEqual(launch.limit_state(dest)['answer_turns'], 0)  # failed delivery: not delivered yet
 
 class DiscardTest(unittest.TestCase):
     def run_discard(self, dest, reviewer_entries, rm_rc=0):

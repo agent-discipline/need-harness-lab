@@ -1,6 +1,6 @@
 # Claude 조건 — 결제·정산 API 실험 (동일 프로토콜, Claude Code 실행)
 
-**프로토콜 `payment-settlement-v3-claude`**(2026-11-17, Claude 전용 — Codex는 쓰지 않는다)로 세 조건을 Claude Code에서 실행하기 위한 폴더다. 계약(`../docs/`)·판정기(`../evaluation/`)·fixture(`../infra/`)는 공유한다. 조건당 10회, 총 30회 독립 시행이며 현재 30개 시행 모두 `NOT_STARTED`다. run당 상한은 input+output 20,000,000 토큰·8시간·피드백 30회다(Codex v2와 같은 상한).
+**프로토콜 `payment-settlement-v3-claude`**(2026-11-17, Claude 전용 — Codex는 쓰지 않는다)로 세 조건을 Claude Code에서 실행하기 위한 폴더다. 계약(`../docs/`)·판정기(`../evaluation/`)·fixture(`../infra/`)는 공유한다. 조건당 10회, 총 30회 독립 시행이며 현재 30개 시행 모두 `NOT_STARTED`다. run당 상한은 input+output 20,000,000 토큰·8시간·피드백 30회다(Codex v2와 같은 상한). 피드백 30회는 평가자가 판정 결과를 전하는 턴만 세고, 3번의 질의응답 턴(대리 사용자 답 전달)은 상한 밖에서 따로 센다([runbook 상한 절](docs/runbook.md#상한-run당-모든-역할-합산)).
 
 | 조건 | 최초 입력 | 모델(요청) | 서브에이전트 | 하네스 |
 |---|---|---|---|---|

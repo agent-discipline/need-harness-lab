@@ -77,4 +77,4 @@
 
 | 일자 | 단계 | 증상 | 원인 | 해결 | 남은 것 / 증거 경로 |
 |---|---|---|---|---|---|
-| | | | | | |
+| 2026-11-17 | 준비(v3-claude) | 피드백 상한이 "첫 성공 턴 이후 모든 성공 턴"을 세어 3번의 질의응답 재개 턴(대리 사용자 답 전달)까지 30회에 들어감 | 실행기가 재개(`--resume`) 여부만 보고 턴의 종류를 기록하지 않음 | 사용자 결정 "판정 피드백만 셈"(`experiment-plan.md:51`·`:25`): 재개 턴은 `--kind feedback·answer·recovery` 선언 필수(없으면 호출 전 거부, `answer`는 3번만), `invocation.json` `turn_kind`에 저장, 상한은 성공한 `feedback`(그 `recovery` 포함)만, `answer`는 `answer_turns`·`ledger.json` `turn_kinds`로 별도 기록. 종류 없는 턴 기록은 상한 계산을 실패시킨다 | `runner/launch.py` `turn_records`·`turn_counts`·`next_turn_kind`, `runner/test_launch.py` `TurnKindTest`, runbook 상한 절 |
