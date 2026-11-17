@@ -9,8 +9,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent / "measurement"))
+sys.path.insert(0, str(ROOT / "runner"))
 from normalize import normalize
 from summarize import summarize
+import launch
 
 
 def main_text(stdout):
@@ -71,6 +73,9 @@ def capture(run_id, turn, analysis, status, runs=None):
         summary["scope"] = "unique_requests_in_collected_transcripts"
         summary["usage_complete"] = complete      # false if any captured turn left usage unaccounted
         (records / "usage-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    # The run's single ledger (every role: pm/implementer/worker/reviewer and user-proxy consultations) goes with the
+    # records; usage-summary.json above covers only the captured turns.
+    (records / "ledger.json").write_text(json.dumps(launch.write_ledger(source), ensure_ascii=False, indent=2) + "\n")
     spec = importlib.util.spec_from_file_location("record", ROOT.parent / "recording/record.py")
     recorder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(recorder)

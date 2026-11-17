@@ -351,8 +351,20 @@ class CaptureTurnTest(unittest.TestCase):
                 self.assertEqual(rows2, ['r-pm2'])                          # already captured request not recounted
                 summary = json.loads((records / 'usage-summary.json').read_text())
                 self.assertFalse(summary['usage_complete'])
+                # the run ledger (all roles, consultations included) travels with the records
+                consult = run / 'consults/0001'
+                consult.mkdir(parents=True)
+                (consult / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r-px', model='x', role='user-proxy',
+                                                                     turn='p', usage=USAGE)) + '\n')
+                (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.01}))
+                turn(3, [dict(type='message', id='r-pm3', model='claude-fable-5-2', usage=USAGE, role='pm')], True)
+                analysis.write_text('analysis 3')
+                capture_turn.capture('claude-arm3-core01', 3, analysis, 'ITERATING')
+                ledger = json.loads((records / 'ledger.json').read_text())
+                self.assertEqual(sorted(ledger['roles']), ['pm', 'reviewer', 'user-proxy', 'worker'])
+                self.assertEqual(ledger['roles']['pm']['requests'], 3)
                 with self.assertRaises(FileExistsError):
-                    capture_turn.capture('claude-arm3-core01', 2, analysis, 'ITERATING')
+                    capture_turn.capture('claude-arm3-core01', 3, analysis, 'ITERATING')
 
 
 class ConsultContractTest(unittest.TestCase):
