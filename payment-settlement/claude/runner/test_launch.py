@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,8 +17,8 @@ SELFTEST_OK = {'passed': True, 'selftest_failed': '0'}
 def manifest(arm=1, **extra):
     data = {'run_id': 'r', 'arm': arm, 'workspace': '/tmp/run/workspace', 'config_volume': 'cfg-vol', 'image': 'runner:test',
             'requested_model': 'model-x', 'requested_worker_model': 'worker-y' if arm == 3 else None,
-            'session_id': '11111111-2222-4333-8444-555555555555', 'codex_volume': 'codex-vol' if arm == 3 else None,
-            'harness': '/h' if arm == 3 else None}
+            'session_id': '11111111-2222-4333-8444-555555555555', 'reviewer_volume': 'rev-vol' if arm == 3 else None,
+            'requested_reviewer_model': 'reviewer-z' if arm == 3 else None, 'harness': '/h' if arm == 3 else None}
     data.update(extra)
     return data
 
@@ -58,16 +59,24 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(resumed[resumed.index('--max-turns') + 1], '3')
         self.assertEqual(resumed[resumed.index('--max-budget-usd') + 1], '1.5')
 
-    def test_arm3_requires_codex_auth_worker_model_no_socket(self):
+    def test_arm3_reviewer_volume_worker_model_no_socket(self):
         with self.assertRaises(ValueError):
-            launch.docker_command(manifest(3), Path('/e'), 'n', resume=False)
-        cmd = launch.docker_command(manifest(3), Path('/e'), 'n', resume=False, codex_auth=Path('/private/auth.json'))
+            launch.docker_command(manifest(3, reviewer_volume=None), Path('/e'), 'n', resume=False)
+        with self.assertRaises(ValueError):
+            launch.docker_command(manifest(3, requested_reviewer_model=None), Path('/e'), 'n', resume=False)
+        cmd = launch.docker_command(manifest(3), Path('/e'), 'n', resume=False)
         mounts = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '--mount']
-        self.assertEqual(len(mounts), 4)
-        self.assertIn('type=bind,src=/private/auth.json,dst=/home/node/.codex/auth.json,readonly', mounts)
+        self.assertEqual(len(mounts), 3)
+        self.assertIn('type=volume,src=rev-vol,dst=/home/node/.fable-review', mounts)
+        self.assertIn('LAB_REVIEWER_MODEL=reviewer-z', cmd)
+        self.assertIn('LAB_REVIEWER_CONFIG_DIR=/home/node/.fable-review', cmd)
+        self.assertNotIn('codex', ' '.join(cmd))
+        self.assertNotIn('bind,src=', ' '.join(m for m in mounts if 'workspace' not in m))   # no credential file mounted
         self.assertIn('CLAUDE_CODE_SUBAGENT_MODEL=worker-y', cmd)
         self.assertNotIn('--tools', cmd)
         self.assertNotIn('docker.sock', ' '.join(cmd))
+        # arms 1/2 never receive the reviewer switch, so fable-review refuses there
+        self.assertNotIn('LAB_REVIEWER', ' '.join(launch.docker_command(manifest(), Path('/e'), 'n', resume=False)))
 
     def test_initialization_distinct_no_overwrite_git_init_atomic(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -129,6 +138,9 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(c['requested_model'], 'claude-fable-5-2')
             self.assertEqual(c['requested_worker_model'], 'claude-opus-5-5')
             self.assertEqual(c['subagents'], 'opus-high')
+            self.assertEqual(c['requested_reviewer_model'], 'claude-fable-5-2')
+            self.assertTrue(c['reviewer_volume'].startswith('payment-claude-reviewer-'))
+            self.assertNotIn('codex_volume', c)
             self.assertIn('core.md', c['harness_seed']['sources'])
             self.assertIn('settings.json', c['harness_seed']['runner'])
             args2 = SimpleNamespace(runs=root / '.runs', run_id='d', arm=3, core=1, image='image', harness=None, network=None)
@@ -237,17 +249,11 @@ class RunnerTest(unittest.TestCase):
     def test_scrub_needle_set_and_streaming(self):
         with tempfile.TemporaryDirectory() as tmp:
             big = Path(tmp) / 'big.bin'
-            big.write_bytes(b'x' * (launch.SCAN_CHUNK - 3) + b'codex-secret-value-1234567890' + b'y' * 10)   # straddles a chunk boundary
+            big.write_bytes(b'x' * (launch.SCAN_CHUNK - 3) + b'other-secret-value-1234567890' + b'y' * 10)   # straddles a chunk boundary
             (Path(tmp) / 'clean.bin').write_bytes(b'z' * (2 * launch.SCAN_CHUNK + 7))
-            hits = launch.scrub(tmp, ['secret-value', 'codex-secret-value-1234567890'])
+            hits = launch.scrub(tmp, ['secret-value', 'other-secret-value-1234567890'])
             self.assertEqual(hits, ['big.bin'])
-            self.assertNotIn(b'codex-secret-value-1234567890', big.read_bytes())
-            auth = Path(tmp) / 'auth.json'
-            auth.write_text(json.dumps({'tokens': {'access_token': 'A' * 40, 'refresh_token': 'R' * 30, 'account_id': 'short'}, 'last_refresh': '2026-09-23T00:00:00Z'}))
-            self.assertEqual(sorted(launch.codex_secrets(auth)), sorted(['A' * 40, 'R' * 30, '2026-09-23T00:00:00Z']))
-            auth.write_text('not json')
-            with self.assertRaises(ValueError):
-                launch.codex_secrets(auth)
+            self.assertNotIn(b'other-secret-value-1234567890', big.read_bytes())
 
     def test_dry_run_validates_env_and_never_calls_subprocess(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -258,7 +264,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=True, cache_policy=None, timeout_seconds=1, max_turns=None, max_budget_usd=None)
             with patch.object(launch.subprocess, 'run') as run:
                 launch.turn(args)
@@ -281,7 +287,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
             def fake_run(cmd, **kw):
                 if cmd[:2] == ['docker', 'create']:
@@ -318,7 +324,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
             def failing_create(cmd, **kw):
                 return SimpleNamespace(returncode=125, stdout=b'', stderr=b'image not found')
@@ -343,50 +349,110 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue((dest / 'turns/0003/result.json').exists())
             self.assertFalse((dest / 'request-ids.txt').exists())
 
-    def test_arm3_codex_attempt_without_session_is_incomplete(self):
+    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions):
+        """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts."""
+        dest = root / 'a'
+        reported = pm_requests[-1]['message']['usage']
+        def fake_run(cmd, **kw):
+            if cmd[:2] == ['docker', 'create']:
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+            if cmd[:2] == ['docker', 'start']:
+                kw['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'session_id': manifest()['session_id'],
+                                               'usage': {k: reported[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': 0.1}).encode() + b'\n')
+                return SimpleNamespace(returncode=0)
+            if cmd[:2] == ['docker', 'inspect']:
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/reviewer-calls.log'):
+                if reviewer_log is None:
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                Path(cmd[-1]).write_text(reviewer_log)
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+            if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/projects'):
+                if not reviewer_sessions:
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                target = Path(cmd[-1]) / '-tmp-mirror'
+                target.mkdir(parents=True)
+                for sid, lines in reviewer_sessions.items():
+                    (target / (sid + '.jsonl')).write_text(''.join(json.dumps(l) + '\n' for l in lines))
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+            if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.claude/projects'):
+                target = Path(cmd[-1]) / '-workspace'
+                target.mkdir(parents=True)
+                (target / 's.jsonl').write_text(''.join(json.dumps(l) + '\n' for l in pm_requests))
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+            return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+        args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume,
+                               dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
+        with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'volume_listing', return_value={}), \
+             patch.object(launch, 'session_exists', return_value=resume), patch.object(launch, 'selftest', return_value=SELFTEST_OK):
+            launch.turn(args)
+        turns = sorted((dest / 'turns').iterdir())
+        return json.loads((turns[-1] / 'result.json').read_text()), turns[-1]
+
+    def test_arm3_reviewer_usage_is_separate_complete_and_not_recounted(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dest = root / 'a'
             (dest / 'turns').mkdir(parents=True)
             (dest / 'workspace').mkdir()
-            env = env_file(tmp)
-            auth = root / 'auth.json'
-            auth.write_text('{}')
-            prompt = root / 'prompt'
-            prompt.write_text('hello')
+            (root / 'prompt').write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(3, run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=auth, prompt=prompt, resume=False,
-                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
-            good = {'type': 'assistant', 'requestId': 'req-ok', 'sessionId': 's', 'message': {'model': 'm', 'usage': USAGE}}
-            def fake_run(cmd, **kw):
-                if cmd[:2] == ['docker', 'create']:
-                    return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
-                if cmd[:2] == ['docker', 'start']:
-                    kw['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'session_id': manifest()['session_id'],
-                                                   'usage': {k: USAGE[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': 0.1}).encode() + b'\n')
-                    return SimpleNamespace(returncode=0)
-                if cmd[:2] == ['docker', 'inspect']:
-                    return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
-                if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/projects'):
-                    target = Path(cmd[-1]) / '-workspace'
-                    target.mkdir(parents=True)
-                    (target / 's.jsonl').write_text(json.dumps(good) + '\n')
-                    return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
-                if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/sessions'):
-                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
-                if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('wrapper-calls.log'):
-                    Path(cmd[-1]).write_text('2026-09-23T00:00:00Z-77 started argc=6 stripped=1\n')   # interrupted: no exit line
-                    return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
-                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
-            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'volume_listing', return_value={}), \
-                 patch.object(launch, 'session_exists', return_value=False), patch.object(launch, 'selftest', return_value=SELFTEST_OK):
-                launch.turn(args)
-            result = json.loads((dest / 'turns/0001/result.json').read_text())
-            self.assertEqual(result['codex_sessions']['attempts_this_turn'], 1)
-            self.assertEqual(result['codex_sessions']['finished_total'], 0)
-            self.assertTrue(result['reviewer_usage_pending'])
-            self.assertFalse(result['usage_complete'])
+            rev_usage = dict(USAGE, output_tokens=50)
+            sid_a, sid_b = 'aaaaaaaa-0000-4000-8000-000000000001', 'bbbbbbbb-0000-4000-8000-000000000002'
+            pm1 = [{'type': 'assistant', 'requestId': 'req-pm1', 'sessionId': manifest()['session_id'], 'message': {'model': 'pm-model', 'usage': USAGE}}]
+            rev_a = [{'type': 'assistant', 'requestId': 'req-rev-a', 'sessionId': sid_a, 'message': {'model': 'reviewer-model', 'usage': rev_usage}}]
+            log1 = 'T1-10 started session=%s model=reviewer-z\nT1-10 exit=0\n' % sid_a
+            result, out = self.arm3_turn(root, False, pm1, log1, {sid_a: rev_a})
             self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['incomplete'], [])
+            self.assertTrue(result['usage_complete'])                       # reviewer usage observed per request
+            self.assertFalse(result['reviewer_usage_pending'])
+            self.assertEqual(result['roles'], ['pm', 'reviewer'])
+            self.assertEqual(result['reviewer']['calls_this_turn'], 1)
+            cross = result['usage_cross_check']
+            self.assertEqual(cross['main_delta'], {k: 0 for k in launch.USAGE_KEYS})   # reviewer never folded into PM sums
+            self.assertEqual(cross['reviewer_sum'], {k: rev_usage[k] for k in launch.USAGE_KEYS})
+            self.assertIn('reviewer', result['role_files'])
+            rows = [json.loads(l) for l in (out / 'events.role-reviewer.jsonl').read_text().splitlines()]
+            self.assertEqual([(r['id'], r['model'], r['role']) for r in rows], [('req-rev-a', 'reviewer-model', 'reviewer')])
+            written = json.loads((dest / 'manifest.json').read_text())
+            self.assertEqual(written['actual_role_models'], {'pm': ['pm-model'], 'reviewer': ['reviewer-model']})
+            self.assertEqual(written['actual_model'], 'pm-model')
+            self.assertEqual(json.loads((dest / 'reviewer-calls.json').read_text())['calls'], ['T1-10'])
+            # turn 2: the volume still holds call A (already accounted) plus call B that started but left nothing
+            pm2 = pm1 + [{'type': 'assistant', 'requestId': 'req-pm2', 'sessionId': manifest()['session_id'], 'message': {'model': 'pm-model', 'usage': USAGE}}]
+            log2 = log1 + 'T2-20 started session=%s model=reviewer-z\n' % sid_b
+            result2, _ = self.arm3_turn(root, True, pm2, log2, {sid_a: rev_a})
+            self.assertEqual(result2['request_ids'], ['req-pm2'])               # req-rev-a is not counted twice
+            self.assertEqual(result2['reviewer']['calls_this_turn'], 1)
+            reasons = sorted(i['reason'] for i in result2['incomplete'])
+            self.assertEqual(reasons, ['reviewer attempt without transcript (usage unobservable)', 'reviewer call did not finish'])
+            self.assertTrue(result2['reviewer_usage_pending'])
+            self.assertFalse(result2['usage_complete'])
+            self.assertEqual(result2['status'], 'ok')
+            events, conflicts = launch.reconcile_events(dest)
+            self.assertEqual(sorted((e['id'], e['role']) for e in events), [('req-pm1', 'pm'), ('req-pm2', 'pm'), ('req-rev-a', 'reviewer')])
+            self.assertEqual(conflicts, [])
+
+    def test_arm3_reviewer_log_unreadable_or_orphan_transcript_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / 'a'
+            (dest / 'turns').mkdir(parents=True)
+            (dest / 'workspace').mkdir()
+            (root / 'prompt').write_text('hello')
+            launch.write_json(dest / 'manifest.json', manifest(3, run_id='a', workspace=str(dest / 'workspace')))
+            sid = 'cccccccc-0000-4000-8000-000000000003'
+            pm1 = [{'type': 'assistant', 'requestId': 'req-pm1', 'sessionId': manifest()['session_id'], 'message': {'model': 'pm-model', 'usage': USAGE}}]
+            rev = [{'type': 'assistant', 'requestId': 'req-rev', 'sessionId': sid, 'message': {'model': 'reviewer-model', 'usage': USAGE}}]
+            result, _ = self.arm3_turn(root, False, pm1, None, {sid: rev})         # transcript but no call log at all
+            self.assertIn('reviewer transcripts exist without any logged reviewer call', [i['reason'] for i in result['incomplete']])
+            self.assertFalse(result['usage_complete'])
+            # no reviewer activity at all: nothing to account for, the turn can be complete
+            result2, _ = self.arm3_turn(root, True, pm1 + [dict(pm1[0], requestId='req-pm2')], None, {})
+            self.assertEqual(result2['incomplete'], [])
+            self.assertTrue(result2['usage_complete'])
+            self.assertTrue(result2['reviewer']['log_absent'])
 
     def test_forked_session_is_incomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -398,7 +464,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
             good = {'type': 'assistant', 'requestId': 'req-ok', 'sessionId': 'other', 'message': {'model': 'm', 'usage': USAGE}}
             def fake_run(cmd, **kw):
@@ -433,7 +499,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
             def failing_create(cmd, **kw):
                 return SimpleNamespace(returncode=125, stdout=b'', stderr=b'image not found for secret-value')
@@ -488,7 +554,7 @@ class RunnerTest(unittest.TestCase):
             prompt = root / 'prompt'
             prompt.write_text('hello')
             launch.write_json(dest / 'manifest.json', manifest(run_id='a', workspace=str(dest / 'workspace')))
-            args = SimpleNamespace(runs=root, run_id='a', env_file=env, codex_auth=None, prompt=prompt, resume=False,
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env, prompt=prompt, resume=False,
                                    dry_run=False, cache_policy='observed-cache', timeout_seconds=1, max_turns=None, max_budget_usd=None)
             good = {'type': 'assistant', 'requestId': 'req-ok', 'sessionId': 's', 'message': {'model': 'm', 'usage': USAGE}}
             bad = {'type': 'assistant', 'requestId': 'req-bad', 'sessionId': 's', 'message': {'model': 'm', 'usage': {'input_tokens': 1}}}
@@ -521,6 +587,75 @@ class RunnerTest(unittest.TestCase):
             self.assertFalse(result['usage_complete'])                                     # req-bad lacks counters
             self.assertEqual(result['usage_cross_check']['main_delta'], {k: 0 for k in launch.USAGE_KEYS})
             self.assertEqual(result['role_files'], {'implementer': 'events.role-implementer.jsonl', 'worker': 'events.role-worker.jsonl'})
+
+class FableReviewWrapperTest(unittest.TestCase):
+    """runner/fable-review.sh with a fake `claude` on PATH (no model call)."""
+    WRAPPER = Path(__file__).with_name('fable-review.sh')
+
+    def run_wrapper(self, tmp, env_extra, args=(), fake_rc=0):
+        bin_dir = Path(tmp) / 'bin'
+        bin_dir.mkdir(exist_ok=True)
+        fake = bin_dir / 'claude'
+        fake.write_text('#!/bin/bash\n'
+                        'printf "%s\\n" "$@" > "$FAKE_OUT/args"\n'
+                        'printf "%s" "$CLAUDE_CONFIG_DIR" > "$FAKE_OUT/config"\n'
+                        'cat > "$FAKE_OUT/stdin"\n'
+                        'echo \'{"type":"result","result":"REVIEW TEXT"}\'\n'
+                        'exit ' + str(fake_rc) + '\n')
+        os.chmod(fake, 0o755)
+        out = Path(tmp) / 'fake-out'
+        out.mkdir(exist_ok=True)
+        env = {'PATH': str(bin_dir) + ':' + os.environ['PATH'], 'FAKE_OUT': str(out), 'HOME': tmp}
+        env.update(env_extra)
+        done = subprocess.run(['bash', str(self.WRAPPER)] + list(args), input='review this', env=env,
+                              capture_output=True, text=True)
+        return done, out
+
+    def test_logs_attempt_runs_isolated_readonly_reviewer_and_returns_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / 'reviewer-cfg'
+            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'claude-fable-5-2', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(done.stdout.strip(), 'REVIEW TEXT')
+            argv = (out / 'args').read_text().split('\n')
+            self.assertEqual(argv[:2], ['-p', '--model'])
+            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-2')
+            self.assertEqual(argv[argv.index('--effort') + 1], 'high')
+            self.assertEqual(argv[argv.index('--tools') + 1], 'Read,Grep,Glob')
+            self.assertNotIn('--dangerously-skip-permissions', argv)
+            self.assertNotIn('--resume', argv)
+            sid = argv[argv.index('--session-id') + 1]
+            self.assertEqual((out / 'config').read_text(), str(cfg))          # never the PM's harness config dir
+            self.assertEqual((out / 'stdin').read_text(), 'review this')
+            lines = (cfg / 'reviewer-calls.log').read_text().splitlines()
+            self.assertEqual(len(lines), 2)
+            started = launch.CALL_STARTED.fullmatch(lines[0])
+            self.assertIsNotNone(started)
+            self.assertEqual(started.group(2), sid)
+            self.assertEqual(launch.CALL_EXIT.fullmatch(lines[1]).group(1), started.group(1))
+            self.assertTrue((cfg / 'raw' / (sid + '.json')).exists())
+
+    def test_failure_exit_code_propagates_and_is_logged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / 'reviewer-cfg'
+            done, _ = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, fake_rc=3)
+            self.assertEqual(done.returncode, 3)
+            self.assertTrue((cfg / 'reviewer-calls.log').read_text().splitlines()[-1].endswith(' exit=3'))
+
+    def test_refuses_without_reviewer_config_arguments_or_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            done, out = self.run_wrapper(tmp, {})                               # arms 1/2: switch absent
+            self.assertEqual(done.returncode, 98)
+            self.assertFalse((out / 'args').exists())
+            cfg = Path(tmp) / 'reviewer-cfg'
+            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(cfg)}, args=['exec'])
+            self.assertEqual(done.returncode, 2)
+            self.assertFalse((out / 'args').exists())
+            blocked = Path(tmp) / 'not-a-dir'
+            blocked.write_text('file, not a directory')
+            done, out = self.run_wrapper(tmp, {'LAB_REVIEWER_MODEL': 'm', 'LAB_REVIEWER_CONFIG_DIR': str(blocked)})
+            self.assertEqual(done.returncode, 97)
+            self.assertFalse((out / 'args').exists())
 
 if __name__ == '__main__':
     unittest.main()

@@ -21,7 +21,10 @@ SKIP = {'.git', '.gradle', 'build', '.runs', '.codex', '.claude', 'node_modules'
 CLI_VERSION = '2.1.280'
 HOME_DST = '/home/node'
 CONFIG_DST = HOME_DST + '/.claude'                    # CLAUDE_CONFIG_DIR, passed explicitly (never implied)
-CODEX_DST = HOME_DST + '/.codex'
+# Arm 3 second reviewer (replaces codex in the review playbook): fresh Claude sessions through runner/fable-review.sh
+# with their own config dir on a per-run volume, so reviewer transcripts are separable from the PM's.
+REVIEWER_DST = HOME_DST + '/.fable-review'
+REVIEWER_MODEL = 'claude-fable-5-2'
 TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN'
 USAGE_KEYS = ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens')
 EXPECTED_UID = 1000                                   # image USER node; workspace .git must be owned by the same uid
@@ -32,7 +35,7 @@ EXPECTED_UID = 1000                                   # image USER node; workspa
 MODELS = {1: ('claude-opus-5-5', None), 2: ('claude-opus-5-5', None), 3: ('claude-fable-5-2', 'claude-opus-5-5')}
 HARNESS_SEED = [('src/core.md', 'core.md'), ('hooks', 'hooks'), ('playbooks', 'playbooks'), ('templates', 'templates')]
 RUNNER_SEED = [('harness-bootstrap-CLAUDE.md', 'CLAUDE.md'), ('harness-settings.json', 'settings.json')]
-ROLES = ('pm', 'implementer', 'worker')
+ROLES = ('pm', 'implementer', 'worker', 'reviewer')
 NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must never appear in arms 1/2 (asserted on the init event)
 # Arms 1/2 run with an ALLOW-LIST of built-in tools (Codex parity: shell + file tools; no agents, skills, schedulers,
 # messaging, worktrees). Web tools stay listed until decision D5 resolves; their use is recorded per turn (web_requests).
@@ -212,7 +215,8 @@ PY
   PUSH="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push origin main\"},\"cwd\":\"$T\",\"session_id\":\"selftest0000\"}"
   PUSHOUT=$(printf '%s' "$PUSH" | bash "$CLAUDE_CONFIG_DIR/hooks/git-guard.sh" 2>/dev/null); rc=$?
   case "$PUSHOUT" in *'"ask"'*) report git_guard_push ask;; *) report git_guard_push "exit$rc"; fail=1;; esac
-  command -v codex >/dev/null && report codex_on_path 1 || { report codex_on_path 0; fail=1; }
+  # second reviewer entry point (replaces codex): present, executable and parseable
+  R=$(command -v fable-review); if [ -n "$R" ] && [ -x "$R" ] && bash -n "$R"; then report reviewer_on_path 1; else report reviewer_on_path 0; fail=1; fi
 fi
 report selftest_failed "$fail"
 '''
@@ -297,7 +301,8 @@ def initialize(args):
             'actual_model': None, 'effort': 'high', 'session_id': str(uuid.uuid4()),
             'cache_policy': 'observed-cache', 'strict_zero_cache_supported': False,
             'image': args.image, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
-            'codex_volume': ('payment-claude-codex-' + uuid.uuid4().hex) if args.arm == 3 else None,
+            'reviewer_volume': ('payment-claude-reviewer-' + uuid.uuid4().hex) if args.arm == 3 else None,
+            'requested_reviewer_model': REVIEWER_MODEL if args.arm == 3 else None,
             'source': str(source), 'workspace': str(dest / 'workspace'), 'network': network,
             'workspace_git_init': True, 'harness': str(args.harness.resolve()) if args.harness else None,
             'harness_seed': None, 'selftest': None, 'created_at': utc(),
@@ -316,7 +321,7 @@ def initialize(args):
         staging.rename(dest)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
-        for volume in (manifest.get('config_volume'), manifest.get('codex_volume')) if 'manifest' in locals() else ():
+        for volume in (manifest.get('config_volume'), manifest.get('reviewer_volume')) if 'manifest' in locals() else ():
             if volume:
                 subprocess.run(['docker', 'volume', 'rm', '-f', volume], capture_output=True, check=False)
         raise
@@ -334,8 +339,9 @@ def claude_command(manifest, resume, max_turns=None, max_budget_usd=None):
         command += ['--tools', ','.join(ALLOWED_TOOLS_ARM12)]              # arms 1/2: allow-list (Codex parity)
     return command
 
-def docker_command(manifest, env_file, name, resume, codex_auth=None, max_turns=None, max_budget_usd=None):
-    # Writable: workspace bind and this run's own state volumes. The token travels only through --env-file.
+def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_usd=None):
+    # Writable: workspace bind and this run's own state volumes. The token travels only through --env-file
+    # (the arm 3 reviewer CLI inherits it from the container environment; no other credential is mounted).
     command = ['docker', 'create', '--name', name, '--interactive', '--init',
                '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
                '--cpus=2', '--memory=3g', '--workdir=/workspace', '--env-file', str(env_file),
@@ -345,10 +351,11 @@ def docker_command(manifest, env_file, name, resume, codex_auth=None, max_turns=
     if manifest.get('requested_worker_model'):
         command += ['--env', 'CLAUDE_CODE_SUBAGENT_MODEL=' + manifest['requested_worker_model']]
     if manifest.get('arm') == 3:
-        if not codex_auth:
-            raise ValueError('arm 3 requires --codex-auth (original dual review calls codex)')
-        command += ['--mount', 'type=volume,src=' + manifest['codex_volume'] + ',dst=' + CODEX_DST,
-                    '--mount', 'type=bind,src=' + str(codex_auth) + ',dst=' + CODEX_DST + '/auth.json,readonly']
+        if not manifest.get('reviewer_volume') or not manifest.get('requested_reviewer_model'):
+            raise ValueError('arm 3 requires a reviewer volume and reviewer model (dual review second reviewer)')
+        command += ['--mount', 'type=volume,src=' + manifest['reviewer_volume'] + ',dst=' + REVIEWER_DST,
+                    '--env', 'LAB_REVIEWER_MODEL=' + manifest['requested_reviewer_model'],
+                    '--env', 'LAB_REVIEWER_CONFIG_DIR=' + REVIEWER_DST]
     if manifest.get('network'):
         command += ['--network', manifest['network'], '--env', 'DB_URL=jdbc:postgresql://db:5432/payment',
                     '--env', 'BANK_BASE_URL=http://bank:8081']
@@ -404,8 +411,9 @@ def collect(raw):
     summary['stream_models'] = sorted(models)
     return summary
 
-def build_events(projects, seen, run_id, turn_id, arm):
-    """One anthropic-adapter event per new requestId across all transcript copies; copies must agree."""
+def build_events(projects, seen, run_id, turn_id, arm, role=None):
+    """One anthropic-adapter event per new requestId across all transcript copies; copies must agree.
+    role fixes the role of every request (reviewer transcripts live in their own tree and have no PM/worker split)."""
     main_role = 'pm' if arm == 3 else 'implementer'
     entries = {}
     stats = {'files': 0, 'unparsable_lines': 0, 'assistant_lines': 0, 'assistant_without_requestId': 0, 'session_ids': set()}
@@ -460,7 +468,7 @@ def build_events(projects, seen, run_id, turn_id, arm):
             continue
         events.append({'type': 'message', 'id': rid, 'event_id': rid, 'model': next(iter(entry['models'])),
                        'usage': entry['usages'][0], 'usage_scope': 'own_request',
-                       'role': 'worker' if entry['worker'] else main_role, 'run_id': run_id, 'turn': turn_id,
+                       'role': role or ('worker' if entry['worker'] else main_role), 'run_id': run_id, 'turn': turn_id,
                        'file': entry['first'][0], 'line': entry['first'][1], 'copies': len(entry['files']),
                        'transcript_sessions': sorted(entry['sessions']), 'timestamp': entry['timestamp']})
     stats['session_ids'] = sorted(stats['session_ids'])
@@ -501,28 +509,9 @@ def contains_any(file, needles):
                 return True
             tail = window[-overlap:] if overlap else b''
 
-def codex_secrets(auth_file):
-    """Secret-shaped values from the mounted codex auth.json (kept in memory only; never written anywhere)."""
-    try:
-        data = json.loads(Path(auth_file).read_text())
-    except (OSError, ValueError) as exc:
-        raise ValueError('codex auth file must be readable JSON so its secrets can be scrubbed: %s' % exc)
-    found = []
-    def walk(node):
-        if isinstance(node, dict):
-            for v in node.values():
-                walk(v)
-        elif isinstance(node, list):
-            for v in node:
-                walk(v)
-        elif isinstance(node, str) and len(node) >= 20 and ' ' not in node:
-            found.append(node)
-    walk(data)
-    return found
-
 def scrub(directory, secret):
-    """Defensive last line: no credential (Claude token, codex auth secrets) may persist in any preserved file or
-    file name under the run directory (workspace included). Accepts one secret or a list."""
+    """Defensive last line: no credential may persist in any preserved file or file name under the run directory
+    (workspace included). Accepts one secret or a list."""
     secrets = [s for s in ([secret] if isinstance(secret, str) else secret) if s]
     if not secrets:
         return []
@@ -649,6 +638,61 @@ def write_role_files(output, events):
             mapping[role] = name
     return mapping
 
+CALL_STARTED = re.compile(r'(\S+) started session=([0-9a-f-]{36}) model=(\S+)')
+CALL_EXIT = re.compile(r'(\S+) exit=(-?\d+)')
+
+def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
+    """Arm 3: copy the second reviewer's call log and transcripts out of the stopped container and account for every
+    attempt made this turn. Reviewer requests become role 'reviewer' events (request-level usage, never mixed into
+    the PM's or workers' sums). Returns (events, new_ids, incomplete, summary, calls_seen)."""
+    incomplete = []
+    log = output / 'reviewer-calls.log'
+    calls = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/reviewer-calls.log', str(log)],
+                           capture_output=True, check=False)
+    log_absent = calls.returncode != 0 and b'No such file' in calls.stderr
+    log_unknown = calls.returncode != 0 and not log_absent
+    started, finished = {}, set()
+    for line in (log.read_text().splitlines() if calls.returncode == 0 else []):
+        hit = CALL_STARTED.fullmatch(line)
+        if hit:
+            started[hit.group(1)] = hit.group(2)
+        elif CALL_EXIT.fullmatch(line):
+            finished.add(CALL_EXIT.fullmatch(line).group(1))
+    # The log is cumulative inside the run's reviewer volume; calls already accounted for in earlier turns are skipped.
+    ledger = dest / 'reviewer-calls.json'
+    recorded = set(json.loads(ledger.read_text())['calls']) if ledger.exists() else set()
+    new_calls = sorted(set(started) - recorded)
+    copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/projects', str(output / 'reviewer-projects')],
+                            capture_output=True, check=False)
+    (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr)
+    projects_absent = copied.returncode != 0 and b'No such file' in copied.stderr
+    events, new_ids, stats, transcripts = [], [], {}, set()
+    if copied.returncode == 0:
+        events, new_ids, found, stats = build_events(output / 'reviewer-projects', seen, run_id, turn_id, arm, role='reviewer')
+        incomplete += found
+        transcripts = {p.stem for p in (output / 'reviewer-projects').rglob('*.jsonl')}
+        if stats.get('unparsable_lines') or stats.get('assistant_without_requestId'):
+            incomplete.append({'reason': 'reviewer transcript lines without parseable usage or requestId',
+                               'unparsable_lines': stats.get('unparsable_lines'),
+                               'assistant_without_requestId': stats.get('assistant_without_requestId')})
+    elif not projects_absent:
+        incomplete.append({'reason': 'reviewer transcript copy failed (docker cp rc=%s)' % copied.returncode})
+    if log_unknown:
+        incomplete.append({'reason': 'reviewer call log copy failed; reviewer attempts unknown (docker cp rc=%s)' % calls.returncode})
+    elif transcripts and not started:
+        incomplete.append({'reason': 'reviewer transcripts exist without any logged reviewer call'})
+    for call in new_calls:
+        if call not in finished:
+            incomplete.append({'reason': 'reviewer call did not finish', 'call': call, 'session': started[call]})
+        if started[call] not in transcripts:
+            incomplete.append({'reason': 'reviewer attempt without transcript (usage unobservable)', 'call': call, 'session': started[call]})
+    summary = {'log_rc': calls.returncode, 'log_absent': log_absent, 'log_unknown': log_unknown,
+               'calls_total': len(started), 'calls_this_turn': len(new_calls),
+               'calls_finished_total': len(finished & set(started)), 'transcript_files': len(transcripts),
+               'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'transcript_stats': stats,
+               'event_count': len(events), 'incomplete': len(incomplete)}
+    return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
+
 def turn(args):
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
@@ -658,10 +702,7 @@ def turn(args):
         raise ValueError('Docker mount paths must not contain commas')
     env_file = Path(args.env_file).resolve()
     secret = read_token(env_file)                      # validated in dry-run too
-    codex_auth = Path(args.codex_auth).resolve() if args.codex_auth else None
-    if codex_auth and (not codex_auth.is_file() or ',' in str(codex_auth)):
-        raise ValueError('codex auth must be an existing file without commas in its path')
-    needles = [secret] + (codex_secrets(codex_auth) if codex_auth else [])   # every credential placed in the blast radius
+    needles = [secret]                                 # the only credential placed in the blast radius
     turn_dirs = sorted(p for p in (dest / 'turns').iterdir() if p.is_dir())
     successes = []
     for p in turn_dirs:
@@ -681,7 +722,7 @@ def turn(args):
     seen = read_seen(dest)
     turn_id = f'{len(turn_dirs) + 1:04d}'   # failed turns keep their directory and number; retries get a new one
     name = 'payment-claude-call-' + uuid.uuid4().hex
-    command = docker_command(manifest, env_file, name, args.resume, codex_auth, args.max_turns, args.max_budget_usd)
+    command = docker_command(manifest, env_file, name, args.resume, args.max_turns, args.max_budget_usd)
     prompt = Path(args.prompt).read_bytes()
     if args.dry_run:
         print(json.dumps({'create': command, 'start': ['docker', 'start', '--attach', '--interactive', name],
@@ -719,32 +760,17 @@ def turn(args):
         copied = subprocess.run(['docker', 'cp', name + ':' + CONFIG_DST + '/projects', str(output / 'projects')],
                                 capture_output=True, check=False)
         (output / 'projects-copy.stderr').write_bytes(copied.stderr)
-        codex_copy = None
+        reviewer = None
         if manifest.get('arm') == 3:
-            sessions = subprocess.run(['docker', 'cp', name + ':' + CODEX_DST + '/sessions', str(output / 'codex-sessions')],
-                                      capture_output=True, check=False)
-            (output / 'codex-sessions-copy.stderr').write_bytes(sessions.stderr)
-            absent = sessions.returncode != 0 and b'No such file' in sessions.stderr
-            calls = subprocess.run(['docker', 'cp', name + ':' + CODEX_DST + '/wrapper-calls.log', str(output / 'codex-wrapper-calls.log')],
-                                   capture_output=True, check=False)
-            log_absent = calls.returncode != 0 and b'No such file' in calls.stderr
-            log_unknown = calls.returncode != 0 and not log_absent
-            lines = (output / 'codex-wrapper-calls.log').read_text().splitlines() if calls.returncode == 0 else []
-            attempts = sum(1 for l in lines if ' started ' in l)      # every attempt is logged BEFORE codex launches
-            finished = sum(1 for l in lines if ' exit=' in l)
-            # The wrapper log is cumulative across turns inside the volume; attempts this turn = total - already recorded.
-            recorded = json.loads((dest / 'codex-attempts.json').read_text())['total'] if (dest / 'codex-attempts.json').exists() else 0
-            this_turn = max(attempts - recorded, 0) if not log_unknown else 0
-            if not log_unknown:
-                (dest / 'codex-attempts.json').write_text(json.dumps({'total': attempts}) + '\n')
-            codex_copy = {'rc': sessions.returncode, 'absent': absent, 'attempts_this_turn': this_turn,
-                          'attempts_unknown': log_unknown, 'started_total': attempts, 'finished_total': finished,
-                          'session_files': len(list((output / 'codex-sessions').rglob('*.jsonl'))) if (output / 'codex-sessions').exists() else 0}
+            r_events, r_ids, r_incomplete, reviewer, reviewer_calls = collect_reviewer(
+                name, output, dest, seen, args.run_id, turn_id, manifest['arm'])
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True, check=False)
         result = collect(output / 'stdout.jsonl')
         events, new_ids, incomplete, stats = [], [], [{'reason': 'transcript copy failed (docker cp rc=%s)' % copied.returncode}], {}
         if copied.returncode == 0 and (output / 'projects').exists():
             events, new_ids, incomplete, stats = build_events(output / 'projects', seen, args.run_id, turn_id, manifest['arm'])
+        if reviewer is not None:
+            events, new_ids, incomplete = events + r_events, sorted(new_ids + r_ids), incomplete + r_incomplete
         with (output / 'events.jsonl').open('x') as stream:
             for event in events:
                 stream.write(json.dumps(event, ensure_ascii=False) + '\n')
@@ -757,10 +783,12 @@ def turn(args):
                 incomplete.append({'reason': 'sidechain request in an arm that forbids subagents', 'requestIds': leaked})
         stream_result = result['result'] or {}
         reported = stream_result.get('usage') if isinstance(stream_result.get('usage'), dict) else None
-        main_sum = sum_usage([e for e in events if e['role'] != 'worker'])
-        all_sum = sum_usage(events)
+        # The stream result covers the pinned session only: reviewer sessions are separate CLI processes and never part of it.
+        main_sum = sum_usage([e for e in events if e['role'] not in ('worker', 'reviewer')])
+        all_sum = sum_usage([e for e in events if e['role'] != 'reviewer'])
         cross = {'reported': reported, 'main_sum': main_sum, 'all_sum': all_sum, 'main_delta': None, 'all_delta': None,
-                 'note': 'observation only until the smoke fixes whether result.usage includes sidechains'}
+                 'reviewer_sum': sum_usage([e for e in events if e['role'] == 'reviewer']),
+                 'note': 'observation only until the smoke fixes whether result.usage includes sidechains; reviewer_sum is outside reported'}
         if reported and all(isinstance(reported.get(k), int) for k in USAGE_KEYS):
             cross['main_delta'] = {k: reported[k] - main_sum[k] for k in USAGE_KEYS}
             cross['all_delta'] = {k: reported[k] - all_sum[k] for k in USAGE_KEYS}
@@ -768,19 +796,16 @@ def turn(args):
             'exit_code': proc.returncode, 'finished_at': utc(), 'session_id': manifest['session_id'],
             'session_id_confirmed': stream_result.get('session_id') == manifest['session_id'],
             'request_ids': new_ids, 'event_count': len(events), 'incomplete': incomplete, 'transcript_stats': stats,
-            'codex_sessions': codex_copy,
-            'reviewer_usage_pending': bool(codex_copy and (codex_copy['session_files'] > 0 or codex_copy['attempts_this_turn'] > 0 or codex_copy['attempts_unknown'])),
+            'reviewer': reviewer,
+            'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
             'web_requests': reported.get('server_tool_use') if reported else None,
             'usage_complete': (not incomplete and result['result'] is not None and proc.returncode == 0
                                and copied.returncode == 0 and bool(events)
                                and stats.get('unparsable_lines', 1) == 0 and result['unparsed_lines'] == 0
                                and stats.get('assistant_without_requestId', 1) == 0
                                and cross['main_delta'] is not None
-                               and (all(v == 0 for v in cross['main_delta'].values()) or all(v == 0 for v in cross['all_delta'].values()))
-                               and (codex_copy is None
-                                    or (not codex_copy['attempts_unknown'] and codex_copy['attempts_this_turn'] == 0
-                                        and codex_copy['session_files'] == 0 and (codex_copy['absent'] or codex_copy['rc'] == 0)))),
-            'usage_complete_note': 'arm 3 turns with any codex attempt (wrapper log) or session stay incomplete until the codex adapter reconciles reviewer usage (analysis stage)',
+                               and (all(v == 0 for v in cross['main_delta'].values()) or all(v == 0 for v in cross['all_delta'].values()))),
+            'usage_complete_note': 'arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)',
             'usage_cross_check': cross, 'role_files': write_role_files(output, events),
             'transcript_models': sorted({e['model'] for e in events}), 'roles': sorted({e['role'] for e in events}),
             'config_volume': volume_listing(manifest), 'actual_model': None,
@@ -793,6 +818,8 @@ def turn(args):
         with (dest / 'request-ids.txt').open('a') as ledger:
             for event in events:
                 ledger.write(event['id'] + '\n')
+        if reviewer is not None and reviewer_calls is not None:
+            (dest / 'reviewer-calls.json').write_text(json.dumps({'calls': reviewer_calls}) + '\n')
         record_models(dest, manifest, events)
         print(json.dumps({k: result[k] for k in ('exit_code', 'session_id_confirmed', 'event_count', 'usage_complete',
                                                  'transcript_models', 'roles')}))
@@ -830,7 +857,7 @@ def discard(args):
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
     record = {'at': utc(), 'volumes': {}}
-    for key in ('config_volume', 'codex_volume'):
+    for key in ('config_volume', 'reviewer_volume', 'codex_volume'):   # codex_volume: manifests created before v3-claude
         volume = manifest.get(key)
         if not volume:
             continue
@@ -840,6 +867,14 @@ def discard(args):
                                      'removed': removed.returncode == 0, 'stderr': removed.stderr[-500:]}
     write_json(dest / ('discard-%s.json' % utc().replace(':', '-')), record)
     print(json.dumps({v: r['removed'] for v, r in record['volumes'].items()}))
+
+def role_model(manifest, role):
+    """Requested model label per role (normalization label only; actual models come from the transcripts)."""
+    if role == 'worker':
+        return manifest.get('requested_worker_model') or 'unspecified'
+    if role == 'reviewer':
+        return manifest.get('requested_reviewer_model') or 'unspecified'
+    return manifest['requested_model']
 
 def normalize(args):
     """Run the shared anthropic adapter once per role file, then summarize the whole run."""
@@ -861,7 +896,7 @@ def normalize(args):
             target.unlink()
         subprocess.run([sys.executable, str(measurement / 'normalize.py'), '--provider', 'anthropic',
                         '--run-id', manifest['run_id'], '--session-id', manifest['session_id'] + '/' + role,
-                        '--role', role, '--model', manifest['requested_model'] if role != 'worker' else (manifest.get('requested_worker_model') or 'unspecified'),
+                        '--role', role, '--model', role_model(manifest, role),
                         '--input', str(source), '--output', str(target)], check=True)
         outputs.append(target)
     if conflicts:
@@ -886,7 +921,6 @@ def main():
     run.add_argument('--run-id', required=True)
     run.add_argument('--prompt', type=Path, required=True)
     run.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
-    run.add_argument('--codex-auth', type=Path, help='Arm 3 only: codex auth.json, read-only bind')
     run.add_argument('--timeout-seconds', type=int, default=7200)
     run.add_argument('--max-turns', type=int)
     run.add_argument('--max-budget-usd', type=float)
