@@ -68,6 +68,29 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(resumed[resumed.index('--max-turns') + 1], '3')
         self.assertEqual(resumed[resumed.index('--max-budget-usd') + 1], '1.5')
 
+    def test_every_arm_waits_for_its_background_tasks(self):
+        # pilot 02: -p stopped a running subagent 10 min after the last answer; the variable lifts that ceiling
+        for arm in (1, 2, 3):
+            cmd = launch.docker_command(manifest(arm), Path('/e'), 'n', resume=False)
+            self.assertIn(launch.BG_WAIT_ENV + '=0', cmd)
+            self.assertLess(cmd.index(launch.BG_WAIT_ENV + '=0'), cmd.index('runner:test'))   # container env, kept by lab-arm3-start
+        self.assertNotIn('unset ' + launch.BG_WAIT_ENV, (Path(launch.__file__).with_name('lab-arm3-start.sh')).read_text())
+
+    def test_killed_background_tasks_are_visible_in_the_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / 'stdout.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in (
+                {'type': 'system', 'subtype': 'task_updated', 'task_id': 't1', 'patch': {'status': 'killed'}},
+                {'type': 'system', 'subtype': 'task_updated', 'task_id': 't2', 'patch': {'status': 'completed'}},
+                {'type': 'result', 'session_id': 's', 'usage': {k: 0 for k in launch.USAGE_KEYS}})))
+            (out / 'stderr.txt').write_text('Background tasks still running 10m after the last turn (subagent "T01 scaffold"); '
+                                            'stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.\n')
+            killed = launch.background_tasks_killed(out, launch.collect(out / 'stdout.jsonl')['background_tasks_killed'])
+            self.assertEqual(killed, [{'source': 'stream task_updated', 'task_id': 't1', 'description': None},
+                                      {'source': 'stderr', 'tasks': 'subagent "T01 scaffold"'}])
+            (out / 'stderr.txt').write_text('')
+            self.assertEqual(launch.background_tasks_killed(out, []), [])
+
     def test_arm3_reviewer_volume_worker_model_no_socket(self):
         with self.assertRaises(ValueError):
             launch.docker_command(manifest(3, reviewer_volume=None), Path('/e'), 'n', resume=False)
@@ -1171,6 +1194,32 @@ class RunLimitTest(unittest.TestCase):
             state = launch.limit_state(dest)
             self.assertEqual(state['reached'], [])
             self.assertLessEqual(launch.LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'], 11)
+
+    def test_a_turn_still_running_at_the_run_cap_is_stopped_and_the_run_censored(self):
+        # no per-turn limit (decision 2026-11-18): only the 8-hour run cap ends a turn, and it does end it
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, started=launch.datetime.now(launch.timezone.utc) - timedelta(seconds=28800 - 40))
+            seen = {}
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    seen['timeout'] = kw.get('timeout')
+                    raise subprocess.TimeoutExpired(cmd, kw.get('timeout'))
+                if cmd[:2] == ['docker', 'stop']:
+                    seen['stopped'] = True
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=28800, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), contextlib.redirect_stdout(io.StringIO()), \
+                 self.assertRaises(RuntimeError):
+                launch.turn(args)
+            self.assertLessEqual(seen['timeout'], 41)                          # the remaining run time, not 28800
+            self.assertTrue(seen.get('stopped'))                               # the container was stopped
+            result = json.loads((dest / 'turns/0002/result.json').read_text())
+            self.assertEqual((result['stopped_at_run_time_cap'], result['timed_out'], result['status']), (True, True, 'failed'))
+            censored = json.loads((dest / 'censored.json').read_text())
+            self.assertEqual((censored['status'], censored['first']['when'], censored['first']['call']), ('CENSORED_TIME', 'after call', 'turn'))
 
     def test_remaining_time_is_recomputed_after_the_arm3_selftest(self):
         for selftest_seconds, expect_call in ((90, True), (200, False)):

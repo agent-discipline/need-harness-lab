@@ -41,6 +41,7 @@ USER_PROXY_MODEL = 'claude-opus-5-5'                 # agreed 2026-11-17 (script
 EXPLORER_AGENT = 'explorer'
 EXPLORER_MODEL_PREFIX = 'claude-sonnet-'
 TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN'
+BG_WAIT_ENV = 'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS'      # 0 = -p waits for background tasks without a ceiling
 USAGE_KEYS = ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens')
 EXPECTED_UID = 1000                                   # image USER node; workspace .git must be owned by the same uid
 # Agreed model control (protocol payment-settlement-v3-claude, 2026-11-17): implementers Opus 5.5 high;
@@ -503,6 +504,9 @@ def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_
                '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512',
                '--cpus=2', '--memory=3g', '--workdir=/workspace', '--env-file', str(env_file),
                '--env', 'HOME=' + HOME_DST, '--env', 'CLAUDE_CONFIG_DIR=' + CONFIG_DST,
+               # every arm: -p waits for background tasks (subagents, background Bash) instead of killing them 10 min
+               # after the last answer (pilot 02); the run's 8-hour cap stops the turn instead (turn())
+               '--env', BG_WAIT_ENV + '=0',
                '--mount', 'type=bind,src=' + manifest['workspace'] + ',dst=/workspace',
                '--mount', 'type=volume,src=' + manifest['config_volume'] + ',dst=' + CONFIG_DST]
     if manifest.get('requested_worker_model'):
@@ -577,11 +581,36 @@ def combine_results(results):
     combined['any_error'] = any(r.get('is_error') for r in results)
     return combined
 
+BG_STOPPED = re.compile(r'Background tasks still running .*?\((.*?)\); stopping them')
+
+def killed_task(event):
+    """A stream event that reports a background task ended as killed (task_updated with status killed), else None."""
+    if event.get('subtype') != 'task_updated' and event.get('type') != 'task_updated':
+        return None
+    patch_ = event.get('patch') if isinstance(event.get('patch'), dict) else {}
+    if 'killed' not in (event.get('status'), patch_.get('status')):
+        return None
+    return {'source': 'stream task_updated', 'task_id': event.get('task_id'),
+            'description': event.get('description') or patch_.get('description')}
+
+def background_tasks_killed(output, stream):
+    """Background tasks the CLI stopped this turn (an observation for the conductor; the turn status is not changed):
+    task_updated events with status killed in the stream, and the CLI's 'Background tasks still running …; stopping
+    them' notice on stderr."""
+    found = list(stream)
+    try:
+        text = (Path(output) / 'stderr.txt').read_text(errors='replace')
+    except OSError:
+        text = ''
+    found += [{'source': 'stderr', 'tasks': hit.group(1)} for hit in BG_STOPPED.finditer(text)]
+    return found
+
 def collect(raw):
     """Parse the preserved stream-json; return the turn's result (all result events combined: combine_results), each
     result event as reported (results) and stream statistics."""
     raw = Path(raw)
-    summary = {'result': None, 'results': [], 'assistant_messages': 0, 'stream_models': [], 'result_count': 0, 'unparsed_lines': 0}
+    summary = {'result': None, 'results': [], 'assistant_messages': 0, 'stream_models': [], 'result_count': 0, 'unparsed_lines': 0,
+               'background_tasks_killed': []}
     models = set()
     with raw.open('rb') as source:
         for line in source:
@@ -599,6 +628,9 @@ def collect(raw):
                 message = event.get('message') or {}
                 if isinstance(message.get('model'), str):
                     models.add(message['model'])
+            killed = killed_task(event)
+            if killed:
+                summary['background_tasks_killed'].append(killed)
             if event.get('type') == 'result':
                 summary['result_count'] += 1
                 summary['results'].append({k: event.get(k) for k in RESULT_FIELDS})
@@ -1130,6 +1162,7 @@ def account_turn(output, manifest, run_id, turn_id, seen, exit_code, copied_rc, 
                            and (all(v == 0 for v in cross['main_delta'].values()) or all(v == 0 for v in cross['all_delta'].values()))),
         'usage_complete_note': 'arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)',
         'usage_cross_check': cross,
+        'background_tasks_killed': background_tasks_killed(output, result['background_tasks_killed']),
         'transcript_models': sorted({e['model'] for e in events}), 'roles': sorted({e['role'] for e in events}),
         'actual_model': None,
         'actual_model_note': 'transcript models/modelUsage are client-observed; requested model is not proof.',
@@ -1373,8 +1406,13 @@ def limit_gate(dest, next_is_feedback, write=True, call='turn'):
     return state
 
 def call_timeout(requested, state):
-    """A single paid call never runs past the run's wall-clock cap: the requested timeout reduced to the remainder."""
-    return max(1, min(requested, int(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
+    """A single paid call never runs past the run's wall-clock cap: the requested timeout reduced to the remainder
+    (rounded up, so a call stopped at that point has reached the cap)."""
+    return max(1, min(requested, math.ceil(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
+
+def stops_at_run_cap(requested, state):
+    """Whether the call's timeout is the run's remaining time (not a smaller requested limit)."""
+    return call_timeout(requested, state) < requested
 
 def record_overshoot(dest, call):
     """After a call of kind call ('turn' or 'user-proxy'): if the run went past a cap during it, censor the run and
@@ -1490,6 +1528,7 @@ def turn(args):
         'effective_timeout_seconds': timeout, 'limits_before_call': limits})
     result = None
     failure = None
+    cap_stop = False
     try:
         created = subprocess.run(command, capture_output=True, check=False)
         (output / 'create.stdout').write_bytes(created.stdout)
@@ -1503,6 +1542,7 @@ def turn(args):
             except subprocess.TimeoutExpired:
                 subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
                 proc = SimpleNamespace(returncode=124)
+                cap_stop = stops_at_run_cap(args.timeout_seconds, limits)
         inspected = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False)
         (output / 'container-inspect.json').write_bytes(redact_inspect(inspected.stdout))
         copied = subprocess.run(['docker', 'cp', name + ':' + CONFIG_DST + '/projects', str(output / 'projects')],
@@ -1520,7 +1560,8 @@ def turn(args):
             for event in events:
                 stream.write(json.dumps(event, ensure_ascii=False) + '\n')
         result.update({'finished_at': utc(), 'role_files': write_role_files(output, events),
-                       'config_volume': volume_listing(manifest)})
+                       'config_volume': volume_listing(manifest),
+                       'stopped_at_run_time_cap': cap_stop, 'timed_out': proc.returncode == 124})
         result['cli_status'] = 'ok' if proc.returncode == 0 else 'failed'
         result['status'] = 'collected'                 # finalized in the finally block after the secret scan
         write_json(output / 'result.json', result)
@@ -1560,6 +1601,11 @@ def turn(args):
             finalize_result(output, result, final, error, hits)
             write_ledger(dest)
             record_overshoot(dest, 'turn')
+            if cap_stop and not (dest / 'censored.json').exists():
+                # stopped at the run's 8-hour cap: the run has reached it even if collection was quicker than a second
+                state = limit_state(dest)
+                state['reached'] = ['CENSORED_TIME']
+                censor(dest, state, 'after call', 'turn')
         finally:
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')
