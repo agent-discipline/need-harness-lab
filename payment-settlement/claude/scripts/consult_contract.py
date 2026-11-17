@@ -82,7 +82,9 @@ def main():
         p.error('--model differs from the frozen user_proxy_model')
     try:
         run, out = consult_dir(a.runs, a.run_id)
-    except (OSError, ValueError) as exc:
+        # the run's caps cover the proxy too (same gate as the runner's turns; a censored run gets no consultation)
+        launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run)
+    except (OSError, ValueError, RuntimeError) as exc:
         p.error(str(exc))
     image = ready['image_digests']['runner']
     env_file = a.env_file.resolve()
@@ -151,6 +153,7 @@ def main():
         if hits:
             (out / 'SECRET-LEAK.txt').write_text('credential found and redacted in: ' + ', '.join(hits) + '\nrotate the token now\n')
         launch.write_ledger(run)
+        launch.record_overshoot(run)
     if error or hits:
         print('user proxy failed: ' + (error or 'credential leak redacted; rotate the token'), file=sys.stderr)
         return 1

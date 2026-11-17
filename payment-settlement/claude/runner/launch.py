@@ -44,6 +44,11 @@ NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must
 # manifest observed_tools); the selftest asserts they are on every arm's observed tool surface.
 WEB_TOOLS = ('WebSearch', 'WebFetch')
 ALLOWED_TOOLS_ARM12 = ('Bash', 'Read', 'Edit', 'Write', 'NotebookEdit', 'Glob', 'Grep', 'ToolSearch') + WEB_TOOLS
+# Run caps (protocol v3-claude): every role of the run counts (pm/implementer/worker/reviewer/user-proxy), tokens are
+# input + cache read + cache creation + output. Feedback = follow-up prompts delivered to the run's session (successful
+# turns after the first one). Whichever cap is reached first ends the run as CENSORED_* (censored.json).
+LIMITS = {'token_limit': 20000000, 'time_limit_seconds': 28800, 'feedback_limit': 30}
+CENSORED = (('token_limit', 'CENSORED_BUDGET'), ('time_limit_seconds', 'CENSORED_TIME'), ('feedback_limit', 'CENSORED_TURNS'))
 HELPER_TIMEOUT = 900                                  # seconds for any no-cost helper container (selftest, seeding, listing)
 MIN_HOOKS = 8                                         # hooks wired in runner/harness-settings.json (fail if fewer are extracted)
 
@@ -811,6 +816,66 @@ def write_ledger(dest):
     tmp.replace(dest / 'ledger.json')
     return value
 
+def parse_time(value):
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+def limit_state(dest, next_is_feedback=False, now=None):
+    """Where the run stands against its caps, from the run ledger (all roles) and the turn records."""
+    ledger = run_ledger(dest)
+    starts, ok_turns = [], 0
+    for folder in sorted(p for p in (dest / 'turns').iterdir() if p.is_dir()) if (dest / 'turns').is_dir() else []:
+        try:
+            start = parse_time(json.loads((folder / 'invocation.json').read_text()).get('started_at'))
+            if start:
+                starts.append(start)
+            ok_turns += json.loads((folder / 'result.json').read_text()).get('status') == 'ok'
+        except (OSError, ValueError):
+            continue
+    now = now or datetime.now(timezone.utc)
+    elapsed = (now - min(starts)).total_seconds() if starts else 0.0
+    used = {'token_limit': ledger['total_tokens'], 'time_limit_seconds': elapsed, 'feedback_limit': max(ok_turns - 1, 0)}
+    # tokens/time: a run that has used its whole budget gets no further call; feedback: only a follow-up prompt counts
+    reached = [status for key, status in CENSORED
+               if used[key] >= LIMITS[key] and (key != 'feedback_limit' or next_is_feedback)]
+    return {'used': used, 'limits': dict(LIMITS), 'tokens_are_lower_bound': ledger['tokens_are_lower_bound'],
+            'overshoot': {k: used[k] - LIMITS[k] for k in LIMITS if used[k] > LIMITS[k]}, 'reached': reached, 'at': utc()}
+
+def censor(dest, state, when):
+    """Write censored.json once (the first cap reached decides the status); later overshoot is appended, never erased."""
+    path = dest / 'censored.json'
+    if path.exists():
+        record = json.loads(path.read_text())
+        record.setdefault('later', []).append(dict(state, when=when))
+    else:
+        record = {'status': state['reached'][0], 'first': dict(state, when=when)}
+    tmp = dest / 'censored.json.tmp'
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+    tmp.replace(path)
+    return record
+
+def limit_gate(dest, next_is_feedback, write=True):
+    """Single gate before every paid call of a run (turns and user-proxy consultations). A censored run accepts no
+    further call; reaching a cap now censors the run. Artifacts are never removed."""
+    if (dest / 'censored.json').exists():
+        raise RuntimeError('run is %s; no further paid call (see censored.json)' % json.loads((dest / 'censored.json').read_text())['status'])
+    state = limit_state(dest, next_is_feedback)
+    if state['reached']:
+        if write:
+            censor(dest, state, 'before call')
+        raise RuntimeError('run cap reached before the call: %s %s' % (state['reached'][0], json.dumps(state['used'])))
+    return state
+
+def record_overshoot(dest):
+    """After a call: if the run went past a cap during it, censor the run and record by how much."""
+    state = limit_state(dest)
+    if state['overshoot']:
+        state['reached'] = [status for key, status in CENSORED if key in state['overshoot']]
+        return censor(dest, state, 'after call')
+    return None
+
 def turn(args):
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
@@ -837,6 +902,9 @@ def turn(args):
         raise ValueError('first turn requires no --resume; subsequent turns require --resume '
                          '(session transcript %s in the config volume; %d turn dirs, %d successful)'
                          % ('present' if exists else 'absent', len(turn_dirs), len(successes)))
+    limits = limit_gate(dest, next_is_feedback=args.resume, write=not args.dry_run)
+    # a single call never runs past the run's wall-clock cap
+    timeout = max(1, min(args.timeout_seconds, int(LIMITS['time_limit_seconds'] - limits['used']['time_limit_seconds'])))
     seen = read_seen(dest)
     turn_id = f'{len(turn_dirs) + 1:04d}'   # failed turns keep their directory and number; retries get a new one
     name = 'payment-claude-call-' + uuid.uuid4().hex
@@ -857,7 +925,8 @@ def turn(args):
     write_json(output / 'invocation.json', {'create': command, 'session_id': manifest['session_id'], 'resume': args.resume,
         'prompt_sha256': hashlib.sha256(prompt).hexdigest(), 'cache_policy': args.cache_policy,
         'env_file': str(env_file), 'started_at': utc(), 'timeout_seconds': args.timeout_seconds,
-        'max_turns': args.max_turns, 'max_budget_usd': args.max_budget_usd, 'hook_selftest_before_call': pre})
+        'max_turns': args.max_turns, 'max_budget_usd': args.max_budget_usd, 'hook_selftest_before_call': pre,
+        'effective_timeout_seconds': timeout, 'limits_before_call': limits})
     result = None
     failure = None
     try:
@@ -869,7 +938,7 @@ def turn(args):
         with (output / 'stdout.jsonl').open('xb') as stdout, (output / 'stderr.txt').open('xb') as stderr:
             try:
                 proc = subprocess.run(['docker', 'start', '--attach', '--interactive', name], input=prompt,
-                                      stdout=stdout, stderr=stderr, check=False, timeout=args.timeout_seconds)
+                                      stdout=stdout, stderr=stderr, check=False, timeout=timeout)
             except subprocess.TimeoutExpired:
                 subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
                 proc = SimpleNamespace(returncode=124)
@@ -975,6 +1044,7 @@ def turn(args):
         try:
             finalize_result(output, result, final, error, hits)
             write_ledger(dest)
+            record_overshoot(dest)
         finally:
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')

@@ -251,6 +251,16 @@ class ConsultContractTest(unittest.TestCase):
             argv, _ = self.setup_run(tmp, arm=1)
             self.assertNotEqual(self.call(argv + ['--model', 'decided-model', '--dry-run'])[0], 0)
 
+    def test_proxy_call_passes_the_run_cap_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            (run_dir / 'censored.json').write_text(json.dumps({'status': 'CENSORED_TIME'}))
+            code, run, out = self.call(argv + ['--model', 'decided-model'], self.fake())
+            self.assertNotEqual(code, 0)
+            self.assertIn('CENSORED_TIME', out)
+            run.assert_not_called()
+            self.assertFalse((run_dir / 'consults').exists())
+
     def test_proxy_usage_lands_in_the_run_ledger_and_unobserved_usage_is_not_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             argv, run_dir = self.setup_run(tmp)

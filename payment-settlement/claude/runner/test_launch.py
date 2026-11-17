@@ -4,6 +4,9 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+import contextlib
+from datetime import timedelta
+import io
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -704,6 +707,101 @@ class RunnerTest(unittest.TestCase):
             self.assertFalse(result['usage_complete'])                                     # req-bad lacks counters
             self.assertEqual(result['usage_cross_check']['main_delta'], {k: 0 for k in launch.USAGE_KEYS})
             self.assertEqual(result['role_files'], {'implementer': 'events.role-implementer.jsonl', 'worker': 'events.role-worker.jsonl'})
+
+class RunLimitTest(unittest.TestCase):
+    """One gate before every paid call: tokens of all roles, wall clock since the first call, follow-up prompts."""
+
+    def make_run(self, root, ok_turns=1, tokens_per_turn=10, started=None, arm=1):
+        dest = root / 'a'
+        (dest / 'workspace').mkdir(parents=True)
+        launch.write_json(dest / 'manifest.json', manifest(arm, run_id='a', workspace=str(dest / 'workspace')))
+        start = started or launch.datetime.now(launch.timezone.utc)
+        (dest / 'turns').mkdir()
+        for n in range(1, ok_turns + 1):
+            t = dest / 'turns' / ('%04d' % n)
+            t.mkdir()
+            (t / 'invocation.json').write_text(json.dumps({'started_at': start.isoformat()}))
+            (t / 'result.json').write_text(json.dumps({'status': 'ok', 'usage_complete': True,
+                                                       'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}}))
+            usage = {'input_tokens': tokens_per_turn, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}
+            (t / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'r%d' % n, 'model': 'm', 'role': 'implementer',
+                                                       'turn': t.name, 'usage': usage}) + '\n')
+        (root / 'prompt').write_text('next')
+        return dest
+
+    def call(self, root, resume=True, dry_run=False):
+        args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=resume,
+                               dry_run=dry_run, cache_policy='observed-cache', timeout_seconds=7200, max_turns=None, max_budget_usd=None)
+        with patch.object(launch.subprocess, 'run') as run, patch.object(launch, 'session_exists', return_value=resume), \
+             contextlib.redirect_stdout(io.StringIO()):
+            try:
+                launch.turn(args)
+                error = None
+            except RuntimeError as exc:
+                error = exc
+            return error, run
+
+    def test_token_cap_counts_every_role_and_censors_before_the_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, tokens_per_turn=15_000_000)
+            consult = dest / 'consults/0001'                         # a user-proxy call pushes the run over the cap
+            consult.mkdir(parents=True)
+            (consult / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'px', 'model': 'x', 'role': 'user-proxy', 'turn': 'p',
+                'usage': {'input_tokens': 5_000_000, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}}) + '\n')
+            (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0}))
+            error, run = self.call(root, dry_run=True)                 # dry run reports, never writes
+            self.assertIsNotNone(error)
+            self.assertFalse((dest / 'censored.json').exists())
+            error, run = self.call(root)
+            self.assertIn('CENSORED_BUDGET', str(error))
+            run.assert_not_called()
+            record = json.loads((dest / 'censored.json').read_text())
+            self.assertEqual(record['status'], 'CENSORED_BUDGET')
+            self.assertEqual(record['first']['used']['token_limit'], 20_000_000)
+            self.assertEqual(sorted(p.name for p in (dest / 'turns').iterdir()), ['0001'])   # artifacts kept, no new turn
+            error, _ = self.call(root)
+            self.assertIn('no further paid call', str(error))
+
+    def test_time_cap_from_first_call_and_timeout_never_exceeds_the_remainder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            now = launch.datetime.now(launch.timezone.utc)
+            dest = self.make_run(root, started=now - timedelta(hours=8, seconds=1))
+            error, run = self.call(root)
+            self.assertIn('CENSORED_TIME', str(error))
+            run.assert_not_called()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, started=launch.datetime.now(launch.timezone.utc) - timedelta(seconds=28790))
+            state = launch.limit_state(dest)
+            self.assertEqual(state['reached'], [])
+            self.assertLessEqual(launch.LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'], 11)
+
+    def test_feedback_cap_is_thirty_follow_up_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, ok_turns=30)                      # initial prompt + 29 follow-ups
+            self.assertIsNone(self.call(root, dry_run=True)[0])          # the 30th follow-up is allowed
+            self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 29)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, ok_turns=31)                      # 30 follow-ups delivered
+            error, run = self.call(root)
+            self.assertIn('CENSORED_TURNS', str(error))
+            run.assert_not_called()
+            self.assertEqual(launch.limit_state(dest)['reached'], [])    # a non-feedback call (proxy) is not a 31st prompt
+
+    def test_overshoot_during_a_call_is_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, tokens_per_turn=20_000_123)
+            record = launch.record_overshoot(dest)
+            self.assertEqual(record['status'], 'CENSORED_BUDGET')
+            self.assertEqual(record['first']['overshoot'], {'token_limit': 123})
+            self.assertEqual(record['first']['when'], 'after call')
+            (root / 'b').mkdir()
+            self.assertIsNone(launch.record_overshoot(self.make_run(root / 'b', tokens_per_turn=5)))
 
 class FableReviewWrapperTest(unittest.TestCase):
     """runner/fable-review.sh with a fake `claude` on PATH (no model call)."""
