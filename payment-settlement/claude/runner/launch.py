@@ -37,7 +37,7 @@ MODELS = {1: ('claude-opus-5-5', None), 2: ('claude-opus-5-5', None), 3: ('claud
 HARNESS_SEED = [('src/core.md', 'core.md'), ('HISTORY.md', 'HISTORY.md'), ('hooks', 'hooks'), ('playbooks', 'playbooks'),
                 ('templates', 'templates'), ('agents', 'agents')]
 RUNNER_SEED = [('harness-bootstrap-CLAUDE.md', 'CLAUDE.md'), ('harness-settings.json', 'settings.json')]
-ROLES = ('pm', 'implementer', 'worker', 'reviewer')
+ROLES = ('pm', 'implementer', 'worker', 'reviewer', 'user-proxy')   # user-proxy: scripts/consult_contract.py (consults/)
 NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must never appear in arms 1/2 (asserted on the init event)
 # Arms 1/2 run with an ALLOW-LIST of built-in tools (shell + file tools; no agents, skills, schedulers, messaging,
 # worktrees). Web tools (decision 2026-11-17): allowed in all three arms and recorded (result.web_requests,
@@ -609,8 +609,10 @@ def reconcile_events(dest):
     """Merge every turn's events by requestId (earliest turn wins the usage; worker role is monotone;
     conflicting usage is excluded and reported) so partially recovered turns cannot double count."""
     merged, conflicts = {}, []
-    for turn_dir in sorted(p for p in (dest / 'turns').iterdir() if p.is_dir()):
-        events_file = turn_dir / 'events.jsonl'
+    sources = sorted(p / 'events.jsonl' for p in (dest / 'turns').iterdir() if p.is_dir())
+    if (dest / 'consults').is_dir():                    # user-proxy calls of this run (scripts/consult_contract.py)
+        sources += sorted(p / 'events.jsonl' for p in (dest / 'consults').iterdir() if p.is_dir())
+    for events_file in sources:
         if not events_file.exists():
             continue
         for line in events_file.read_text().splitlines():
@@ -695,12 +697,96 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
             incomplete.append({'reason': 'reviewer call did not finish', 'call': call, 'session': started[call]})
         if started[call] not in transcripts:
             incomplete.append({'reason': 'reviewer attempt without transcript (usage unobservable)', 'call': call, 'session': started[call]})
+    costs = reviewer_costs(name, output, [started[c] for c in new_calls])
     summary = {'log_rc': calls.returncode, 'log_absent': log_absent, 'log_unknown': log_unknown,
                'calls_total': len(started), 'calls_this_turn': len(new_calls),
                'calls_finished_total': len(finished & set(started)), 'transcript_files': len(transcripts),
                'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'transcript_stats': stats,
-               'event_count': len(events), 'incomplete': len(incomplete)}
+               'event_count': len(events), 'incomplete': len(incomplete), **costs}
     return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
+
+def reviewer_costs(name, output, sessions):
+    """CLI cost estimate of each reviewer call this turn, from the wrapper's raw/<session>.json in the reviewer volume.
+    A call whose raw result cannot be recovered or has no numeric total_cost_usd stays listed as unobserved; the turn's
+    reviewer cost is then None, never a partial sum presented as complete."""
+    raw_dir = output / 'reviewer-raw'
+    copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/raw', str(raw_dir)], capture_output=True, check=False)
+    calls, unobserved = {}, []
+    for sid in sessions:
+        cost = None
+        try:
+            value = json.loads((raw_dir / (sid + '.json')).read_text()).get('total_cost_usd')
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                cost = value
+        except (OSError, ValueError, AttributeError):
+            pass
+        calls[sid] = cost
+        if cost is None:
+            unobserved.append(sid)
+    return {'raw_rc': copied.returncode, 'call_costs_usd': calls, 'cost_unobserved': unobserved,
+            'cost_usd': None if unobserved else round(sum(calls.values()), 6)}
+
+def number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+
+def turn_cost(stream_result, reviewer):
+    """CLI cost estimates of one turn: the pinned session's total_cost_usd and (arm 3) the reviewer calls' sum.
+    Unobserved parts stay None and make cost_complete false."""
+    pinned = number(stream_result.get('total_cost_usd'))
+    reviewer_usd = None if reviewer is None else reviewer.get('cost_usd')
+    return {'pinned_session_usd': pinned, 'reviewer_usd': reviewer_usd, 'reviewer_applicable': reviewer is not None,
+            'cost_complete': pinned is not None and (reviewer is None or reviewer_usd is not None)}
+
+def total_tokens(usage):
+    return sum(usage[k] for k in USAGE_KEYS)           # input + cache read + cache creation + output (cached input counts)
+
+def run_ledger(dest):
+    """The run's single usage ledger over every role: pm/implementer/worker/reviewer from turns and user-proxy from
+    consults. Token sums are request-level and deduplicated; anything unobserved keeps the ledger incomplete (the
+    sums are then lower bounds) and unobserved costs make cost_usd None instead of a partial number."""
+    events, conflicts = reconcile_events(dest)
+    roles = {}
+    for event in events:
+        roles.setdefault(event['role'], []).append(event)
+    calls, unreadable = [], []
+    for kind, folder, name in (('turn', 'turns', 'result.json'), ('consult', 'consults', 'usage.json')):
+        for path in sorted((dest / folder).glob('*/' + name)) if (dest / folder).is_dir() else []:
+            try:
+                calls.append((kind, path.parent.name, json.loads(path.read_text())))
+            except ValueError:
+                unreadable.append(str(path.relative_to(dest)))
+    if (dest / 'turns').is_dir():                       # a turn directory without any result means the turn was cut short
+        unreadable += [str(p.relative_to(dest)) for p in sorted((dest / 'turns').iterdir()) if p.is_dir() and not (p / 'result.json').exists()]
+    costs, cost_unobserved = [], []
+    for kind, ident, data in calls:
+        if kind == 'turn':
+            cost = data.get('cost') or {}
+            parts = [cost.get('pinned_session_usd')] + ([cost.get('reviewer_usd')] if cost.get('reviewer_applicable') else [])
+        else:
+            parts = [data.get('cost_usd')]
+        if any(number(v) is None for v in parts):
+            cost_unobserved.append('%s/%s' % (kind, ident))
+        else:
+            costs += parts
+    complete = (not conflicts and not unreadable and all(data.get('usage_complete') is True for _, _, data in calls))
+    return {
+        'roles': {role: {'requests': len(evs), 'usage': sum_usage(evs), 'total_tokens': total_tokens(sum_usage(evs))}
+                  for role, evs in sorted(roles.items())},
+        'total_tokens': total_tokens(sum_usage(events)), 'usage_complete': complete, 'tokens_are_lower_bound': not complete,
+        'incomplete_calls': ['%s/%s' % (k, i) for k, i, d in calls if d.get('usage_complete') is not True] + unreadable,
+        'conflicts': conflicts, 'turns': sum(1 for k, _, _ in calls if k == 'turn'),
+        'consults': sum(1 for k, _, _ in calls if k == 'consult'),
+        'cost_usd': None if cost_unobserved else round(sum(costs), 6), 'cost_unobserved': cost_unobserved,
+        'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null); whether a resumed session reports '
+                     'per-invocation or cumulative cost is not verified before the pilot',
+        'updated_at': utc()}
+
+def write_ledger(dest):
+    value = run_ledger(dest)
+    tmp = dest / 'ledger.json.tmp'
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+    tmp.replace(dest / 'ledger.json')
+    return value
 
 def turn(args):
     dest = location(args)
@@ -806,6 +892,7 @@ def turn(args):
             'session_id_confirmed': stream_result.get('session_id') == manifest['session_id'],
             'request_ids': new_ids, 'event_count': len(events), 'incomplete': incomplete, 'transcript_stats': stats,
             'reviewer': reviewer,
+            'cost': turn_cost(stream_result, reviewer),
             'reviewer_usage_pending': bool(reviewer is not None and (r_incomplete or reviewer['log_unknown'])),
             'web_requests': reported.get('server_tool_use') if reported else None,
             'usage_complete': (not incomplete and result['result'] is not None and proc.returncode == 0
@@ -857,6 +944,7 @@ def turn(args):
             error = (error + ' | ' if error else '') + 'secret scan failed: ' + scan_error
         try:
             finalize_result(output, result, final, error, hits)
+            write_ledger(dest)
         finally:
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')
@@ -877,8 +965,10 @@ def discard(args):
     write_json(dest / ('discard-%s.json' % utc().replace(':', '-')), record)
     print(json.dumps({v: r['removed'] for v, r in record['volumes'].items()}))
 
-def role_model(manifest, role):
+def role_model(manifest, role, events=()):
     """Requested model label per role (normalization label only; actual models come from the transcripts)."""
+    if role == 'user-proxy':
+        return next((e.get('requested_model') for e in events if e.get('requested_model')), 'unspecified')
     if role == 'worker':
         return manifest.get('requested_worker_model') or 'unspecified'
     if role == 'reviewer':
@@ -905,7 +995,7 @@ def normalize(args):
             target.unlink()
         subprocess.run([sys.executable, str(measurement / 'normalize.py'), '--provider', 'anthropic',
                         '--run-id', manifest['run_id'], '--session-id', manifest['session_id'] + '/' + role,
-                        '--role', role, '--model', role_model(manifest, role),
+                        '--role', role, '--model', role_model(manifest, role, subset),
                         '--input', str(source), '--output', str(target)], check=True)
         outputs.append(target)
     if conflicts:
@@ -913,6 +1003,7 @@ def normalize(args):
     combined = dest / 'usage-normalized.jsonl'
     combined.write_text(''.join(p.read_text() for p in outputs))
     subprocess.run([sys.executable, str(measurement / 'summarize.py'), str(combined), '--output', str(dest / 'usage-summary.json')], check=True)
+    write_ledger(dest)
     print((dest / 'usage-summary.json').read_text())
 
 def main():

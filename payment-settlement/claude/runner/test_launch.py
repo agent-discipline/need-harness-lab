@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 import tempfile
@@ -355,7 +356,7 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue((dest / 'turns/0003/result.json').exists())
             self.assertFalse((dest / 'request-ids.txt').exists())
 
-    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions):
+    def arm3_turn(self, root, resume, pm_requests, reviewer_log, reviewer_sessions, reviewer_raw=None, pm_cost=0.1):
         """Drive one arm 3 turn with a fake docker: PM transcript, cumulative reviewer call log and reviewer transcripts."""
         dest = root / 'a'
         reported = pm_requests[-1]['message']['usage']
@@ -364,10 +365,17 @@ class RunnerTest(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'start']:
                 kw['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'session_id': manifest()['session_id'],
-                                               'usage': {k: reported[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': 0.1}).encode() + b'\n')
+                                               'usage': {k: reported[k] for k in launch.USAGE_KEYS}, 'total_cost_usd': pm_cost}).encode() + b'\n')
                 return SimpleNamespace(returncode=0)
             if cmd[:2] == ['docker', 'inspect']:
                 return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/raw'):
+                if not reviewer_raw:
+                    return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
+                Path(cmd[-1]).mkdir(parents=True)
+                for sid, body in reviewer_raw.items():
+                    (Path(cmd[-1]) / (sid + '.json')).write_text(body if isinstance(body, str) else json.dumps(body))
+                return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
             if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.fable-review/reviewer-calls.log'):
                 if reviewer_log is None:
                     return SimpleNamespace(returncode=1, stdout=b'', stderr=b'No such file or directory')
@@ -439,6 +447,61 @@ class RunnerTest(unittest.TestCase):
             events, conflicts = launch.reconcile_events(dest)
             self.assertEqual(sorted((e['id'], e['role']) for e in events), [('req-pm1', 'pm'), ('req-pm2', 'pm'), ('req-rev-a', 'reviewer')])
             self.assertEqual(conflicts, [])
+
+    def arm3_dest(self, root):
+        dest = root / 'a'
+        (dest / 'turns').mkdir(parents=True)
+        (dest / 'workspace').mkdir()
+        (root / 'prompt').write_text('hello')
+        launch.write_json(dest / 'manifest.json', manifest(3, run_id='a', workspace=str(dest / 'workspace')))
+        return dest
+
+    def test_reviewer_cost_is_recovered_and_the_run_ledger_covers_every_role(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.arm3_dest(root)
+            sid = 'aaaaaaaa-0000-4000-8000-000000000011'
+            pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+            rev = [{'type': 'assistant', 'requestId': 'req-rv', 'sessionId': sid, 'message': {'model': 'r', 'usage': USAGE}}]
+            log = 'T1-1 started session=%s model=reviewer-z\nT1-1 exit=0\n' % sid
+            result, _ = self.arm3_turn(root, False, pm, log, {sid: rev}, reviewer_raw={sid: {'result': 'x', 'total_cost_usd': 0.25}})
+            self.assertEqual(result['reviewer']['cost_usd'], 0.25)
+            self.assertEqual(result['cost'], {'pinned_session_usd': 0.1, 'reviewer_usd': 0.25, 'reviewer_applicable': True, 'cost_complete': True})
+            # a user-proxy consultation of the same run lands in the same ledger
+            consult = dest / 'consults/0001'
+            consult.mkdir(parents=True)
+            (consult / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'req-px', 'model': 'x', 'role': 'user-proxy',
+                                                             'turn': 'proxy', 'usage': {k: USAGE[k] for k in launch.USAGE_KEYS}}) + '\n')
+            (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.05}))
+            ledger = launch.write_ledger(dest)
+            self.assertEqual(sorted(ledger['roles']), ['pm', 'reviewer', 'user-proxy'])
+            self.assertEqual(ledger['total_tokens'], 3 * 10)
+            self.assertEqual(ledger['cost_usd'], 0.4)
+            self.assertTrue(ledger['usage_complete'])
+            self.assertEqual(json.loads((dest / 'ledger.json').read_text())['roles']['user-proxy']['requests'], 1)
+
+    def test_unrecovered_reviewer_cost_is_flagged_not_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.arm3_dest(root)
+            sid = 'aaaaaaaa-0000-4000-8000-000000000012'
+            pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+            rev = [{'type': 'assistant', 'requestId': 'req-rv', 'sessionId': sid, 'message': {'model': 'r', 'usage': USAGE}}]
+            log = 'T1-1 started session=%s model=reviewer-z\nT1-1 exit=0\n' % sid
+            for raw in (None, {sid: 'not json'}, {sid: {'result': 'x'}}):
+                for p in list((dest / 'turns').iterdir()):
+                    shutil.rmtree(p)
+                for name in ('request-ids.txt', 'reviewer-calls.json'):
+                    if (dest / name).exists():
+                        (dest / name).unlink()
+                result, _ = self.arm3_turn(root, False, pm, log, {sid: rev}, reviewer_raw=raw)
+                self.assertIsNone(result['reviewer']['cost_usd'])
+                self.assertEqual(result['reviewer']['cost_unobserved'], [sid])
+                self.assertFalse(result['cost']['cost_complete'])
+                self.assertTrue(result['usage_complete'])                  # tokens were observed; only cost is missing
+                ledger = json.loads((dest / 'ledger.json').read_text())
+                self.assertIsNone(ledger['cost_usd'])
+                self.assertEqual(ledger['cost_unobserved'], ['turn/0001'])
 
     def test_arm3_reviewer_log_unreadable_or_orphan_transcript_is_incomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
