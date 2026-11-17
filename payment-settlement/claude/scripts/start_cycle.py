@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]           # payment-settlement/claude
 REPO = ROOT.parent.parent
 sys.path.insert(0, str(ROOT / 'scripts'))
 import lab
+import freeze_readiness
+import hashlib
 from preflight import blockers
 
 
@@ -40,6 +42,22 @@ def gate(ready, cycle):
     return failures
 
 
+def contract_drift(ready, frozen_list=None):
+    """Recompute the frozen-input hash from the current files; on mismatch name the files that differ (when the
+    freeze's frozen-inputs.json is available). Empty list = unchanged since the freeze."""
+    current = freeze_readiness.inventory()
+    if hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest() == ready.get('contract_sha256'):
+        return []
+    try:
+        frozen = json.loads(Path(frozen_list).read_text()) if frozen_list else None
+    except (OSError, ValueError):
+        frozen = None
+    if frozen is None:
+        return ['contract_sha256 differs from the current frozen inputs (frozen-inputs.json unavailable)']
+    changed = sorted(k for k in frozen.keys() | current.keys() if frozen.get(k) != current.get(k))
+    return changed or ['contract_sha256 differs although frozen-inputs.json matches the current files']
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cycle', type=int, choices=range(1, 11), required=True)
@@ -52,6 +70,10 @@ def main():
     failed = gate(ready, args.cycle)
     if failed:
         p.error('; '.join(failed))
+    drift = contract_drift(ready, args.readiness.with_name('frozen-inputs.json'))
+    if drift:
+        p.error('frozen inputs changed since the freeze (new protocol version and rerun of all arms required): '
+                + ', '.join(drift[:20]))
     cycles_path = ROOT / 'docs/results/cycles.json'
     cycles = json.loads(cycles_path.read_text())
     current = cycles[args.cycle - 1]

@@ -187,7 +187,8 @@ class StartCycleTest(unittest.TestCase):
                                                       {'APP_PORT': '38023', 'DB_PORT': '39023', 'BANK_PORT': '40023'}))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'readiness.json'
-            write(path, ready())
+            frozen = freeze_readiness.inventory()
+            write(path, ready(contract_sha256=__import__('hashlib').sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()))
             argv = ['start_cycle.py', '--cycle', '1', '--readiness', str(path), '--env-file', '/nonexistent', '--dry-run']
             out = io.StringIO()
             with patch.object(sys, 'argv', argv), patch.object(start_cycle.subprocess, 'run') as run, contextlib.redirect_stdout(out):
@@ -196,6 +197,30 @@ class StartCycleTest(unittest.TestCase):
             plan = json.loads(out.getvalue()[out.getvalue().index('{'):])     # lab.verify prints PASS lines first
             self.assertEqual([r['run_id'] for r in plan['runs']], ['claude-arm1-core01', 'claude-arm2-core01', 'claude-arm3-core01'])
             self.assertEqual(plan['image'], 'sha256:1')
+
+
+class ContractDriftTest(unittest.TestCase):
+    def test_cycle_refuses_inputs_that_changed_after_the_freeze(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shared = Path(tmp)
+            (shared / 'docs').mkdir()
+            (shared / 'docs/acceptance.md').write_text('C01 v1')
+            with patch.object(freeze_readiness, 'SHARED', shared):
+                frozen = freeze_readiness.inventory()
+                digest = __import__('hashlib').sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
+                listing = shared / 'frozen-inputs.json'
+                listing.write_text(json.dumps(frozen))
+                self.assertEqual(start_cycle.contract_drift({'contract_sha256': digest}, listing), [])
+                (shared / 'docs/acceptance.md').write_text('C01 v2')
+                self.assertEqual(start_cycle.contract_drift({'contract_sha256': digest}, listing), ['docs/acceptance.md'])
+                self.assertTrue(start_cycle.contract_drift({'contract_sha256': digest}, None))
+            path = shared / 'readiness.json'
+            write(path, ready(contract_sha256='0' * 64))
+            argv = ['start_cycle.py', '--cycle', '1', '--readiness', str(path), '--env-file', '/nonexistent', '--dry-run']
+            with patch.object(sys, 'argv', argv), patch.object(start_cycle.subprocess, 'run') as run, \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                start_cycle.main()
+            run.assert_not_called()
 
 
 class CaptureTurnTest(unittest.TestCase):
