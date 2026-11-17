@@ -95,14 +95,15 @@ def assistant(rid, model, usage, session='s', sidechain=False):
     return line
 
 
-def selftest_patch(effect=None):
-    """The hook self-test is a no-cost helper container; it passes, optionally after running `effect(manifest)`."""
+def selftest_patch(effect=None, report=SELFTEST_OK):
+    """The hook self-test is a no-cost helper container; it reports `report` (default: passed), optionally after running
+    `effect(manifest)`."""
     if effect is None:
-        return patch.object(launch, 'selftest', return_value=SELFTEST_OK)
+        return patch.object(launch, 'selftest', return_value=report)
 
     def run(manifest, *a, **k):
         effect(manifest)
-        return SELFTEST_OK
+        return report
     return patch.object(launch, 'selftest', side_effect=run)
 
 
@@ -937,7 +938,7 @@ def last_prompt(root, run_id):
     return (turns[-1] / 'prompt.txt').read_text()
 
 
-def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None, prompt_text=None):
+def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None, prompt_text=None, selftest_report=SELFTEST_OK):
     """Call launch.turn with a docker stub that only records; returns (error, paid calls).
     A paid call is any `docker create`/`docker start` (the model call happens inside the started container).
     session: what the config volume says about the session transcript (default: exists iff resume).
@@ -961,7 +962,7 @@ def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None, pro
     with patch.object(launch.subprocess, 'run', side_effect=fake_run), \
          patch.object(launch, 'volume_listing', return_value={'rc': 0, 'entries': [], 'credentials_file_in_volume': False}), \
          patch.object(launch, 'session_exists', return_value=resume if session is None else session), \
-         selftest_patch(selftest), \
+         selftest_patch(selftest, selftest_report), \
          contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         try:
             launch.turn(args)
@@ -1526,9 +1527,11 @@ class EvaluationCostIsSeparate(unittest.TestCase):
         self.tmp.cleanup()
 
     def record(self, role, *counters, total=None, cost=None, session='conductor-session-1', run_ids=('ev',), adapter=False,
-               model=OPUS, source='agent completion notice usage'):
+               model=OPUS, source='agent completion notice usage', item=None):
         argv = ['record_evaluation_cost.py', '--ledger', str(self.ledger), '--role', role, '--session', session,
                 '--model', model, '--source', source]
+        if item is not None:
+            argv += ['--item', item]
         for flag, value in zip(('--input-tokens', '--cache-creation-input-tokens', '--cache-read-input-tokens',
                                 '--output-tokens'), counters):
             argv += [flag, str(value)]
@@ -1580,7 +1583,7 @@ class EvaluationCostIsSeparate(unittest.TestCase):
         before = launch.run_ledger(self.dest)
         code, out = self.record('conductor', 10_000_000, 5_000_000, 5_000_000, 1_000_000)   # 21M: more than the run cap alone
         self.assertEqual(code, 0, out)
-        code, out = self.record('judging-adapter', total=777, session='adapter-author-1')
+        code, out = self.record('judging-adapter', total=777, session='adapter-author-1', item='adapter for ev')
         self.assertEqual(code, 0, out)
         self.assertEqual(tree_state(self.dest), before_files, 'recording evaluation cost wrote into the run folder')
         after = launch.run_ledger(self.dest)
@@ -1621,7 +1624,7 @@ class EvaluationCostIsSeparate(unittest.TestCase):
         self.assertEqual(self.ledger_bytes(), first)
 
     def test_a_total_only_source_leaves_the_split_unobserved_not_zero(self):
-        code, out = self.record('judging-adapter', total=500, session='adapter-author-1')
+        code, out = self.record('judging-adapter', total=500, session='adapter-author-1', item='adapter for ev')
         self.assertEqual(code, 0, out)
         [line] = self.lines()
         self.assertEqual(line['total_tokens'], 500)
@@ -1659,11 +1662,48 @@ class EvaluationCostIsSeparate(unittest.TestCase):
         code, out = self.record('conductor', total=0, cost=0, session='s-zero')      # control: zero is allowed
         self.assertEqual(code, 0, out)
 
+    def test_one_session_can_record_one_adapter_line_per_job(self):
+        # spec 10.4: 같은 세션이 어댑터를 여러 번 작성하면 건마다 한 줄 — 건을 구분하는 표시를 함께 적는다
+        first = self.record('judging-adapter', total=300, session='adapter-author-1', item='arm1 core01 adapter',
+                            run_ids=('claude-arm1-core01',))
+        second = self.record('judging-adapter', total=400, session='adapter-author-1', item='arm2 core01 adapter',
+                             run_ids=('claude-arm2-core01',))
+        self.assertEqual(first[0], 0, first[1])
+        self.assertEqual(second[0], 0, second[1])
+        lines = self.lines()
+        self.assertEqual([l['total_tokens'] for l in lines], [300, 400])
+        self.assertEqual({l['session'] for l in lines}, {'adapter-author-1'})
+        labels = [l.get('item') for l in lines]
+        self.assertEqual(sorted(labels), ['arm1 core01 adapter', 'arm2 core01 adapter'])
+
+    def test_an_exact_duplicate_adapter_job_is_refused(self):
+        self.assertEqual(self.record('judging-adapter', total=300, session='adapter-author-1', item='job-1')[0], 0)
+        first = self.ledger_bytes()
+        code, _ = self.record('judging-adapter', total=300, session='adapter-author-1', item='job-1')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.ledger_bytes(), first)
+
+    def test_adapter_line_without_a_job_label_is_refused(self):
+        # 건을 구분하는 표시를 함께 적는다 — required on an adapter line (coordinator clarification 2026-11-18)
+        for name, item in {'absent': None, 'empty': '', 'blank': '   '}.items():
+            with self.subTest(name):
+                before = self.ledger_bytes()
+                code, _ = self.record('judging-adapter', total=300, session='adapter-author-' + name, item=item)
+                self.assertNotEqual(code, 0, name)
+                self.assertEqual(self.ledger_bytes(), before, name)
+
+    def test_conductor_line_takes_no_job_label(self):
+        # 한 줄 = 진행자 세션 1개: the label distinguishes adapter jobs only (runbook: 진행자 줄은 --item을 받지 않는다)
+        code, _ = self.record('conductor', total=100, item='job-1')
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(self.ledger_bytes())
+
     def test_every_run_id_is_listed_and_an_unrecorded_run_shows_up(self):
         # 누락 점검: 모든 run id가 어느 한 줄의 run 목록에 들어 있어야 하고, 빠진 run은 "평가 비용 미기록"으로 드러난다
         expected = {'claude-pilot-01', 'claude-arm1-core01', 'claude-arm2-core01', 'claude-arm3-core01'}
         self.assertEqual(self.record('conductor', total=100, run_ids=('claude-pilot-01', 'claude-arm1-core01'))[0], 0)
-        self.assertEqual(self.record('judging-adapter', total=7, session='adapter-1', run_ids=('claude-arm2-core01',))[0], 0)
+        self.assertEqual(self.record('judging-adapter', total=7, session='adapter-1', run_ids=('claude-arm2-core01',),
+                                     item='claude-arm2-core01 adapter')[0], 0)
         covered = {run_id for line in self.lines() for run_id in line['run_ids']}
         self.assertEqual(expected - covered, {'claude-arm3-core01'})
 
@@ -1723,6 +1763,9 @@ class NoCallOutlastsTheEightHourCap(unittest.TestCase):
 CRITERIA = tuple('C%02d' % n for n in range(1, 21))
 FINISHER = load_script('finish_run')
 CAPTURE = load_script('capture_turn')
+_rec_spec = importlib.util.spec_from_file_location('spec_inv_recording', HERE.parents[1] / 'recording' / 'record.py')
+RECORDER = importlib.util.module_from_spec(_rec_spec)
+_rec_spec.loader.exec_module(RECORDER)
 RUNNER_TOOLS = ('Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch')
 
 
@@ -1735,6 +1778,7 @@ def write_record(root, run_id, arm, core=1, status='RUNNING', **fields):
     """The run.json a cycle start leaves for a main-experiment run (status RUNNING after its first turn)."""
     folder = record_folder(root, run_id, arm, core)
     folder.mkdir(parents=True, exist_ok=True)
+    RECORDER.init_run(folder)                    # the NOT_STARTED journal prepare.py leaves (recording/README.md init_run)
     (folder / 'run.json').write_text(json.dumps(dict({'run_id': run_id, 'arm': arm, 'core': core, 'status': status}, **fields)))
     return folder
 
@@ -1775,6 +1819,55 @@ def read_record(folder):
     return json.loads((folder / 'run.json').read_text())
 
 
+def finished_turns(root, run_id):
+    """Turn numbers of the run directory whose result.json says the turn ended (status ok or failed — runbook ⑤)."""
+    turns = Path(root) / '.runs' / run_id / 'turns'
+    out = []
+    for d in sorted(turns.iterdir()) if turns.exists() else []:
+        result = d / 'result.json'
+        if result.exists() and json.loads(result.read_text()).get('status') in ('ok', 'failed'):
+            out.append(int(d.name))
+    return out
+
+
+def run_record_folder(root, run_id):
+    manifest = json.loads((Path(root) / '.runs' / run_id / 'manifest.json').read_text())
+    return record_folder(root, run_id, manifest['arm'], manifest.get('core', 1), pilot=bool(manifest.get('pilot')))
+
+
+def close_turns(root, run_id, only=None):
+    """Spec 10.1 steps before the finish: launch.py normalize -> capture_turn.py for every finished turn that is not yet
+    in the record folder (both through their public entry points). only: capture just these turn numbers.
+    Returns the turn numbers captured."""
+    root = Path(root)
+    folder = run_record_folder(root, run_id)
+    todo = [n for n in finished_turns(root, run_id)
+            if (only is None or n in only) and not (folder / 'turns' / ('%04d' % n)).exists()]
+    if not todo:                                               # nothing left to close: the record folder stays as it is
+        return []
+    for shared in ('recording', 'measurement'):                # the shared recorder and adapter (read only, linked)
+        link = root.parent / shared
+        if not link.exists():
+            link.symlink_to(HERE.parents[1] / shared)
+    with patch.object(launch, 'ROOT', root), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        launch.normalize(SimpleNamespace(runs=root / '.runs', run_id=run_id))
+    captured = []
+    for n in todo:
+        analysis = root.parent / ('analysis-%04d.md' % n)
+        analysis.write_text('turn %d analysis' % n)
+        with patch.object(CAPTURE, 'ROOT', root), contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            CAPTURE.capture(run_id, n, analysis, 'RUNNING', runs=root / '.runs')
+        captured.append(n)
+    return captured
+
+
+def close_and_finish(root, run_id, *options):
+    """The fixed order of spec 10.1: normalize -> capture_turn -> finish_run."""
+    close_turns(root, run_id)
+    return finish(root, run_id, *options)
+
+
 def first_turn(root, run_id, arm, usage=U1, reported='same'):
     """The run's first turn through launch.turn with the fake docker (what a real call writes)."""
     model = FABLE if arm == 3 else OPUS
@@ -1811,19 +1904,30 @@ class FinishFixture(unittest.TestCase):
         self.tmp.cleanup()
 
     def started_run(self, run_id='claude-arm1-core01', arm=1, core=1, **record_fields):
-        """A main-experiment run with one real (fake-docker) turn and its RUNNING record. Returns (root, record folder)."""
+        """A main-experiment run with one real (fake-docker) turn, normalized and captured into its RUNNING record
+        (spec 10.1: the finish comes after normalize and capture_turn). record_fields are then set on run.json as a
+        record that says otherwise would (e.g. a NOT_STARTED status, hand-written evidence fields).
+        Returns (root, record folder)."""
         root = make_root(self.base / run_id)
         init_run(root, run_id, arm, core=core)
         first_turn(root, run_id, arm)
-        return root, write_record(root, run_id, arm, core, **record_fields)
+        folder = write_record(root, run_id, arm, core)
+        self.assertEqual(close_turns(root, run_id), [1])
+        if record_fields:
+            run = read_record(folder)
+            run.update(record_fields)
+            (folder / 'run.json').write_text(json.dumps(run))
+        return root, folder
 
 
-class CapOvershootInTheFinalCall(FinishFixture):
-    """Spec 10.2: "완료 + 초과 표시"는 상한을 넘긴 마지막 호출이 턴일 때만이다. 대리 사용자 호출에서 넘긴 경우는 해당하지 않는다
-    (… 통과 판정이 올 수 없다 — 오면 거부). 상한 기록(censored.json)에 어느 종류의 호출에서 넘었는지를 남긴다. 그 칸이 없는
-    상한 기록은 "완료 + 초과"로 인정하지 않는다. §0 추가 결정: 수용 기준을 통과한 run이 그 마지막 턴에서 토큰·시간 상한을 넘겼으면
-    완료로 판정하고 초과분을 함께 기록한다. "먼저 닿으면 CENSORED_*"는 다음 호출을 막는 규칙. Main session decision (a): a run
-    blocked BEFORE a call whose verdict is all PASS is refused (a pass cannot follow a refused call)."""
+class CapRecordIsAnnotation(FinishFixture):
+    """Spec 10.2 (2026-11-18, replaces "완료 + 초과 only when the capped call was a turn" and "blocked before a call + all
+    PASS is refused"): 통과 여부는 판정표만으로 정하고, 상한 기록은 표시로 붙는다. 판정표가 전부 PASS이면 상한 기록이 있든 없든
+    PASSED다. 상한 기록이 있으면 cap_reached=true와 함께 상한의 종류·시점(호출 전 차단 / 호출 뒤 초과)·호출 종류(턴 / 대리
+    사용자)·초과량을 run.json에 옮겨 적는다(결과 표에서 "완료", "완료 + 상한 도달", "완료 + 초과"를 구분). 통과하지 못했고 상한
+    기록이 있으면 CENSORED_*다. 상한 기록 자체는 고치지 않는다. Spec 2 / §0: 상한은 다음 호출을 막는 규칙 — a capped run gets no
+    further paid call. Field names (cap_status, cap_when, cap_call, cap_overshoot; "before call"/"after call") are the
+    runbook's (종료 상태 표)."""
 
     def setup_run(self, run_id, arm, prior_tokens, started=None):
         root = make_root(self.base / run_id)
@@ -1839,13 +1943,76 @@ class CapOvershootInTheFinalCall(FinishFixture):
         drive_turn(root, run_id, resume=True, kind='feedback', reported=usage, side_effect=side_effect,
                    projects={'-workspace/s.jsonl': [assistant('last', model, usage)]})
 
-    def token_overshoot(self, run_id, arm=3):
+    # --- the six kinds of cap record a run can carry ---------------------------------------------------
+
+    def token_after_turn(self, run_id, arm=3):
         # 19,999,980 before the final call; the final turn adds 1,000 -> 980 over the 20,000,000 cap
         root, dest, folder = self.setup_run(run_id, arm, tokens(9_999_990, 9_999_990))
         self.assertFalse((dest / 'censored.json').exists())
         self.final_call(root, run_id, arm, tokens(500, 500))
-        self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap during the call left no record')
         return root, dest, folder
+
+    def time_after_turn(self, run_id, arm=1):
+        start = self.now - timedelta(hours=8) + timedelta(seconds=60)
+        root, dest, folder = self.setup_run(run_id, arm, tokens(1, 1), started=start)
+        self.final_call(root, run_id, arm, U2, side_effect=lambda d: age_first_turn(d, start - timedelta(seconds=90)))
+        return root, dest, folder
+
+    def token_after_proxy(self, run_id, arm=3):
+        root, dest, folder = self.setup_run(run_id, arm, tokens(9_999_990, 9_999_990))
+        code, console = proxy_call(root / '.runs', run_id, usage=tokens(500, 500))
+        self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap in a proxy call left no record: %s' % console)
+        return root, dest, folder
+
+    def time_before_turn(self, run_id, arm=1):
+        # the eight hours pass between calls: the next turn is refused before it is made
+        root, dest, folder = self.setup_run(run_id, arm, tokens(1, 1), started=self.now - timedelta(hours=8, seconds=1))
+        self.assertFalse((dest / 'censored.json').exists())
+        _, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
+        self.assertEqual(paid, [])
+        return root, dest, folder
+
+    def time_before_proxy(self, run_id, arm=3):
+        root, dest, folder = self.setup_run(run_id, arm, tokens(1, 1), started=self.now - timedelta(hours=8, seconds=1))
+        record = []
+        code, _ = proxy_call(root / '.runs', run_id, record=record)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(paid_calls(record), [])
+        return root, dest, folder
+
+    def feedback_cap(self, run_id, arm=1):
+        # initial + 30 delivered feedback turns (real fake-docker turns); the 31st feedback is refused before the call
+        root, dest, folder = self.setup_run(run_id, arm, tokens(1, 1))
+        model = FABLE if arm == 3 else OPUS
+        lines = [assistant('first-' + run_id, model, tokens(1, 1))]
+        for i in range(30):
+            lines = lines + [assistant('fb%d' % i, model, tokens(1, 1))]
+            result, _, error, _ = drive_turn(root, run_id, resume=True, kind='feedback', reported=tokens(1, 1),
+                                             projects={'-workspace/s.jsonl': lines})
+            self.assertIsNone(error)
+            self.assertEqual(result['status'], 'ok')
+        _, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
+        self.assertEqual(paid, [])
+        return root, dest, folder
+
+    CASES = {
+        # name: (maker, arm, status, when, call, overshoot expected)
+        'token cap crossed in the final turn': ('token_after_turn', 3, 'CENSORED_BUDGET', 'after call', 'turn', True),
+        'time cap crossed in the final turn': ('time_after_turn', 1, 'CENSORED_TIME', 'after call', 'turn', True),
+        'token cap crossed in a user-proxy call': ('token_after_proxy', 3, 'CENSORED_BUDGET', 'after call', 'user-proxy', True),
+        'time cap blocked a turn before the call': ('time_before_turn', 1, 'CENSORED_TIME', 'before call', 'turn', False),
+        'time cap blocked a user-proxy call before the call': ('time_before_proxy', 3, 'CENSORED_TIME', 'before call', 'user-proxy',
+                                                               False),
+        'feedback cap blocked the 31st feedback': ('feedback_cap', 1, 'CENSORED_TURNS', 'before call', 'turn', False),
+    }
+
+    def capped(self, name, run_id):
+        maker, arm, status, when, call, overshoot = self.CASES[name]
+        self.base = Path(self.tmp.name) / run_id
+        root, dest, folder = getattr(self, maker)(run_id, arm)
+        self.assertTrue((dest / 'censored.json').exists(), name)
+        self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], status, name)
+        return root, dest, folder, arm
 
     def assert_no_further_paid_call(self, root, run_id, arm):
         error, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
@@ -1857,63 +2024,80 @@ class CapOvershootInTheFinalCall(FinishFixture):
             self.assertNotEqual(code, 0)
             self.assertEqual(paid_calls(record), [])
 
-    def assert_refused_and_untouched(self, root, run_id, folder, censored_bytes, dest):
-        before = (folder / 'run.json').read_bytes()
-        code, out = finish(root, run_id)
-        self.assertNotEqual(code, 0, out)
-        self.assertEqual((folder / 'run.json').read_bytes(), before)
-        self.assertNotEqual(read_record(folder)['status'], 'PASSED')
-        self.assertEqual((dest / 'censored.json').read_bytes(), censored_bytes)
+    def assert_annotation(self, run, name):
+        _, _, status, when, call, overshoot = self.CASES[name]
+        self.assertIs(run['cap_reached'], True, name)
+        self.assertEqual(run['cap_status'], status, name)
+        self.assertEqual(run['cap_when'], when, name)
+        self.assertEqual(run['cap_call'], call, name)
+        if overshoot:
+            self.assertTrue([n for n in numbers_in(run['cap_overshoot']) if n > 0], '%s: overshoot not recorded' % name)
+        else:
+            self.assertIsNone(run['cap_overshoot'], name)
 
-    def test_passed_run_that_crossed_the_token_cap_in_its_final_turn_is_completed_with_the_overshoot(self):
-        root, dest, folder = self.token_overshoot('tok')
-        censored = (dest / 'censored.json').read_bytes()
+    def test_every_cap_kind_with_an_all_pass_table_is_passed_with_its_annotation(self):
+        for i, name in enumerate(self.CASES):
+            with self.subTest(name):
+                run_id = 'cap%d' % i
+                root, dest, folder, arm = self.capped(name, run_id)
+                censored = (dest / 'censored.json').read_bytes()
+                write_verdict(folder, run_id)
+                code, out = close_and_finish(root, run_id)
+                self.assertEqual(code, 0, '%s: %s' % (name, out))
+                run = read_record(folder)
+                self.assertEqual(run['status'], 'PASSED', name)
+                self.assertIs(run['all_acceptance_passed'], True, name)
+                self.assert_annotation(run, name)
+                self.assertEqual((dest / 'censored.json').read_bytes(), censored, '%s: cap record modified' % name)
+                self.assert_no_further_paid_call(root, run_id, arm)
+                self.assertEqual((dest / 'censored.json').read_bytes(), censored, name)
+
+    def test_token_overshoot_amount_is_carried_over(self):
+        root, dest, folder, _ = self.capped('token cap crossed in the final turn', 'tok')
         write_verdict(folder, 'tok')
-        code, out = finish(root, 'tok')
+        code, out = close_and_finish(root, 'tok')
         self.assertEqual(code, 0, out)
-        run = read_record(folder)
-        self.assertEqual(run['status'], 'PASSED')
-        self.assertIs(run['cap_reached'], True)
-        self.assertTrue(run.get('cap_overshoot'), 'overshoot not recorded with the completed run')
-        self.assertIn(980, numbers_in(run['cap_overshoot']), 'token overshoot (20,000,980 - 20,000,000) not recorded')
-        self.assert_no_further_paid_call(root, 'tok', 3)
-        self.assertEqual((dest / 'censored.json').read_bytes(), censored)        # the cap record is never modified
+        self.assertIn(980, numbers_in(read_record(folder)['cap_overshoot']), 'token overshoot (20,000,980 - 20,000,000) not recorded')
 
-    def test_passed_run_that_crossed_the_time_cap_in_its_final_turn_is_completed_with_the_overshoot(self):
-        start = self.now - timedelta(hours=8) + timedelta(seconds=60)
-        root, dest, folder = self.setup_run('tim', 1, tokens(1, 1), started=start)
-        self.final_call(root, 'tim', 1, U2, side_effect=lambda d: age_first_turn(d, start - timedelta(seconds=90)))
-        self.assertTrue((dest / 'censored.json').exists())
-        censored = (dest / 'censored.json').read_bytes()
-        write_verdict(folder, 'tim')
-        code, out = finish(root, 'tim')
-        self.assertEqual(code, 0, out)
-        run = read_record(folder)
-        self.assertEqual(run['status'], 'PASSED')
-        self.assertIs(run['cap_reached'], True)
-        self.assertTrue([n for n in numbers_in(run.get('cap_overshoot')) if n > 0])
-        self.assert_no_further_paid_call(root, 'tim', 1)
-        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+    def test_completed_completed_at_cap_and_completed_over_cap_are_distinguishable(self):
+        # 결과 표에서 "완료", "완료 + 상한 도달", "완료 + 초과"를 구분
+        def mark(run):
+            return (run['cap_reached'], run['cap_when'], run['cap_overshoot'] is not None)
+        root, folder = self.started_run('clean', 1)
+        write_verdict(folder, 'clean')
+        self.assertEqual(finish(root, 'clean')[0], 0)
+        marks = {'완료': mark(read_record(folder))}
+        for label, name in (('완료 + 상한 도달', 'time cap blocked a turn before the call'),
+                            ('완료 + 초과', 'time cap crossed in the final turn')):
+            run_id = 'd' + str(len(marks))
+            root, dest, folder, _ = self.capped(name, run_id)
+            write_verdict(folder, run_id)
+            self.assertEqual(close_and_finish(root, run_id)[0], 0)
+            marks[label] = mark(read_record(folder))
+        self.assertEqual(len(set(marks.values())), 3, marks)
+        self.assertEqual(marks['완료'][0], False)
 
-    def test_pass_after_the_cap_was_crossed_in_a_user_proxy_call_is_refused(self):
-        # 대리 사용자 호출에서 넘긴 경우는 해당하지 않는다 … 오면 거부
-        root, dest, folder = self.setup_run('prx', 3, tokens(9_999_990, 9_999_990))
-        code, console = proxy_call(root / '.runs', 'prx', usage=tokens(500, 500))
-        self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap in a proxy call left no record: %s' % console)
-        censored = (dest / 'censored.json').read_bytes()
-        self.assertIn('user-proxy', censored.decode(), 'the cap record does not say the cap was crossed in a proxy call')
-        write_verdict(folder, 'prx')
-        self.assert_refused_and_untouched(root, 'prx', folder, censored, dest)
-        # the same run judged not passed is kept as censored
-        write_verdict(folder, 'prx', results={'C04': 'FAIL'})
-        code, out = finish(root, 'prx')
-        self.assertEqual(code, 0, out)
-        self.assertEqual(read_record(folder)['status'], json.loads(censored)['status'])
-        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+    def test_not_passed_capped_run_is_censored_with_the_cap_records_status(self):
+        for i, name in enumerate(self.CASES):
+            for result in ('FAIL', 'PARTIAL', 'NOT_RUN'):
+                with self.subTest(name, result=result):
+                    run_id = 'np%d-%s' % (i, result)
+                    root, dest, folder, arm = self.capped(name, run_id)
+                    censored = (dest / 'censored.json').read_bytes()
+                    write_verdict(folder, run_id, results={'C11': result})
+                    code, out = close_and_finish(root, run_id)
+                    self.assertEqual(code, 0, out)
+                    run = read_record(folder)
+                    self.assertEqual(run['status'], json.loads(censored)['status'])
+                    self.assertTrue(run['status'].startswith('CENSORED_'))
+                    self.assertIs(run['all_acceptance_passed'], False)
+                    self.assert_annotation(run, name)
+                    self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+                    self.assert_no_further_paid_call(root, run_id, arm)
 
-    def test_cap_record_without_the_call_kind_is_not_completed_with_overshoot(self):
-        # 그 칸이 없는 상한 기록은 "완료 + 초과"로 인정하지 않는다
-        root, dest, folder = self.token_overshoot('nocall')
+    def test_cap_record_without_the_call_kind_still_passes_and_is_left_as_it_is(self):
+        # 상한 기록 자체는 고치지 않는다 / 판정표가 전부 PASS이면 상한 기록이 있든 없든 PASSED (runbook: 옛 기록은 cap_call=null)
+        root, dest, folder, _ = self.capped('token cap crossed in the final turn', 'nocall')
 
         def strip(value):
             if isinstance(value, dict):
@@ -1926,46 +2110,13 @@ class CapOvershootInTheFinalCall(FinishFixture):
         (dest / 'censored.json').write_text(json.dumps(strip(record)))           # a cap record written without that field
         censored = (dest / 'censored.json').read_bytes()
         write_verdict(folder, 'nocall')
-        self.assert_refused_and_untouched(root, 'nocall', folder, censored, dest)
-
-    def test_capped_run_that_did_not_pass_stays_censored(self):
-        for result in ('FAIL', 'PARTIAL', 'NOT_RUN'):
-            with self.subTest(result):
-                root, dest, folder = self.token_overshoot('fail-' + result)
-                censored = (dest / 'censored.json').read_bytes()
-                write_verdict(folder, 'fail-' + result, results={'C11': result})
-                code, out = finish(root, 'fail-' + result)
-                self.assertEqual(code, 0, out)
-                run = read_record(folder)
-                self.assertEqual(run['status'], json.loads(censored)['status'])
-                self.assertTrue(run['status'].startswith('CENSORED_'))
-                self.assertIs(run['cap_reached'], True)
-                self.assertIs(run['all_acceptance_passed'], False)
-                self.assertEqual((dest / 'censored.json').read_bytes(), censored)
-                self.assert_no_further_paid_call(root, 'fail-' + result, 3)
-
-    def test_run_blocked_before_a_call_or_by_the_feedback_cap_cannot_pass(self):
-        # only a final turn that crossed the token or time cap counts as "완료 + 초과"; decision (a)
-        # the eight hours pass between calls: the next call is refused before it is made
-        root, dest, folder = self.setup_run('before', 1, tokens(1, 1), started=self.now - timedelta(hours=8, seconds=1))
-        self.assertFalse((dest / 'censored.json').exists())
-        error, paid = attempt_turn(root, 'before', resume=True, kind='feedback')
-        self.assertEqual(paid, [])
-        self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TIME')
-        root2, dest2 = new_run(self.base, 'turns', 1, ['initial', *['feedback'] * 30])
-        folder2 = write_record(root2, 'turns', 1)
-        attempt_turn(root2, 'turns', resume=True, kind='feedback')
-        self.assertEqual(json.loads((dest2 / 'censored.json').read_text())['status'], 'CENSORED_TURNS')
-        for r, d, f, run_id in ((root, dest, folder, 'before'), (root2, dest2, folder2, 'turns')):
-            with self.subTest(run_id):
-                censored = (d / 'censored.json').read_bytes()
-                write_verdict(f, run_id)
-                self.assert_refused_and_untouched(r, run_id, f, censored, d)
-                write_verdict(f, run_id, results={'C02': 'FAIL'})
-                code, out = finish(r, run_id)
-                self.assertEqual(code, 0, out)
-                self.assertEqual(read_record(f)['status'], json.loads(censored)['status'])
-                self.assertEqual((d / 'censored.json').read_bytes(), censored)
+        code, out = close_and_finish(root, 'nocall')
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIs(run['cap_reached'], True)
+        self.assertIsNone(run['cap_call'])
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
 
     def test_uncapped_passed_run_is_completed_without_a_cap_mark(self):
         root, folder = self.started_run('clean', 1)
@@ -1975,6 +2126,204 @@ class CapOvershootInTheFinalCall(FinishFixture):
         run = read_record(folder)
         self.assertEqual(run['status'], 'PASSED')
         self.assertIs(run['cap_reached'], False)
+        for field in ('cap_status', 'cap_when', 'cap_call', 'cap_overshoot'):
+            self.assertIsNone(run.get(field), field)
+
+
+class FinishComesAfterCapture(FinishFixture):
+    """Spec 10.1: normalize → capture_turn(남은 턴 기록 — 기록 폴더의 파일이 여기서 마지막으로 바뀐다) → 종료 기록(근거 해시는 이
+    시점 값). A run whose finished turns are not yet captured into the record folder cannot be finished; "captured" means
+    the capture of that turn ran to completion."""
+
+    def assert_refused(self, root, run_id, folder, name=''):
+        before = (folder / 'run.json').read_bytes()
+        code, out = finish(root, run_id)
+        self.assertNotEqual(code, 0, '%s: %s' % (name, out))
+        self.assertEqual((folder / 'run.json').read_bytes(), before, name)
+        self.assertNotIn(read_record(folder)['status'], ('PASSED', 'FAILED'), name)
+
+    def test_no_turn_captured_blocks_the_finish(self):
+        root = make_root(self.base / 'none')
+        init_run(root, 'claude-arm1-core01', 1)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        write_verdict(folder, 'claude-arm1-core01')
+        self.assert_refused(root, 'claude-arm1-core01', folder)
+        self.assertEqual(close_and_finish(root, 'claude-arm1-core01')[0], 0)          # control: after capture it finishes
+
+    def test_a_later_turn_not_captured_blocks_the_finish(self):
+        for result in ('PASS', 'FAIL'):
+            with self.subTest(result):
+                self.base = Path(self.tmp.name) / result
+                root, folder = self.started_run()                    # turn 0001 captured
+                drive_turn(root, 'claude-arm1-core01', resume=True, kind='feedback', reported=U2,
+                           projects={'-workspace/s.jsonl': [assistant('first-claude-arm1-core01', OPUS, U1),
+                                                            assistant('second', OPUS, U2)]})
+                write_verdict(folder, 'claude-arm1-core01', results={'C05': result})
+                self.assert_refused(root, 'claude-arm1-core01', folder, result)
+                self.assertEqual(close_turns(root, 'claude-arm1-core01'), [2])
+                code, out = finish(root, 'claude-arm1-core01')
+                self.assertEqual(code, 0, out)
+
+    def test_a_failed_turn_not_captured_blocks_the_finish(self):
+        # finished = result.json status ok or failed (runbook ⑤)
+        root, folder = self.started_run()
+
+        def container_died(dest):
+            raise RuntimeError('container died during the call')
+        result, _, _, _ = drive_turn(root, 'claude-arm1-core01', resume=True, kind='feedback', reported=U2,
+                                     side_effect=container_died,
+                                     projects={'-workspace/s.jsonl': [assistant('r2', OPUS, U2)]})
+        self.assertEqual(result['status'], 'failed', 'control: the fake call left a failed turn')
+        write_verdict(folder, 'claude-arm1-core01', results={'C05': 'FAIL'})
+        self.assert_refused(root, 'claude-arm1-core01', folder)
+
+    def test_capped_run_with_its_last_turn_uncaptured_is_not_finished(self):
+        # the order holds for a capped run as well: a cap record does not stand in for the capture
+        root = make_root(self.base / 'cap')
+        init_run(root, 'claude-arm1-core01', 1)
+        first_turn(root, 'claude-arm1-core01', 1, usage=tokens(9_999_990, 9_999_990))
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertEqual(close_turns(root, 'claude-arm1-core01'), [1])
+        drive_turn(root, 'claude-arm1-core01', resume=True, kind='feedback', reported=tokens(500, 500),
+                   projects={'-workspace/s.jsonl': [assistant('last', OPUS, tokens(500, 500))]})
+        self.assertTrue((root / '.runs/claude-arm1-core01/censored.json').exists())
+        write_verdict(folder, 'claude-arm1-core01')
+        self.assert_refused(root, 'claude-arm1-core01', folder)
+
+    def test_a_captured_turn_whose_files_are_incomplete_blocks_the_finish(self):
+        # a capture that stopped partway leaves only part of what a completed capture leaves
+        root, folder = self.started_run('probe')
+        names = sorted(p.name for p in (folder / 'turns' / '0001').iterdir())
+        self.assertIn('result.json', names)
+        for name in names:
+            with self.subTest(missing=name):
+                self.base = Path(self.tmp.name) / ('part-' + name)
+                root, folder = self.started_run()
+                (folder / 'turns' / '0001' / name).unlink()
+                write_verdict(folder, 'claude-arm1-core01')
+                self.assert_refused(root, 'claude-arm1-core01', folder, 'turn file %s missing' % name)
+
+    def test_a_capture_that_failed_before_its_journal_entry_blocks_the_finish(self):
+        # capture_turn run through its public entry point, with the shared recorder failing when it appends the turn:
+        # the turn folder may exist, but the capture did not complete
+        root = make_root(self.base / 'jfail')
+        init_run(root, 'claude-arm1-core01', 1)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        broken = root.parent / 'recording'
+        broken.mkdir()
+        (broken / 'record.py').write_text(
+            'import importlib.util as u\n'
+            's = u.spec_from_file_location("real_record", %r)\n'
+            'm = u.module_from_spec(s); s.loader.exec_module(m)\n'
+            'globals().update({k: v for k, v in vars(m).items() if not k.startswith("__")})\n'
+            'def record_turn(*a, **k):\n'
+            '    raise OSError("disk full while appending the turn")\n' % str(HERE.parents[1] / 'recording' / 'record.py'))
+        with self.assertRaises(BaseException):
+            close_turns(root, 'claude-arm1-core01')
+        write_verdict(folder, 'claude-arm1-core01')
+        self.assert_refused(root, 'claude-arm1-core01', folder)
+
+    def test_finish_does_not_capture_by_itself(self):
+        # the record folder changes last at capture_turn; a refused finish leaves the turns uncaptured
+        root = make_root(self.base / 'self')
+        init_run(root, 'claude-arm1-core01', 1)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        write_verdict(folder, 'claude-arm1-core01')
+        before = tree_state(folder)
+        finish(root, 'claude-arm1-core01')
+        self.assertEqual(tree_state(folder), before)
+
+
+def write_criteria(folder, run_id, per, judged_by='main supervising session'):
+    """A verdict table: all PASS with an existing evidence file, overridden per criterion by `per` {criterion: entry}."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'acceptance-audit.json').write_text('{}')
+    criteria = {c: {'result': 'PASS', 'evidence': ['acceptance-audit.json'], 'note': 'observed'} for c in CRITERIA}
+    criteria.update(per)
+    (folder / 'verdict.json').write_text(json.dumps({'run_id': run_id, 'judged_by': judged_by,
+                                                     'judged_at': '2026-11-18T00:00:00+00:00', 'criteria': criteria}))
+
+
+class EveryCriterionNeedsSupport(FinishFixture):
+    """Spec 10.2 (2026-11-18): 판정표의 각 기준은 근거가 있어야 한다: PASS·FAIL·PARTIAL은 실제로 있는 근거 파일 1개 이상,
+    NOT_RUN은 사유(note). 이를 채우지 못한 판정표로는 종료 기록을 할 수 없다(통과가 아닌 종료 상태도 마찬가지)."""
+
+    def assert_refused(self, root, folder, *options, name=''):
+        before = (folder / 'run.json').read_bytes()
+        code, out = finish(root, 'claude-arm1-core01', *options)
+        self.assertNotEqual(code, 0, '%s: %s' % (name, out))
+        self.assertEqual((folder / 'run.json').read_bytes(), before, name)
+
+    UNSUPPORTED = {
+        'no evidence listed': {'evidence': []},
+        'evidence key absent': None,
+        'only a missing file': {'evidence': ['never-written.json']},
+        'only a path outside the record folder': {'evidence': ['../../../../outside.json']},
+        'only an absolute path': {'evidence': ['/etc/hostname']},
+    }
+
+    def entry(self, result, how):
+        if how is None:
+            return {'result': result, 'note': 'observed'}
+        return dict({'result': result, 'note': 'observed'}, **how)
+
+    def test_pass_fail_partial_without_an_existing_evidence_file_block_the_finish(self):
+        for result in ('PASS', 'FAIL', 'PARTIAL'):
+            for name, how in self.UNSUPPORTED.items():
+                with self.subTest(result=result, case=name):
+                    self.base = Path(self.tmp.name) / ('%s-%s' % (result, name.replace(' ', '-')))
+                    root, folder = self.started_run()
+                    (folder / '../../../../outside.json').resolve().write_text('{}')
+                    write_criteria(folder, 'claude-arm1-core01', {'C07': self.entry(result, how)})
+                    self.assert_refused(root, folder, name='%s %s' % (result, name))
+
+    def test_not_run_without_a_note_blocks_the_finish(self):
+        for name, entry in {'empty note': {'result': 'NOT_RUN', 'evidence': [], 'note': ''},
+                            'blank note': {'result': 'NOT_RUN', 'evidence': [], 'note': '   '},
+                            'no note': {'result': 'NOT_RUN', 'evidence': []},
+                            'null note with evidence': {'result': 'NOT_RUN', 'evidence': ['acceptance-audit.json'],
+                                                        'note': None}}.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / ('nr-' + name.replace(' ', '-'))
+                root, folder = self.started_run()
+                write_criteria(folder, 'claude-arm1-core01', {'C20': entry})
+                self.assert_refused(root, folder, name=name)
+
+    def test_unsupported_criterion_blocks_invalid_infra_too(self):
+        # 통과가 아닌 종료 상태도 마찬가지
+        root, folder = self.started_run()
+        (folder / 'docker.log').write_text('daemon died')
+        write_criteria(folder, 'claude-arm1-core01', {'C03': {'result': 'FAIL', 'evidence': [], 'note': 'x'}})
+        self.assert_refused(root, folder, '--invalid-infra', 'docker daemon died', '--evidence', 'docker.log')
+
+    def test_supported_tables_are_accepted(self):
+        # control: NOT_RUN with a reason and no file, FAIL/PARTIAL with one existing file among missing ones
+        cases = {'NOT_RUN with a note': ({'C20': {'result': 'NOT_RUN', 'evidence': [], 'note': 'k6 not runnable'}}, 'FAILED'),
+                 'FAIL with a file': ({'C04': {'result': 'FAIL', 'evidence': ['acceptance-audit.json'], 'note': ''}}, 'FAILED'),
+                 'PARTIAL with one existing file': ({'C04': {'result': 'PARTIAL',
+                                                             'evidence': ['acceptance-audit.json', 'gone.json'],
+                                                             'note': 'x'}}, 'FAILED')}
+        for name, (per, status) in cases.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / ('ok-' + name.replace(' ', '-'))
+                root, folder = self.started_run()
+                write_criteria(folder, 'claude-arm1-core01', per)
+                code, out = finish(root, 'claude-arm1-core01')
+                self.assertEqual(code, 0, '%s: %s' % (name, out))
+                self.assertEqual(read_record(folder)['status'], status)
+
+    def test_pass_with_one_existing_and_one_missing_file_is_not_all_acceptance_passed(self):
+        # all_acceptance_passed 원천: 20개 모두 PASS이고 근거 파일이 모두 존재
+        root, folder = self.started_run()
+        write_criteria(folder, 'claude-arm1-core01',
+                       {'C09': {'result': 'PASS', 'evidence': ['acceptance-audit.json', 'never-written.json'], 'note': 'x'}})
+        code, out = finish(root, 'claude-arm1-core01')
+        if code != 0:
+            return                                       # refusing is also within the spec
+        self.assertIs(read_record(folder)['all_acceptance_passed'], False, out)
 
 
 class VerdictTableDecidesTheOutcome(FinishFixture):
@@ -2147,8 +2496,14 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
         init_run(root, run_id, arm, image=None, tools=tools, readiness=root / 'docs/results/readiness.json')
         return root
 
-    def fields(self, root, run_id, folder):
-        write_verdict(folder, run_id)
+    def fields(self, root, run_id, folder, preset=None, **verdict):
+        """verdict -> normalize -> capture_turn -> (run.json says `preset`) -> finish_run; returns the finished record."""
+        write_verdict(folder, run_id, **verdict)
+        close_turns(root, run_id)
+        if preset:
+            run = read_record(folder)
+            run.update(preset)
+            (folder / 'run.json').write_text(json.dumps(run))
         code, out = finish(root, run_id)
         self.assertEqual(code, 0, out)
         run = read_record(folder)
@@ -2169,8 +2524,12 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
         init_run(root, 'claude-arm1-core01', 1)
         drive_turn(root, 'claude-arm1-core01', reported=None,
                    projects={'-workspace/s.jsonl': [assistant('x', FABLE, U1)]})
-        folder = write_record(root, 'claude-arm1-core01', 1, **self.HAND_WRITTEN)
+        folder = write_record(root, 'claude-arm1-core01', 1)
         write_verdict(folder, 'claude-arm1-core01', results={'C03': 'FAIL'})
+        close_turns(root, 'claude-arm1-core01')
+        run = read_record(folder)
+        run.update(self.HAND_WRITTEN)                                    # the record says all four are true at finish time
+        (folder / 'run.json').write_text(json.dumps(run))
         code, out = finish(root, 'claude-arm1-core01')
         self.assertEqual(code, 0, out)
         run = read_record(folder)
@@ -2186,8 +2545,8 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
         ledger = json.loads((dest / 'ledger.json').read_text()) if (dest / 'ledger.json').exists() else {}
         ledger['usage_complete'] = True                                     # a stale or edited ledger file says complete
         (dest / 'ledger.json').write_text(json.dumps(ledger))
-        folder = write_record(root, 'claude-arm1-core01', 1, usage_complete=True)
-        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['usage_complete'], False)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder, preset=dict(usage_complete=True))['usage_complete'], False)
 
     def test_role_models_must_be_the_agreed_models(self):
         root = make_root(self.base / 'roles1')
@@ -2198,8 +2557,9 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
         root = make_root(self.base / 'roles2')
         init_run(root, 'claude-arm1-core01', 1)
         drive_turn(root, 'claude-arm1-core01', reported=U1, projects={'-workspace/s.jsonl': [assistant('f', FABLE, U1)]})
-        folder = write_record(root, 'claude-arm1-core01', 1, all_role_models_verified=True)
-        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['all_role_models_verified'], False)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder,
+                                  preset=dict(all_role_models_verified=True))['all_role_models_verified'], False)
 
     def arm3(self, name, *, reviewer=True, worker=True, proxy=True, proxy_model=OPUS):
         root = make_root(self.base / name)
@@ -2208,8 +2568,8 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
         if proxy:
             code, console = proxy_call(root / '.runs', 'claude-arm3-core01', served_model=proxy_model)
             self.assertEqual(code, 0, console)
-        folder = write_record(root, 'claude-arm3-core01', 3, all_role_models_verified=True)
-        return self.fields(root, 'claude-arm3-core01', folder)['all_role_models_verified']
+        folder = write_record(root, 'claude-arm3-core01', 3)
+        return self.fields(root, 'claude-arm3-core01', folder, preset=dict(all_role_models_verified=True))['all_role_models_verified']
 
     def test_arm3_with_every_required_role_on_its_agreed_model_is_verified(self):
         # control: PM Fable, worker Opus, second reviewer Fable, user proxy Opus
@@ -2232,15 +2592,93 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
     def test_isolation_needs_the_frozen_tool_list_of_that_arm(self):
         root = self.frozen_run('claude-arm1-core01', 1, RUNNER_TOOLS + ('Skill',))       # surface drifted from the freeze
         first_turn(root, 'claude-arm1-core01', 1)
-        folder = write_record(root, 'claude-arm1-core01', 1, isolation_verified=True)
-        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['isolation_verified'], False)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder, preset=dict(isolation_verified=True))['isolation_verified'],
+                      False)
 
     def test_isolation_without_a_freeze_is_false(self):
         root = make_root(self.base / 'nofreeze')
         init_run(root, 'claude-arm1-core01', 1, tools=RUNNER_TOOLS)
         first_turn(root, 'claude-arm1-core01', 1)
-        folder = write_record(root, 'claude-arm1-core01', 1, isolation_verified=True)
-        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['isolation_verified'], False)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder, preset=dict(isolation_verified=True))['isolation_verified'],
+                      False)
+
+
+SELFTEST_FAILED = {'passed': False, 'selftest_failed': '1'}
+
+
+class PreCallSelftestFailureIsRecorded(FinishFixture):
+    """§0 격리 칸(2026-11-18): 호출 전 self-test가 실패해 턴이 시작되지 못한 경우도 run에 기록으로 남기고 격리 검사가 그것을
+    읽는다. Spec 10.2 isolation_verified ← 그 run의 self-test가 통과. Runbook (실패한 턴의 복구): the record is not a turn —
+    it does not enter turn numbers, the cap count or the ledger, and the next attempt is the kind originally declared."""
+
+    RUN = 'claude-arm3-core01'
+    frozen_run = EvidenceFieldsComeOnlyFromTheirSources.frozen_run
+    fields = EvidenceFieldsComeOnlyFromTheirSources.fields
+
+    def arm3_run(self):
+        root = self.frozen_run(self.RUN, 3, RUNNER_TOOLS + ('Task',))
+        arm3_turn(root, self.RUN)
+        code, console = proxy_call(root / '.runs', self.RUN)
+        self.assertEqual(code, 0, console)
+        return root, root / '.runs' / self.RUN
+
+    def next_feedback(self, root):
+        lines = [assistant('pm-' + self.RUN, FABLE, U1), assistant('fb-pm', FABLE, U2)]
+        result, turn_dir, error, _ = drive_turn(root, self.RUN, resume=True, kind='feedback', reported=U2,
+                                                projects={'-workspace/s.jsonl': lines})
+        self.assertIsNone(error)
+        self.assertEqual(result['status'], 'ok')
+        return turn_dir
+
+    def turn_names(self, dest):
+        return sorted(p.name for p in (dest / 'turns').iterdir())
+
+    def test_control_arm3_with_passing_selftests_is_isolated(self):
+        root, dest = self.arm3_run()
+        self.next_feedback(root)
+        folder = write_record(root, self.RUN, 3)
+        run = self.fields(root, self.RUN, folder)
+        self.assertIs(run['isolation_verified'], True)
+
+    def test_failed_precall_selftest_makes_no_call_and_is_recorded_in_the_run(self):
+        root, dest = self.arm3_run()
+        before_turns = self.turn_names(dest)
+        before_state = launch.limit_state(dest)
+        before_ledger = launch.run_ledger(dest)
+        error, paid = attempt_turn(root, self.RUN, resume=True, kind='feedback', selftest_report=SELFTEST_FAILED)
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        self.assertEqual(self.turn_names(dest), before_turns, 'the stopped attempt became a turn')
+        recorded = [p for p in dest.rglob('*') if p.is_file() and 'selftest-failures-before-call' in p.parts]
+        self.assertTrue(recorded, 'the failed pre-call self-test left no record in the run')
+        state = launch.limit_state(dest)
+        self.assertEqual(state['used']['feedback_limit'], before_state['used']['feedback_limit'])
+        self.assertEqual(state['answer_turns'], before_state['answer_turns'])
+        ledger = launch.run_ledger(dest)
+        self.assertEqual(ledger['total_tokens'], before_ledger['total_tokens'])
+        self.assertEqual(ledger['turn_kinds'], before_ledger['turn_kinds'])
+
+    def test_next_attempt_after_the_failure_is_the_declared_kind_not_a_recovery(self):
+        root, dest = self.arm3_run()
+        attempt_turn(root, self.RUN, resume=True, kind='feedback', selftest_report=SELFTEST_FAILED)
+        error, paid = attempt_turn(root, self.RUN, resume=True, kind='recovery')
+        self.assertIsNotNone(error, 'a recovery was accepted after a self-test failure that started no turn')
+        self.assertEqual(paid, [])
+        turn_dir = self.next_feedback(root)
+        self.assertEqual(turn_dir.name, '0002')
+        inv = json.loads((turn_dir / 'invocation.json').read_text())
+        self.assertEqual(inv['turn_kind'], 'feedback')
+        self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 1)
+
+    def test_recorded_failure_makes_isolation_false_even_after_a_good_turn(self):
+        root, dest = self.arm3_run()
+        attempt_turn(root, self.RUN, resume=True, kind='feedback', selftest_report=SELFTEST_FAILED)
+        self.next_feedback(root)
+        folder = write_record(root, self.RUN, 3)
+        run = self.fields(root, self.RUN, folder, preset=dict(isolation_verified=True))
+        self.assertIs(run['isolation_verified'], False)
 
 
 class OneFinishPerRun(FinishFixture):
