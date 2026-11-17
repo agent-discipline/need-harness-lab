@@ -671,9 +671,9 @@ class EvaluationCostLedgerTest(unittest.TestCase):
                                  '--run-id', 'claude-arm1-core01', '--run-id', 'claude-arm2-core01', '--includes-judging-adapter')
             self.assertEqual(code, 0, err)
             before = ledger.read_bytes()
-            code, err = self.cli(ledger, '--role', 'judging-adapter', '--session', 'agent-2', '--model', 'claude-opus-5-5',
-                                 '--total-tokens', '40', '--source', 'completion notice total only', '--run-id', 'claude-pilot-01',
-                                 '--cost-usd', '0.2')
+            code, err = self.cli(ledger, '--role', 'judging-adapter', '--session', 'agent-2', '--item', 'pilot-01 adapter',
+                                 '--model', 'claude-opus-5-5', '--total-tokens', '40', '--source', 'completion notice total only',
+                                 '--run-id', 'claude-pilot-01', '--cost-usd', '0.2')
             self.assertEqual(code, 0, err)
             self.assertTrue(ledger.read_bytes().startswith(before))          # appended, earlier line untouched
             first, second = self.lines(ledger)
@@ -700,8 +700,8 @@ class EvaluationCostLedgerTest(unittest.TestCase):
                         ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'a/b'],
                         ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
                          '--run-id', 'r'],
-                        ['--role', 'judging-adapter', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x',
-                         '--run-id', 'r', '--includes-judging-adapter'],
+                        ['--role', 'judging-adapter', '--session', 't', '--item', 'i', '--model', 'm', '--total-tokens', '1',
+                         '--source', 'x', '--run-id', 'r', '--includes-judging-adapter'],
                         ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
                          '--cost-usd', 'nan'],
                         ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
@@ -724,8 +724,12 @@ class EvaluationCostLedgerTest(unittest.TestCase):
             code, err = self.cli(ledger, *adapter, '--item', 'arm1-core01 adapter')   # exact duplicate
             self.assertNotEqual(code, 0)
             self.assertIn('already recorded', err)
-            for bad in (['--item', ' '],):
-                self.assertNotEqual(self.cli(ledger, *adapter, *bad)[0], 0)
+            for bad in (['--item', ' '], ['--item', ''], []):                     # an adapter line needs its job label
+                code, err = self.cli(ledger, *adapter, *bad)
+                self.assertNotEqual(code, 0, bad)
+                self.assertIn('--item', err)
+            with self.assertRaises(ValueError):                                  # the same rule without the CLI
+                record_evaluation_cost.entry('judging-adapter', 'agent-8', 'm', None, 1, 'x', ['claude-arm1-core01'])
             conductor = ['--role', 'conductor', '--session', 'agent-7', '--model', 'claude-fable-5-2', '--total-tokens', '5',
                          '--source', 'completion notice', '--run-id', 'claude-arm1-core01']
             self.assertNotEqual(self.cli(ledger, *conductor, '--item', 'x')[0], 0)  # conductor: one per session, no item

@@ -5,8 +5,8 @@ ledger docs/results/evaluation-cost.jsonl.
 Decision 2026-11-17 (spec 10.4): evaluation cost belongs to the experiment, not to a run. It never enters a run ledger,
 a run cap or an arm's cost. One line = one conductor session or one adapter-writing job; the main session records it
 from the agent's completion notice usage. A session that wrote several adapters records one judging-adapter line per
-job, each with its own --item label (the same role, session and item is never recorded twice). A conductor line stays
-one per session and takes no --item. A conductor that wrote the adapter itself records one conductor line marked
+job, each with its own --item label — required for every judging-adapter line (the same role, session and item is
+never recorded twice). A conductor line stays one per session and takes no --item. A conductor that wrote the adapter itself records one conductor line marked
 --includes-judging-adapter and no separate adapter line. The ledger is append-only; a line is never rewritten.
 Tokens are either the four request counters or, when the source reports only a total, --total-tokens alone.
 """
@@ -59,11 +59,11 @@ def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, in
     for name, value in (('session', session), ('model', model), ('source', source)):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(name + ' is required')
-    if item is not None:
-        if role != 'judging-adapter':
-            raise ValueError('--item labels a judging-adapter job; a conductor line is one per session')
+    if role == 'judging-adapter':
         if not isinstance(item, str) or not item.strip():
-            raise ValueError('--item must not be empty')
+            raise ValueError('a judging-adapter line needs --item (label of the adapter-writing job, not empty)')
+    elif item is not None:
+        raise ValueError('--item labels a judging-adapter job; a conductor line is one per session')
     if not run_ids:
         raise ValueError('name every run id this session or adapter covered (--run-id, repeat)')
     for run_id in run_ids:
@@ -112,8 +112,8 @@ def main():
     p.add_argument('--ledger', type=Path, default=default_ledger())
     p.add_argument('--role', required=True, choices=ROLES)
     p.add_argument('--session', required=True, help='conductor session / adapter authoring agent identifier')
-    p.add_argument('--item', help='judging-adapter only: label of this adapter-writing job (e.g. the run id or adapter '
-                   'name) so one session can record one line per job')
+    p.add_argument('--item', help='judging-adapter: required label of this adapter-writing job (e.g. the run id or '
+                   'adapter name) so one session records one line per job; refused for conductor')
     p.add_argument('--model', required=True, help='model id the source reports (not the requested alias)')
     for key, flag in SPLIT.items():
         p.add_argument(flag, dest=key, type=non_negative)
