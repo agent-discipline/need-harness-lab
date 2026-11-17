@@ -120,9 +120,11 @@ class RunnerTest(unittest.TestCase):
             (root / '3/core1').mkdir(parents=True)
             (root / '3/core1/starter.kt').write_text('starter')
             harness = root / 'harness-source'
-            for rel in ('src', 'hooks', 'playbooks', 'templates'):
+            for rel in ('src', 'hooks', 'playbooks', 'templates', 'agents'):
                 (harness / rel).mkdir(parents=True)
             (harness / 'src/core.md').write_text('core')
+            (harness / 'HISTORY.md').write_text('history')
+            (harness / 'agents/explorer.md').write_text('explorer')
             (harness / 'hooks/gate-guard.sh').write_text('#!/bin/bash')
             (harness / 'playbooks/review.md').write_text('review')
             (harness / 'templates/log.md').write_text('log')
@@ -143,6 +145,9 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue(c['reviewer_volume'].startswith('payment-claude-reviewer-'))
             self.assertNotIn('codex_volume', c)
             self.assertIn('core.md', c['harness_seed']['sources'])
+            flat = launch.expected_harness_hashes(c)
+            self.assertIn('agents/explorer.md', flat)                    # v4.3 subagent definition is seeded and hash-checked
+            self.assertIn('HISTORY.md', flat)
             self.assertIn('settings.json', c['harness_seed']['runner'])
             args2 = SimpleNamespace(runs=root / '.runs', run_id='d', arm=3, core=1, image='image', harness=None, network=None)
             with patch.object(launch, 'ROOT', root), self.assertRaises(ValueError):

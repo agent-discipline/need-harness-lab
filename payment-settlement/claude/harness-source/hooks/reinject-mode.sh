@@ -49,7 +49,7 @@ DEBT=$(state_get "$STATE" DEBT)
 
 case "$MODE" in
   lazy)
-    echo "[게이트] MODE=lazy (SPEC=${SPEC:-0}). 상태파일: $STATE (PENDING_GATE=${PENDING:-0}). 매 diff 이해 게이트 — before/after 스니펫 기록 → 사용자 주관식 설명 → 판정 워커 → 통과 시 set-state.sh gate-pass. (implementation-lazymode.md)"
+    echo "[게이트] MODE=lazy (SPEC=${SPEC:-0}). 상태파일: $STATE (PENDING_GATE=${PENDING:-0}). 매 diff 이해 게이트 — before/after 스니펫 기록 → 사용자 주관식 설명 → 사전 점검(실코드 대조·정답 비노출 힌트, 시도 미산정) → 판정 워커 → 통과 시 set-state.sh gate-pass. ★ 질문·재질문·힌트는 매번 자기완결 — 근거 코드를 파일:줄과 함께 그 메시지에 다시 붙인다(앞서 보였어도). (implementation-lazymode.md §1·§4)"
     ;;
   auto)
     echo "[게이트] MODE=auto (SPEC=${SPEC:-0}). 상태파일: $STATE. 명세 합의 후 자율 실행 — per-diff 게이트 없음. 검증·리뷰는 stakes 비례(자율 ≠ 검증 생략)."

@@ -1,17 +1,22 @@
 {
-  "source": "~/.claude/settings.json (live deployment of claude-code-harness 1754f16)",
-  "source_sha256": "82d705ef6c3afec0837546b0e600fe3cda1653d85e907e4e897e781b74c426a1",
+  "source": "~/.claude/settings.json (live deployment of harness v4.3, commit 7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3)",
+  "source_sha256": "dcb2f5fcf015e7c425709c770b7fb9b4d4b2cf3e90453ceb8e6066f6420484dc",
   "extracted_at": "2026-09-23T06:14:24.395608+00:00",
+  "reverified_at": "2026-11-17",
+  "reverification": "hooks section of the live settings, after removing the orca entries, is identical (jq -S) to runner/harness-settings.json; the file is therefore unchanged for v4.3. Live ~/.claude/{core.md,hooks,playbooks,templates,agents} equal the 7b0ef7b tree and live ~/.claude/CLAUDE.md equals runner/harness-bootstrap-CLAUDE.md.",
+  "previous_source": "live deployment of claude-code-harness 1754f16, source_sha256 82d705ef6c3afec0837546b0e600fe3cda1653d85e907e4e897e781b74c426a1",
   "kept": "hooks section only",
   "removed_top_level_keys": [
+    "autoMode",
     "cleanupPeriodDays",
-    "permissions",
-    "model",
-    "statusLine",
     "enabledPlugins",
-    "tui",
-    "skipWorkflowUsageWarning"
+    "model",
+    "permissions",
+    "remote",
+    "skipWorkflowUsageWarning",
+    "statusLine",
+    "tui"
   ],
   "removed_hook_commands": "10 orca agent-hook entries (host-only observability, not part of the harness)",
-  "note": "harness-source/settings.json (repo root copy) references hooks that do not exist (scope-guard, template-guard); the live wiring is the reference. Container model pin is set per arm by the runner, not by settings (live pin claude-fable-5-1[1m] is NOT carried: context_variant=default)."
+  "note": "harness-source/settings.json (repo root copy) references hooks that do not exist (scope-guard, template-guard); the live wiring is the reference. Container model pin is set per arm by the runner, not by settings (live model key 'fable' is NOT carried: context_variant=default)."
 }

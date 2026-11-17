@@ -1,6 +1,6 @@
 # playbook: 리뷰 (中=듀얼 1패스 / 높음=병렬 듀얼 리뷰 루프)
 
-> 트리거: **中·높음**의 리뷰 시점(페이즈 구현 완료·커밋 후). 개발 단계의 설계 자문은 §3 렌즈만 참조. **낮음(셀프체크)만 이 문서를 읽지 않는다.** 中 = §1의 **듀얼 1패스**(⓪~④ + post-fix 타깃 재점검, ⑤ 반복 없음) + §2·§3 / 높음 = §1 전체(반복 루프 max3) + 설계 선검증·blind 테스트 워커. §2 대칭 부담·ledger는 中·높음 공통.
+> 트리거: **中·높음**의 리뷰 시점(페이즈 구현 완료·커밋 후). 개발 단계의 설계 자문은 §3 렌즈만 참조. **낮음(셀프체크)만 이 문서를 읽지 않는다.** 中 = §1의 **듀얼 1패스**(⓪~④ + post-fix 타깃 재점검, ⑤ 반복 없음) + §2·§3 / 높음 = §1 전체(반복 루프 max3) + 설계 선검증(조건·생략 기록 = core §4 강도표)·blind 테스트 워커. §2 대칭 부담·ledger는 中·높음 공통.
 > ★ **산출물 유형 분기 (2026-08-06 — core §4의 정의를 따른다)**: 산출물이 **설계 문서**면 中·높음 공통으로 **中 변형(⓪~④ + post-fix 타깃 재점검 1회)** 이 상한(⑤ 반복 없음 — 높음의 3루프는 실행물 전용, blind 테스트 워커는 비대상). 리뷰어 프롬프트에 명시: **"동기화·표기·색인·버전 정합은 지적 대상이 아니다 — 구조·불변식·판정 충돌만"**(그 유형의 **사냥을 리뷰가 하지 않는다**는 뜻이다 — 검산 도구·구현 소관. 이미 발견된 결함의 수정을 막는 규칙이 아니다. 실측: 문서 리뷰 지적의 ~60%가 이 유형에 소모됐다).
 > 원리: 같은 모델 여러 개는 편향을 공유한다 — 독립 신호는 다른 모델(codex)이 제공하고, 최종 판정은 투표가 아니라 근거 품질 재평가다.
 
@@ -11,14 +11,14 @@
 → ④ 수정 → 테스트 → ⑤ 재리뷰(①로) … 종료 조건 충족 시 탈출, 최대 3루프
 ```
 
-- **⓪ review packet** (2026-08-27 실측 — diff-only packet이 untracked 누락 오탐 11작업·Opus 단독 채택 37%의 원인): 페이즈 시작 base SHA와 **실제 `$OUT`·미러 경로**를 작업 폴더 log.md에 고정(임시 경로라 사후 재현의 유일한 단서). packet = ① **누적 diff** — base 커밋 vs **index+작업트리**(staged·unstaged 모두). tracked 대용량 binary는 `git diff --stat`으로 크기를 먼저 보고 `-- ':(exclude)<path>'`로 빼되 목록에 표기한다. ② **untracked 정규 파일 전문**(index 무변경 — `git add -N` 금지). 항목마다 `### untracked: <경로> (<크기>)` 헤더를 먼저 적어 **빈 파일도 가시화**한다. symlink는 target 1줄, FIFO·socket·device는 타입 1줄, binary는 `file` 타입 1줄. **untracked 한정으로 파일당 1MB·총 5MB 상한** — 초과분은 *절단하지 않고* 목록만 넣어 `packet truncated`로 표시하고 사용자에게 보고한다. **모든 작업 ledger(`docs/plans/**/log.md`)와 `docs/measurement-log.md`를 제외**한다(리뷰 ledger·메인 판단이 리뷰어에게 새는 경로 — 현재 작업 폴더만이 아니다). ③ **spec 원문**(⓪′) ④ **연관 파일 목록** — 변경 hunk의 심볼(함수·타입·설정키)로 돌린 `git grep`의 **명령 원문과 원시 결과를 그대로** 붙인다. 이건 **탐색 힌트지 증거 범위가 아니다** — 메인이 해석·선별·요약을 덧붙이지 않는다(사전 판단 유입 방지). ⑤ 이번 루프 수정 diff는 참고로만 별도 표기(마지막 수정만 보면 전체 일관성 문제를 놓친다) ⑥ **read-only 미러**(①) — tracked 정규 파일 + ②에서 본문을 붙인 untracked만, **모든 ledger·measurement-log 제외**, packet 산출물은 미러 안 `_packet/`에 둔다. **리뷰어에게 주는 것은 `$PKT`(= 미러의 `_packet/`)뿐이고 `$RES`(codex 출력·워커 회수물·로그)는 주지 않는다.** **보안 스캔(§5①)은 packet 전체 + 미러 전체**에 적용하고, 통과한 동일 입력을 양쪽에 제공 — 비대칭 입력이 불가피하면 결과 신뢰도에 명시.
+- **⓪ review packet** (2026-08-27 실측 — diff-only packet이 untracked 누락 오탐 11작업·Opus 단독 채택 37%의 원인): 페이즈 시작 base SHA와 **실제 `$OUT`·미러 경로**를 작업 폴더 log.md에 고정(임시 경로라 사후 재현의 유일한 단서). packet = ① **누적 diff** — base 커밋 vs **index+작업트리**(staged·unstaged 모두). tracked 대용량 binary는 `git diff --stat`으로 크기를 먼저 보고 `-- ':(exclude)<path>'`로 빼되 목록에 표기한다. ② **untracked 정규 파일 전문**(index 무변경 — `git add -N` 금지). 항목마다 `### untracked: <경로> (<크기>)` 헤더를 먼저 적어 **빈 파일도 가시화**한다. symlink는 target 1줄, FIFO·socket·device는 타입 1줄, binary는 `file` 타입 1줄. **untracked 한정으로 파일당 1MB·총 5MB 상한** — 초과분은 *절단하지 않고* 목록만 넣어 `packet truncated`로 표시하고 사용자에게 보고한다. **모든 작업 ledger(`docs/plans/**/log.md`)·`docs/measurement-log.md`·`docs/plans/NEXT.md`(다음 작업에 대한 메인의 사전 판단)를 제외**한다(리뷰 ledger·메인 판단이 리뷰어에게 새는 경로 — 현재 작업 폴더만이 아니다). ③ **spec 원문**(⓪′) ④ **연관 파일 목록** — 변경 hunk의 심볼(함수·타입·설정키)로 돌린 `git grep`의 **명령 원문과 원시 결과를 그대로** 붙인다. 이건 **탐색 힌트지 증거 범위가 아니다** — 메인이 해석·선별·요약을 덧붙이지 않는다(사전 판단 유입 방지). ⑤ 이번 루프 수정 diff는 참고로만 별도 표기(마지막 수정만 보면 전체 일관성 문제를 놓친다) ⑥ **read-only 미러**(①) — tracked 정규 파일 + ②에서 본문을 붙인 untracked만, **모든 ledger·measurement-log 제외**, packet 산출물은 미러 안 `_packet/`에 둔다. **리뷰어에게 주는 것은 `$PKT`(= 미러의 `_packet/`)뿐이고 `$RES`(codex 출력·워커 회수물·로그)는 주지 않는다.** **보안 스캔(§5①)은 packet 전체 + 미러 전체**에 적용하고, 통과한 동일 입력을 양쪽에 제공 — 비대칭 입력이 불가피하면 결과 신뢰도에 명시.
 
 ```bash
 # repo 루트에서 실행(하위 cwd면 untracked 수집이 잘린다). 함수는 현재 셸에서 돌아 실패해도 셸이 죽지 않고 $OUT/$PKT/$RES/$mirror가 남는다
 set -o pipefail; OUT=$(mktemp -d); PKT="$OUT/packet"; RES="$OUT/results"; mkdir -p "$PKT" "$RES"
 #   OUT·mirror는 반드시 repo 밖 — repo 안에 두면 packet 산출물이 untracked로 잡혀 자기 자신을 읽는다
 BASE=<페이즈 시작 SHA>; TASK=docs/plans/<날짜>/<작업>; MAX_F=1048576; MAX_T=5242880   # 상한은 untracked 한정
-EXCLP=(':(exclude,glob)docs/plans/**/log.md' ':(exclude)docs/measurement-log.md')   # 모든 작업 ledger·측정로그 제외
+EXCLP=(':(exclude,glob)docs/plans/**/log.md' ':(exclude)docs/measurement-log.md' ':(exclude)docs/plans/NEXT.md')   # 모든 작업 ledger·측정로그·NEXT(메인 사전 판단) 제외
 mkpacket() {
   [ -f "$TASK/requirement-spec.md" ] && install -m 0444 "$TASK/requirement-spec.md" "$PKT/spec.md" \
     || { echo "spec 원문 없음: $TASK/requirement-spec.md"; return 1; }   # ③ spec 원문 — 판정 기준(없으면 packet 불성립)
@@ -27,7 +27,7 @@ mkpacket() {
   : > "$OUT/untracked-included.txt"
   git ls-files --others --exclude-standard -z -- . "${EXCLP[@]}" |   # ② untracked (index 무변경)
     { tot=0; while IFS= read -r -d '' f; do
-        case "$f" in docs/plans/*/*/log.md|docs/measurement-log.md) continue;; esac   # ledger·메인 판단 차단(이중 가드)
+        case "$f" in docs/plans/*/*/log.md|docs/measurement-log.md|docs/plans/NEXT.md) continue;; esac   # ledger·메인 판단 차단(이중 가드)
         sz=$(stat -c %s "$f" 2>/dev/null || echo 0); echo "### untracked: $f ($sz B)"
         if   [ -L "$f" ];   then echo "symlink: $f -> $(readlink "$f")"
         elif [ ! -f "$f" ]; then echo "special: $f ($(stat -c %F "$f"))"
@@ -89,6 +89,7 @@ set +o pipefail
 | **완전성·운영성 (diff에 *없는 것*)** | CRUD·기능에 빠진 경로가 없나 — 생성만 있고 조회/수정/복구가 없나 · **public/필터 경로(useYn='Y' 등)가 관리자를 가두지 않나** — 숨김·비활성·소프트삭제 데이터의 admin 조회·복구 경로가 있나 · 운영자가 배포 후 상태를 관찰·되돌릴 수 있나 · 통합 단절(이 변경이 옮긴 소스를 다른 경로가 옛 소스로 계속 읽나) |
 | **통합·부작용 (이 변경 밖)** | 이 변경이 공유 자원·라이브 데이터·다른 경로에 미치는 부작용 — 공유 테이블 컬럼 무단 덮어쓰기, 식별자/소스 전환이 미처리 경로(비번재설정·부트스트랩·배치)와 단절되나 |
 | **설계 품질·취향** | 응집·경계·이름·냄새가 좋은 설계인가 — DDD 용어 일관성·도메인 경계(기술 트랜잭션 ≠ Aggregate) · 이름붙은 코드냄새 · 슬롭↔오버킬 사이에서 판단을 commit했나. 냄새 목록·8앵커·슬롭↔오버킬 예시 카탈로그: `design-taste.md`. **순수 취향·선호는 finding 아님**(§2) — 단정 가능한 냄새·불변식·경계 위반만 |
+| **과잉 구현 (Ponytail — core §4 사다리)** | diff가 더 짧아질 수 있나 — `delete:` 죽은 코드·추측성 기능 · `stdlib:`/`native:` 표준·플랫폼이 이미 제공 · `yagni:` 구현 1개인 추상화·아무도 안 바꾸는 config · `shrink:` 같은 로직 더 짧게(finding마다 대체안 명시). **core §4 게으름 비적용 항목은 이 렌즈 대상이 아니다**(목록 정본 = core §4 — 여기서 재열거하지 않는다). §2 자격조건 그대로 — 유지보수·정확성 리스크 없는 `shrink:`는 finding이 아니라 open question |
 
 ## 4. 자원·속도 체크리스트 (메서드 내부 렌즈 — 프로파일링 없이 diff만으로 판단)
 

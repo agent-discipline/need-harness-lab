@@ -4,7 +4,7 @@ f211184fe40bf182b2453af9fc525cf43388617c551186c7e0bb75509f49e112  cases/codex-sc
 dbb769f9ba80c4318fa9b4278328373249d990124dc18f87834a19d34791fe04  cases/detect-layer.sh
 e7182d053acbe1edb76e96824d0a21fb027c0c63d527598b1862091e866c9042  cases/gate-guard.sh
 b8f9275979d0bddaad36acc8ccc418fb5c97ce48c5520982edb82d6ef167466b  cases/git-guard.sh
-b5946a1adafe6e0d323cba97f6aec98867a52c54ceffa0d0c9f70e2a0c4873fd  cases/misc-guards.sh
+1988fc683309c8495c1500663ba1a584ac73cdbc5a876d67fdf7ae9b4796fde5  cases/misc-guards.sh
 a300b3e17b2235035e27c1c9f6b0baa59d184dafd67d8951ea7967b4cd0d0939  cases/sidecar-docsroot.sh
 90897bfb9e7914f528fb039a2d6a31d2263a7e03faa0498dd8fbb25bbd4c52a3  cases/state-schema.sh
 6a778fcb02db6ec70cf1b1d559ac8e28463c93d1339d66be2f85698ac26f6565  lib.sh
@@ -194,6 +194,9 @@ a300b3e17b2235035e27c1c9f6b0baa59d184dafd67d8951ea7967b4cd0d0939  cases/sidecar-
 # test: test_rm_04
 # test: test_rm_05
 # test: test_rm_06
+# test: test_rm_07
+# test: test_rm_08
+# test: test_rm_09
 # test: test_sd_01
 # test: test_sd_02
 # test: test_sd_03

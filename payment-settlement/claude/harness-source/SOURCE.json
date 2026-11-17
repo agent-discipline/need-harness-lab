@@ -1,5 +1,18 @@
 {
-  "path": "/home/jun/project/claude-code-harness",
-  "commit": "1754f16e0e4f54ad1a81d05beff15b895a26a1d5",
-  "purpose": "read-only experiment reference; not installed as Codex hooks"
+  "path": "/home/jun/project/agent-discipline/harness",
+  "commit": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
+  "version": "v4.3",
+  "paths": [
+    "src",
+    "hooks",
+    "playbooks",
+    "templates",
+    "agents",
+    "HISTORY.md",
+    "README.md",
+    "CLAUDE.md",
+    "settings.json"
+  ],
+  "method": "git archive of the commit (working tree not used)",
+  "purpose": "frozen harness for arm 3; runner seeds core.md, HISTORY.md, hooks, playbooks, templates, agents"
 }

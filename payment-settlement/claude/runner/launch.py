@@ -33,7 +33,9 @@ EXPECTED_UID = 1000                                   # image USER node; workspa
 # the provider-reported model per request is recorded separately (record_models / transcript_models).
 # Arms 1/2 have no subagents.
 MODELS = {1: ('claude-opus-5-5', None), 2: ('claude-opus-5-5', None), 3: ('claude-fable-5-2', 'claude-opus-5-5')}
-HARNESS_SEED = [('src/core.md', 'core.md'), ('hooks', 'hooks'), ('playbooks', 'playbooks'), ('templates', 'templates')]
+# = the deploy manifest of the harness (hooks/deploy.sh v4.3: core.md HISTORY.md hooks playbooks templates agents)
+HARNESS_SEED = [('src/core.md', 'core.md'), ('HISTORY.md', 'HISTORY.md'), ('hooks', 'hooks'), ('playbooks', 'playbooks'),
+                ('templates', 'templates'), ('agents', 'agents')]
 RUNNER_SEED = [('harness-bootstrap-CLAUDE.md', 'CLAUDE.md'), ('harness-settings.json', 'settings.json')]
 ROLES = ('pm', 'implementer', 'worker', 'reviewer')
 NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must never appear in arms 1/2 (asserted on the init event)
@@ -188,7 +190,7 @@ import json,os
 exp=set(json.load(open('/expected/harness-hashes.json')))
 root=os.environ['CLAUDE_CONFIG_DIR']
 extra=[]
-for sub in ('hooks','playbooks','templates'):
+for sub in ('hooks','playbooks','templates','agents'):
     for d,_,files in os.walk(os.path.join(root,sub)):
         for f in files:
             rel=os.path.relpath(os.path.join(d,f),root)
