@@ -70,6 +70,38 @@ class PreflightStageTest(unittest.TestCase):
             preflight.blockers(base, 'anything')
         self.assertTrue(start_cycle.gate(dict(ready(), pilot_passed=False), 1))   # cycles always use the full gate
 
+    def cli(self, tmp, readiness, *argv):
+        path = Path(tmp) / 'readiness.json'
+        write(path, readiness)
+        out = io.StringIO()
+        with patch.object(sys, 'argv', ['preflight.py', *[str(path) if a == 'R' else a for a in argv]]), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                code = preflight.main()
+            except SystemExit as exc:
+                code = exc.code
+        return code, (json.loads(out.getvalue()) if out.getvalue() else None)
+
+    def test_pilot_gate_command_merges_readiness_with_the_run_records(self):
+        # readiness carries actual_models (plural) and no arm: the command merges it with each arm's run record
+        with tempfile.TemporaryDirectory() as tmp:
+            code, report = self.cli(tmp, ready(pilot_passed=False), '--stage', 'pilot', '--readiness', 'R', '--core', '1')
+            self.assertEqual((code, report['blockers']), (0, []))
+            code, report = self.cli(tmp, ready(pilot_passed=False, harness_adapter_verified=False),
+                                    '--stage', 'pilot', '--readiness', 'R', '--core', '1')
+            self.assertEqual(code, 2)
+            self.assertEqual(sorted(report['blockers']), ['arm %d: harness_adapter_verified: must be boolean true (got False)' % a
+                                                          for a in (1, 2, 3)])
+            code, report = self.cli(tmp, ready(pilot_passed=False, actual_models={'1': 'claude-opus-5-5'}),
+                                    '--stage', 'pilot', '--readiness', 'R', '--core', '1', '--arm', '3')
+            self.assertEqual((code, report['blockers']), (2, ['arm 3: actual_model: missing/unverified']))
+            code, _ = self.cli(tmp, ready(pilot_passed=False), '--readiness', 'R', '--core', '1')    # default stage = cycle
+            self.assertEqual(code, 2)
+            self.assertEqual(start_cycle.gate(ready(pilot_passed=False), 1),
+                             preflight.readiness_blockers(ready(pilot_passed=False), 1, 'cycle'))   # one merge for both gates
+            for argv in (('--readiness', 'R'), ('R', '--readiness', 'R', '--core', '1'), (), ('R', '--core', '1')):
+                self.assertEqual(self.cli(tmp, ready(), *argv)[0], 2, argv)                         # usage errors
+
 
 class FreezeTest(unittest.TestCase):
     def smoke(self, runs, run_id, arm, roles, selftest=None, usage_complete=True, credentials=False):

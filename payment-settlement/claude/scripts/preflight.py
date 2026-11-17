@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
+ROOT = Path(__file__).resolve().parents[1]      # payment-settlement/claude
+sys.path.insert(0, str(ROOT / "runner"))
 from launch import USER_PROXY_MODEL            # agreed protocol constant (claude-opus-5-5)
 
 REQUIRED = ("actual_model", "baseline_sha", "contract_sha256", "image_digests")
@@ -56,13 +57,43 @@ def blockers(manifest, stage="cycle"):
         failures.append("subscription runs cannot claim a billed cost")
     return failures
 
+def merge(run, ready, arm):
+    """The gate input of one arm: its run record (run.json from prepare.py: arm, models, provider) with the frozen
+    readiness over it; the model the freeze observed for the arm becomes actual_model."""
+    merged = dict(run, **{k: v for k, v in ready.items() if k not in ("status", "run_id", "arm", "core", "evidence")})
+    merged["actual_model"] = (ready.get("actual_models") or {}).get(str(arm))
+    return merged
+
+def readiness_blockers(ready, core, stage, arms=(1, 2, 3), root=None):
+    """Blockers of each arm's record of cycle `core` merged with readiness, prefixed with the arm. Used by the pilot gate
+    (this script, --readiness) and the cycle gate (start_cycle.gate)."""
+    failures = []
+    for arm in arms:
+        record = Path(root or ROOT) / "docs/experiments" / str(arm) / f"core{core}" / "run.json"
+        failures += ["arm %d: %s" % (arm, f) for f in blockers(merge(json.loads(record.read_text()), ready, arm), stage)]
+    return failures
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("manifest", type=Path, nargs="?", help="one ledger already merged with readiness")
+    parser.add_argument("--readiness", type=Path, help="instead of a merged ledger: the frozen readiness.json, merged here "
+                        "with the run record docs/experiments/<arm>/core<N>/run.json of each --arm")
+    parser.add_argument("--core", type=int, choices=range(1, 11), help="with --readiness: the core whose run records are used")
+    parser.add_argument("--arm", type=int, choices=(1, 2, 3), action="append",
+                        help="with --readiness: arm to check (repeat; default all three)")
     parser.add_argument("--stage", choices=tuple(STAGE_WAIVED), default="cycle",
                         help="pilot: before the pilot run (pilot_passed not yet possible); cycle: before measured cycles")
     args = parser.parse_args()
-    failed = blockers(json.loads(args.manifest.read_text()), args.stage)
+    if (args.manifest is None) == (args.readiness is None):
+        parser.error("give either a merged ledger or --readiness")
+    if args.readiness is not None:
+        if args.core is None:
+            parser.error("--readiness requires --core")
+        failed = readiness_blockers(json.loads(args.readiness.read_text()), args.core, args.stage, tuple(args.arm or (1, 2, 3)))
+    else:
+        if args.core is not None or args.arm:
+            parser.error("--core/--arm apply only with --readiness")
+        failed = blockers(json.loads(args.manifest.read_text()), args.stage)
     print(json.dumps({"stage": args.stage, "ready": not failed, "blockers": failed}, ensure_ascii=False, indent=2))
     return 2 if failed else 0
 

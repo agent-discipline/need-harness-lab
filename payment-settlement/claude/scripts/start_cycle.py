@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import lab
 import freeze_readiness
 import hashlib
-from preflight import blockers
+from preflight import readiness_blockers
 import commit_run
 
 
@@ -32,15 +32,8 @@ def run_plan(cycle, arm):
 
 
 def gate(ready, cycle):
-    """Per-arm preflight on the ledger merged with readiness (the arm's observed model becomes actual_model)."""
-    failures = []
-    for arm in (1, 2, 3):
-        records = ROOT / 'docs/experiments' / str(arm) / f'core{cycle}'
-        run = json.loads((records / 'run.json').read_text())
-        merged = dict(run, **{k: v for k, v in ready.items() if k not in ('status', 'run_id', 'arm', 'core', 'evidence')})
-        merged['actual_model'] = (ready.get('actual_models') or {}).get(str(arm))
-        failures += ['arm %d: %s' % (arm, f) for f in blockers(merged)]
-    return failures
+    """Per-arm preflight (cycle stage) on each arm's record merged with readiness (preflight.merge)."""
+    return readiness_blockers(ready, cycle, 'cycle', root=ROOT)
 
 
 def contract_drift(ready, frozen_list=None):
