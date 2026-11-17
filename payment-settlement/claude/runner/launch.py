@@ -37,9 +37,11 @@ HARNESS_SEED = [('src/core.md', 'core.md'), ('hooks', 'hooks'), ('playbooks', 'p
 RUNNER_SEED = [('harness-bootstrap-CLAUDE.md', 'CLAUDE.md'), ('harness-settings.json', 'settings.json')]
 ROLES = ('pm', 'implementer', 'worker', 'reviewer')
 NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must never appear in arms 1/2 (asserted on the init event)
-# Arms 1/2 run with an ALLOW-LIST of built-in tools (Codex parity: shell + file tools; no agents, skills, schedulers,
-# messaging, worktrees). Web tools stay listed until decision D5 resolves; their use is recorded per turn (web_requests).
-ALLOWED_TOOLS_ARM12 = ('Bash', 'Read', 'Edit', 'Write', 'NotebookEdit', 'Glob', 'Grep', 'ToolSearch', 'WebSearch', 'WebFetch')
+# Arms 1/2 run with an ALLOW-LIST of built-in tools (shell + file tools; no agents, skills, schedulers, messaging,
+# worktrees). Web tools (decision 2026-11-17): allowed in all three arms and recorded (result.web_requests,
+# manifest observed_tools); the selftest asserts they are on every arm's observed tool surface.
+WEB_TOOLS = ('WebSearch', 'WebFetch')
+ALLOWED_TOOLS_ARM12 = ('Bash', 'Read', 'Edit', 'Write', 'NotebookEdit', 'Glob', 'Grep', 'ToolSearch') + WEB_TOOLS
 HELPER_TIMEOUT = 900                                  # seconds for any no-cost helper container (selftest, seeding, listing)
 MIN_HOOKS = 8                                         # hooks wired in runner/harness-settings.json (fail if fewer are extracted)
 
@@ -133,6 +135,8 @@ for l in open('/tmp/cli.out'):
 ")
 report cli_tools "$TOOLS"
 if [ -z "$TOOLS" ]; then report cli_init_missing 1; fail=1; fi
+# web tools are part of every arm's tool surface (same allowance in all three arms)
+for t in $WEB_TOOLS; do case ",$TOOLS," in *",$t,"*) ;; *) report web_tool_missing "$t"; fail=1;; esac; done
 if [ "$HARNESS" = 0 ]; then
   for t in $DENIED_TOOLS; do case ",$TOOLS," in *",$t,"*) report denied_tool_present "$t"; fail=1;; esac; done
   # observed surface must be a subset of the allow-list (a tool nobody enumerated is a failure, not a silent leak)
@@ -247,9 +251,9 @@ def selftest(manifest):
     mounts.append('type=bind,src=%s,dst=/expected/harness-hashes.json,readonly' % expected.name)
     settings_sha = hashlib.sha256((ROOT / 'runner/harness-settings.json').read_bytes()).hexdigest()
     extra = '' if manifest.get('requested_worker_model') else '--tools ' + ','.join(ALLOWED_TOOLS_ARM12)
-    script = 'export MODEL=%s HARNESS=%d SETTINGS_SHA=%s MIN_HOOKS=%d DENIED_TOOLS="%s" ALLOWED_TOOLS="%s" EXTRA_ARGS="%s"\n' % (
+    script = 'export MODEL=%s HARNESS=%d SETTINGS_SHA=%s MIN_HOOKS=%d DENIED_TOOLS="%s" ALLOWED_TOOLS="%s" WEB_TOOLS="%s" EXTRA_ARGS="%s"\n' % (
         manifest['requested_model'], 1 if harness else 0, settings_sha, MIN_HOOKS, ' '.join(NO_SUBAGENT_TOOLS),
-        ','.join(ALLOWED_TOOLS_ARM12), extra) + SELFTEST
+        ','.join(ALLOWED_TOOLS_ARM12), ' '.join(WEB_TOOLS), extra) + SELFTEST
     try:
         rc, out, err = helper(manifest, script, mounts)
     finally:
@@ -258,7 +262,7 @@ def selftest(manifest):
     for line in out.splitlines():
         if '=' in line:
             key, value = line.split('=', 1)
-            if key in ('hook_missing', 'denied_tool_present', 'tool_outside_allowlist'):
+            if key in ('hook_missing', 'denied_tool_present', 'tool_outside_allowlist', 'web_tool_missing'):
                 report.setdefault(key, []).append(value)
             else:
                 report.setdefault(key, value)

@@ -539,6 +539,21 @@ class RunnerTest(unittest.TestCase):
         with patch.object(launch, 'helper', return_value=(0, 'f ./.claude.json\nf ./.credentials.json\n', '')):
             self.assertTrue(launch.volume_listing(manifest())['credentials_file_in_volume'])
 
+    def test_selftest_requires_web_tools_on_every_arm(self):
+        for arm in (1, 2, 3):
+            with tempfile.TemporaryDirectory() as tmp:
+                captured = {}
+                def fake_helper(m, script, mounts, network_none=True):
+                    captured['script'] = script
+                    return 0, 'cli_tools=Bash,Read\nweb_tool_missing=WebSearch\nweb_tool_missing=WebFetch\nselftest_failed=1\n', ''
+                with patch.object(launch, 'helper', side_effect=fake_helper):
+                    report = launch.selftest(manifest(arm, workspace=str(Path(tmp) / 'runs/r/workspace')))
+                self.assertIn('WEB_TOOLS="WebSearch WebFetch"', captured['script'])
+                self.assertIn('web_tool_missing', captured['script'])
+                self.assertEqual(report['web_tool_missing'], ['WebSearch', 'WebFetch'])
+                self.assertFalse(report['passed'])
+        self.assertTrue(set(launch.WEB_TOOLS) <= set(launch.ALLOWED_TOOLS_ARM12))
+
     def test_expected_harness_hashes_flatten(self):
         m = {'harness_seed': {'sources': {'core.md': {'core.md': 'a'}, 'hooks': {'gate-guard.sh': 'b', 'tests/lib.sh': 'c'}},
                               'runner': {'CLAUDE.md': {'harness-bootstrap-CLAUDE.md': 'd'}, 'settings.json': {'harness-settings.json': 'e'}}}}

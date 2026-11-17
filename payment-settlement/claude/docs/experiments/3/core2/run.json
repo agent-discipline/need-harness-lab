@@ -39,6 +39,6 @@
   "acceptance_suite_verified": false,
   "pilot_passed": false,
   "observed_tools": null,
-  "web_tools": "enabled-recorded (D5 pending)",
+  "web_tools": "enabled-recorded (all arms, decided 2026-11-17)",
   "estimated_cost_usd": null
 }
