@@ -791,14 +791,18 @@ def reviewer_dir_names(name, output):
     arm 3 container and copying it succeeds whether or not the reviewer was ever called: a name missing from the copy
     is absent. The answer never depends on the wording of docker's error for a missing path (it differs between Docker
     versions). The copy is temporary and removed at once; it sits inside the turn folder so the secret scan covers any
-    leftover."""
+    leftover. Returns (names, docker rc, docker stderr, leftover): leftover is the copy's path relative to output when it
+    could not be removed (the caller records the turn incomplete), else None."""
     probe = Path(tempfile.mkdtemp(prefix='.reviewer-dir-', dir=output))
     try:
         copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/.', str(probe)], capture_output=True, check=False)
         names = sorted(p.name for p in probe.iterdir()) if copied.returncode == 0 else None
-        return names, copied.returncode, copied.stderr
     finally:
-        shutil.rmtree(probe, ignore_errors=True)
+        try:
+            shutil.rmtree(probe)
+        except OSError:
+            pass                                        # reported below through the path that is still there
+    return names, copied.returncode, copied.stderr, (str(probe.relative_to(output)) if probe.exists() else None)
 
 def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
     """Arm 3: copy the second reviewer's call log and transcripts out of the stopped container and account for every
@@ -812,9 +816,12 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
                            capture_output=True, check=False)
     copied = subprocess.run(['docker', 'cp', name + ':' + REVIEWER_DST + '/projects', str(output / 'reviewer-projects')],
                             capture_output=True, check=False)
-    names, dir_rc, dir_stderr = (None, None, b'')
+    names, dir_rc, dir_stderr, leftover = (None, None, b'', None)
     if calls.returncode != 0 or copied.returncode != 0:
-        names, dir_rc, dir_stderr = reviewer_dir_names(name, output)
+        names, dir_rc, dir_stderr, leftover = reviewer_dir_names(name, output)
+    if leftover:
+        incomplete.append({'reason': 'temporary copy of the reviewer directory could not be removed from the turn folder',
+                           'path': leftover})
     (output / 'reviewer-copy.stderr').write_bytes(calls.stderr + copied.stderr + dir_stderr)
     log_absent = calls.returncode != 0 and names is not None and 'reviewer-calls.log' not in names
     log_unknown = calls.returncode != 0 and not log_absent
@@ -855,7 +862,7 @@ def collect_reviewer(name, output, dest, seen, run_id, turn_id, arm):
                'calls_total': len(started), 'calls_this_turn': len(new_calls),
                'calls_finished_total': len(finished & set(started)), 'transcript_files': len(transcripts),
                'projects_rc': copied.returncode, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
-               'reviewer_dir_names': names, 'transcript_stats': stats,
+               'reviewer_dir_names': names, 'reviewer_dir_leftover': leftover, 'transcript_stats': stats,
                'event_count': len(events), 'incomplete': len(incomplete), **costs}
     return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
 

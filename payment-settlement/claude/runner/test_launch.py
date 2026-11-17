@@ -661,6 +661,18 @@ class RunnerTest(unittest.TestCase):
                     self.assertEqual(result['reviewer']['log_unknown'], rlog is None and not readable)
                     self.assertEqual(result['status'], 'ok')
                     self.assertFalse([p for p in out.iterdir() if p.name.startswith('.reviewer-dir-')])   # probe removed
+                    self.assertIsNone(result['reviewer']['reviewer_dir_leftover'])
+        # the temporary copy cannot be removed: never hidden — the turn is incomplete and names the leftover path
+        with tempfile.TemporaryDirectory() as tmp, patch.object(launch.shutil, 'rmtree', side_effect=OSError('busy')):
+            root = Path(tmp)
+            self.arm3_dest(root)
+            result, out = self.arm3_turn(root, False, pm, None, {})
+            leftover = result['reviewer']['reviewer_dir_leftover']
+            self.assertTrue(leftover and leftover.startswith('.reviewer-dir-') and (out / leftover).is_dir())
+            self.assertIn({'reason': 'temporary copy of the reviewer directory could not be removed from the turn folder',
+                           'path': leftover}, result['incomplete'])
+            self.assertFalse(result['usage_complete'])
+            self.assertTrue(result['reviewer_usage_pending'])
         # the "No such file" text no longer decides anything: a log the directory does hold is unknown, not absent
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
