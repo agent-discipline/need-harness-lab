@@ -32,6 +32,8 @@ python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt /tmp
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
 
+이미지: 동결 전(인증 스모크)에는 `--image`(기본 `payment-claude-runner:2.1.326` 태그)를 쓴다. `readiness.json`이 생긴 뒤의 `init`(파일럿·사이클)은 그 동결 digest만 쓴다 — `--image`를 생략하면 digest가 들어가고, 다른 값은 거부된다(바꾸려면 새 프로토콜 버전).
+
 `turn`은 Docker 컨테이너를 만들고 `claude -p --output-format stream-json`을 고정 session id로 실행한다(첫 턴 `--session-id`, 이후 `--resume`). `.runs/<run>/turns/NNNN/`에 prompt 원문·invocation·원시 stdout/stderr·마스킹된 inspect·transcript 사본(`projects/`)·`events.jsonl`·`events.role-*.jsonl`·`result.json`을 보존한다. 종료 후 run 디렉터리 전체를 토큰 값으로 스캔해 히트가 있으면 `SECRET-LEAK.txt`를 남기고 실패로 끝낸다(토큰 회전 필요).
 
 시행별 문서화는 Codex 판과 같다: `python3 payment-settlement/recording/record.py --run-dir payment-settlement/claude/docs/experiments/<arm>/core<N> ...`로 프롬프트 전문·응답·분석·증거를 원장에 추가한다. transcript를 직접 편집하지 않는다. `result.json`의 `usage_complete`, `incomplete`, `usage_cross_check`, `config_volume.credentials_file_in_volume`, `hook_selftest_before_call`을 분석에 인용한다.
@@ -100,4 +102,5 @@ run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ② `lau
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
 - [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴) → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3>`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 증거 파일에서만 도출)
 - [ ] 파일럿 개시 전: `preflight.py --stage pilot <ledger+readiness>` 전 항목 true (`pilot_passed`만 면제, 가짜 true 금지 — 프로토콜·상한 포함)
+- [ ] 파일럿 init: `python3 payment-settlement/claude/runner/launch.py init --run-id claude-pilot-arm3 --arm 3 --core 1 --harness payment-settlement/claude/harness-source --readiness payment-settlement/claude/docs/results/readiness.json` — readiness가 있으면 `--image`를 생략해도 동결 digest(`image_digests.runner`)를 쓰고 다른 이미지는 거부한다. manifest의 `image`·`image_frozen=true`·`readiness`로 확인한다
 - [ ] 파일럿 뒤: `freeze_readiness.py ... --pilot-run <id> --replace`로 `pilot_passed`를 파일럿 산출물에서 도출 → 사이클 개시 게이트(`start_cycle.py`, 항상 `--stage cycle` 기준)

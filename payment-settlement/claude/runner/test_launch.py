@@ -120,6 +120,36 @@ class RunnerTest(unittest.TestCase):
             self.assertFalse((root / '.runs/a/workspace/experiment').exists())
             self.assertTrue((root / '.runs/a/workspace/.git').is_dir())
 
+    def test_after_the_freeze_init_uses_only_the_frozen_runner_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '1/core1').mkdir(parents=True)
+            (root / '1/core1/starter.kt').write_text('starter')
+            def init(run_id, image=None, readiness=None):
+                args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=1, core=1, image=image, harness=None,
+                                       network=None, readiness=readiness)
+                with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
+                     patch.object(launch, 'selftest', return_value=SELFTEST_OK) as st, contextlib.redirect_stdout(io.StringIO()):
+                    launch.initialize(args)
+                    self.assertEqual(st.call_args[0][0]['image'], json.loads((root / '.runs' / run_id / 'manifest.json').read_text())['image'])
+                return json.loads((root / '.runs' / run_id / 'manifest.json').read_text())
+            smoke = init('smoke')                                       # before the freeze: the CLI-version tag
+            self.assertEqual((smoke['image'], smoke['image_frozen']), ('payment-claude-runner:' + launch.CLI_VERSION, False))
+            readiness = root / 'docs/results/readiness.json'
+            readiness.parent.mkdir(parents=True)
+            readiness.write_text(json.dumps({'image_digests': {'runner': 'sha256:frozen'}, 'contract_sha256': 'c' * 64}))
+            pilot = init('pilot')                                       # after the freeze: the frozen digest by default
+            self.assertEqual((pilot['image'], pilot['image_frozen'], pilot['readiness']), ('sha256:frozen', True, str(readiness.resolve())))
+            self.assertEqual(init('same', image='sha256:frozen')['image'], 'sha256:frozen')
+            for other in ('payment-claude-runner:' + launch.CLI_VERSION, 'sha256:other'):
+                with self.assertRaises(ValueError) as ctx:
+                    init('x', image=other)
+                self.assertIn('frozen runner digest', str(ctx.exception))
+            self.assertFalse((root / '.runs/x').exists())
+            readiness.write_text(json.dumps({'image_digests': {}}))
+            with self.assertRaises(ValueError):
+                init('y')
+
     def test_arm3_seeds_harness_and_records_hashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

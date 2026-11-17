@@ -305,6 +305,25 @@ def selftest(manifest):
     report['passed'] = rc == 0 and report.get('selftest_failed') == '0'
     return report
 
+def default_readiness():
+    return ROOT / 'docs/results/readiness.json'
+
+def runner_image(args):
+    """The image a new run uses. Before the freeze (smoke runs): --image or the CLI-version tag. Once readiness exists
+    (pilot and cycles): the frozen runner digest, and any other --image is refused. Returns (image, readiness or None)."""
+    path = Path(getattr(args, 'readiness', None) or default_readiness())
+    requested = getattr(args, 'image', None)
+    if not path.exists():
+        return requested or 'payment-claude-runner:' + CLI_VERSION, None
+    ready = json.loads(path.read_text())
+    digest = (ready.get('image_digests') or {}).get('runner') if isinstance(ready, dict) else None
+    if not digest:
+        raise ValueError('readiness %s carries no frozen runner image digest' % path)
+    if requested and requested != digest:
+        raise ValueError('image %s differs from the frozen runner digest %s (readiness %s); a different image needs a '
+                         'new protocol version' % (requested, digest, path))
+    return digest, dict(ready, path=path.resolve())
+
 def initialize(args):
     dest = location(args)
     harness = Path(args.harness) if getattr(args, 'harness', None) else None
@@ -325,6 +344,7 @@ def initialize(args):
         raise ValueError('run already exists; overwrite refused')
     if any(p.is_symlink() for p in source.rglob('*')):
         raise ValueError('starter symlinks are not allowed')
+    image, frozen = runner_image(args)
     dest.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.staging-', dir=dest.parent))   # same filesystem: final rename is atomic
     try:
@@ -340,7 +360,8 @@ def initialize(args):
             'context_variant': 'default', 'subagents': 'opus-high' if worker else 'disabled',
             'actual_model': None, 'effort': 'high', 'session_id': str(uuid.uuid4()),
             'cache_policy': 'observed-cache', 'strict_zero_cache_supported': False,
-            'image': args.image, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
+            'image': image, 'image_frozen': frozen is not None,
+            'readiness': str(frozen['path']) if frozen else None, 'config_volume': 'payment-claude-' + uuid.uuid4().hex,
             'reviewer_volume': ('payment-claude-reviewer-' + uuid.uuid4().hex) if args.arm == 3 else None,
             'requested_reviewer_model': REVIEWER_MODEL if args.arm == 3 else None,
             'source': str(source), 'workspace': str(dest / 'workspace'), 'network': network,
@@ -1276,7 +1297,9 @@ def main():
     init.add_argument('--core', type=int, choices=range(1, 11), required=True)
     init.add_argument('--harness', type=Path, help='Arm 3 only: frozen harness snapshot seeded into the config volume')
     init.add_argument('--network', help='Own run Compose network; never host networking')
-    init.add_argument('--image', default='payment-claude-runner:' + CLI_VERSION)
+    init.add_argument('--image', help='default: the frozen runner digest of --readiness once it exists (any other image '
+                      'is refused), else payment-claude-runner:' + CLI_VERSION + ' (smoke runs before the freeze)')
+    init.add_argument('--readiness', type=Path, help='default: claude/docs/results/readiness.json')
     run = sub.add_parser('turn')
     run.add_argument('--run-id', required=True)
     run.add_argument('--prompt', type=Path, required=True)

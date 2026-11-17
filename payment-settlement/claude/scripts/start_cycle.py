@@ -127,7 +127,8 @@ def main():
         prompt = records / 'initial-prompt.txt'
         # models come from launch.MODELS (frozen in readiness.requested_models); the image is the frozen id
         init = [sys.executable, str(runner), 'init', '--run-id', run_id, '--arm', str(arm), '--core', str(args.cycle),
-                '--image', ready['image_digests']['runner'], '--network', project + '_default']
+                '--image', ready['image_digests']['runner'], '--readiness', str(args.readiness),
+                '--network', project + '_default']
         if arm == 3:
             init += ['--harness', str(ROOT / 'harness-source')]
         env = dict(os.environ, ARM=f'.runs/{run_id}', CORE='workspace', **ports)
