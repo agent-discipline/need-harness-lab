@@ -23,6 +23,7 @@ import preflight
 import record_evaluation_cost
 import start_cycle
 
+IMG = 'sha256:smoke-runner'
 USAGE = {'input_tokens': 1, 'cache_creation_input_tokens': 2, 'cache_read_input_tokens': 3, 'output_tokens': 4}
 READY_FLAGS = dict(isolation_verified=True, usage_collector_verified=True, harness_adapter_verified=True,
                    acceptance_suite_verified=True, pilot_passed=True, oauth_token_source_verified=True,
@@ -120,6 +121,7 @@ class FreezeTest(unittest.TestCase):
             status='ok', session_id_confirmed=True, usage_complete=usage_complete, reviewer=reviewer,
             roles=sorted(roles) + (['reviewer'] if reviewer and reviewer.get('event_count') and 'reviewer' not in roles else []),
             config_volume=dict(credentials_file_in_volume=credentials), usage_cross_check=dict(reported=USAGE)))
+        write(runs / run_id / 'turns/0001/container-inspect.json', [{'Image': IMG}])   # ran on the image being frozen
 
     def test_flags_derive_only_from_smoke_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -127,32 +129,35 @@ class FreezeTest(unittest.TestCase):
             self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's3', 3, {'pm': ['claude-fable-5-2-20261101'], 'reviewer': ['claude-fable-5-2']})
-            flags, actual, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])
+            flags, actual, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], IMG)
             self.assertTrue(all(flags.values()), flags)
             self.assertEqual(actual, {'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2-20261101'})
             self.assertEqual(detail['s3']['role_model_check'], {'pm': True, 'reviewer': True})
             # required main role missing → not verified; a requested-and-served model other than the agreed one → not verified
             self.smoke(runs, 'n3', 3, {'reviewer': ['claude-fable-5-2']})
-            self.assertEqual(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'])[2]['n3']['role_model_check'],
+            self.assertEqual(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'], IMG)[2]['n3']['role_model_check'],
                              {'reviewer': True, 'pm': False})
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'])[0]['role_models_verified'])
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'], IMG)[0]['role_models_verified'])
             self.smoke(runs, 'x1', 1, {'implementer': ['claude-opus-5-5x']})
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['x1', 's3'])[0]['role_models_verified'])
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['x1', 's3'], IMG)[0]['role_models_verified'])
             # arm 3 tools must be exactly arms 1/2 tools plus the subagent tool
             manifest3 = json.loads((runs / 's3/manifest.json').read_text())
             manifest3['observed_tools'] += ['Skill']
             write(runs / 's3/manifest.json', manifest3)
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['isolation_verified'])
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], IMG)[0]['isolation_verified'])
             # wrong worker model, missing arm 3, incomplete usage, credentials file present: each flips its flag
             self.smoke(runs, 'w3', 3, {'pm': ['claude-fable-5-2'], 'worker': ['claude-sonnet-5']})
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'w3'])[0]['role_models_verified'])
-            only1 = freeze_readiness.smoke_evidence(runs, ['s1'])[0]
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'w3'], IMG)[0]['role_models_verified'])
+            only1 = freeze_readiness.smoke_evidence(runs, ['s1'], IMG)[0]
             self.assertFalse(only1['isolation_verified'] or only1['hook_enforcement_verified'] or only1['role_models_verified'])
             self.smoke(runs, 'u1', 1, {'implementer': ['claude-opus-5-5']}, usage_complete=False, credentials=None)
-            bad = freeze_readiness.smoke_evidence(runs, ['u1', 's3'])[0]
+            bad = freeze_readiness.smoke_evidence(runs, ['u1', 's3'], IMG)[0]
             self.assertFalse(bad['usage_collector_verified'])
             self.assertFalse(bad['oauth_token_source_verified'])         # unknown (None) is not "absent"
-            self.assertFalse(any(freeze_readiness.smoke_evidence(runs, [])[0].values()))
+            self.assertFalse(any(freeze_readiness.smoke_evidence(runs, [], IMG)[0].values()))
+            for missing in (None, ''):                                      # no way to switch the image check off
+                with self.assertRaises(ValueError):
+                    freeze_readiness.smoke_evidence(runs, ['s1'], missing)
 
     def test_usage_collector_needs_a_real_reviewer_call_in_an_arm3_smoke(self):
         # spec 11.5: reviewer authentication and reviewer-role usage collection are verified before the freeze
@@ -161,7 +166,7 @@ class FreezeTest(unittest.TestCase):
             self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 'hook3', 3, {'pm': ['claude-fable-5-2']}, reviewer=dict(calls_this_turn=0, event_count=0))
-            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3'])
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3'], IMG)
             self.assertFalse(flags['usage_collector_verified'])                    # the hook smoke never calls the reviewer
             self.assertEqual(detail['hook3']['reviewer_smoke_turns'], [])
             cases = {'reviewer call failed (Not logged in)': dict(calls_this_turn=2, calls_succeeded_this_turn=0, event_count=0),
@@ -169,16 +174,16 @@ class FreezeTest(unittest.TestCase):
             for name, reviewer in cases.items():
                 with self.subTest(name):
                     self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2']}, reviewer=reviewer)
-                    self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])[0]['usage_collector_verified'])
+                    self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'], IMG)[0]['usage_collector_verified'])
             self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']}, usage_complete=False)
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])[0]['usage_collector_verified'])
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'], IMG)[0]['usage_collector_verified'])
             self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']})
-            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'], IMG)
             self.assertTrue(flags['usage_collector_verified'], flags)
             self.assertEqual(detail['rev3']['reviewer_smoke_turns'], ['rev3/0001'])
             # a reviewer call in an arm 1/2 run proves nothing about arm 3
             self.smoke(runs, 'odd1', 1, {'implementer': ['claude-opus-5-5']}, reviewer=self.REVIEWER_OK)
-            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['odd1', 's2', 'hook3'])[0]['usage_collector_verified'])
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['odd1', 's2', 'hook3'], IMG)[0]['usage_collector_verified'])
 
     def inspect(self, runs, run_id, image, turn='0001'):
         write(runs / run_id / 'turns' / turn / 'container-inspect.json', [{'Image': image}])
@@ -206,9 +211,9 @@ class FreezeTest(unittest.TestCase):
             self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']})
-            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['usage_collector_verified'])
+            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], IMG)[0]['usage_collector_verified'])
             write(runs / 's1/turns/0002/result.json', dict(status='failed', usage_complete=False))   # a failed turn in the run
-            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], IMG)
             self.assertFalse(flags['usage_collector_verified'])
             self.assertFalse(detail['s1']['all_turns_ok_and_complete'])
             shutil.rmtree(runs / 's1/turns/0002')
@@ -218,10 +223,10 @@ class FreezeTest(unittest.TestCase):
                 m = json.loads((runs / run_id / 'manifest.json').read_text())
                 m['observed_tools'] = [t for t in m['observed_tools'] if t != drop]
                 write(runs / run_id / 'manifest.json', m)
-            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['a', 'b', 's2', 's3'])
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['a', 'b', 's2', 's3'], IMG)
             self.assertFalse(flags['isolation_verified'])
             self.assertFalse(detail['a']['tools_equal_arm_allow_list'])
-            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['isolation_verified'])
+            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], IMG)[0]['isolation_verified'])
 
     def test_attestation_is_limited_and_hashed(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -167,12 +167,14 @@ def run_isolation_check(run, manifest, readiness):
     return all(checks.values()), checks
 
 
-def smoke_evidence(runs, run_ids, runner_image=None):
+def smoke_evidence(runs, run_ids, runner_image):
     """Derive flags from paid smoke runs made by launch.py (manifest + finalized turns). Every adopted run counts as a
     whole: a run with any turn that did not end ok with complete usage cannot verify the collector (no picking of the
     good turns), and each run's observed tool surface must equal its own arm's allow-list (no union over runs).
-    runner_image (the runner image id being frozen; main always passes it): every turn of every adopted run must have
-    run on exactly that image, otherwise every smoke-derived flag is false and the runs are named in the detail."""
+    runner_image (the runner image id being frozen, required): every turn of every adopted run must have run on exactly
+    that image, otherwise every smoke-derived flag is false and the runs are named in the detail."""
+    if not isinstance(runner_image, str) or not runner_image:
+        raise ValueError('smoke_evidence needs the runner image id being frozen')
     flags = {k: False for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
                                 'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
     detail, actual, arms = {}, {}, set()
@@ -211,8 +213,8 @@ def smoke_evidence(runs, run_ids, runner_image=None):
         if checks.get(main_role):
             actual[str(arm)] = observed[main_role][0]
         image_ids = turn_image_ids(run)
-        image_match = None if runner_image is None else (bool(image_ids) and set(image_ids) == {runner_image})
-        images_ok = images_ok and image_match is not False
+        image_match = bool(image_ids) and set(image_ids) == {runner_image}
+        images_ok = images_ok and image_match
         detail[run_id] = dict(arm=arm, manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good), turns=len(results),
                               all_turns_ok_and_complete=run_complete,
                               observed_role_models=observed, role_model_check=checks,
