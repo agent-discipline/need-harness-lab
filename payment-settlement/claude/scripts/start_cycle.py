@@ -89,7 +89,8 @@ def main():
     p.add_argument('--cycle', type=int, choices=range(1, 11), required=True)
     p.add_argument('--readiness', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
-    p.add_argument('--timeout-seconds', type=int, default=3600)
+    p.add_argument('--timeout-seconds', type=int, default=freeze_readiness.LIMITS['time_limit_seconds'],
+                   help='first turns: default the run cap (no per-turn limit); the runner reduces it to the run time left')
     p.add_argument('--dry-run', action='store_true', help='check gates and print the plan; no init, compose or model call')
     args = p.parse_args()
     ready = json.loads(args.readiness.read_text())

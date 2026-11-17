@@ -1,0 +1,5 @@
+This is an execution infrastructure smoke test of the second reviewer, not a payment implementation task. Do NOT write any requirement-spec or log file, do NOT run set-state and do NOT change any file in /workspace. Run exactly this one Bash command in the foreground and wait until it has finished (the reviewer may take a few minutes); do not run it in the background and do not run anything else:
+
+m=$(mktemp -d) && printf 'The reviewer smoke line.\n' > "$m/note.txt" && cd "$m" && printf 'Read note.txt in the current directory and reply with its single line only.\n' | fable-review > "$m/review.txt"; echo "exit=$?"; head -c 300 "$m/review.txt"
+
+Then reply with exactly one line: REVIEWER_OK: <first line the reviewer returned> if the command printed exit=0, or REVIEWER_FAILED: exit=<code> otherwise. Do nothing else.

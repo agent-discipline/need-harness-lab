@@ -104,7 +104,9 @@ class PreflightStageTest(unittest.TestCase):
 
 
 class FreezeTest(unittest.TestCase):
-    def smoke(self, runs, run_id, arm, roles, selftest=None, usage_complete=True, credentials=False):
+    REVIEWER_OK = dict(calls_this_turn=1, calls_succeeded_this_turn=1, event_count=1)
+
+    def smoke(self, runs, run_id, arm, roles, selftest=None, usage_complete=True, credentials=False, reviewer=None):
         requested = 'claude-fable-5-2' if arm == 3 else 'claude-opus-5-5'
         write(runs / run_id / 'manifest.json', dict(
             arm=arm, requested_model=requested, requested_worker_model='claude-opus-5-5' if arm == 3 else None,
@@ -112,8 +114,11 @@ class FreezeTest(unittest.TestCase):
             requested_reviewer_model='claude-fable-5-2' if arm == 3 else None, actual_role_models=roles,
             selftest=selftest or dict(passed=True, gate_l1_write_exit='2', gate_docs_write_exit='0', git_guard_push='ask',
                                       harness_hash_match='1', reviewer_on_path='1')))
+        if reviewer is None and arm == 3:
+            reviewer = self.REVIEWER_OK
         write(runs / run_id / 'turns/0001/result.json', dict(
-            status='ok', session_id_confirmed=True, usage_complete=usage_complete,
+            status='ok', session_id_confirmed=True, usage_complete=usage_complete, reviewer=reviewer,
+            roles=sorted(roles) + (['reviewer'] if reviewer and reviewer.get('event_count') and 'reviewer' not in roles else []),
             config_volume=dict(credentials_file_in_volume=credentials), usage_cross_check=dict(reported=USAGE)))
 
     def test_flags_derive_only_from_smoke_artifacts(self):
@@ -148,6 +153,32 @@ class FreezeTest(unittest.TestCase):
             self.assertFalse(bad['usage_collector_verified'])
             self.assertFalse(bad['oauth_token_source_verified'])         # unknown (None) is not "absent"
             self.assertFalse(any(freeze_readiness.smoke_evidence(runs, [])[0].values()))
+
+    def test_usage_collector_needs_a_real_reviewer_call_in_an_arm3_smoke(self):
+        # spec 11.5: reviewer authentication and reviewer-role usage collection are verified before the freeze
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
+            self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
+            self.smoke(runs, 'hook3', 3, {'pm': ['claude-fable-5-2']}, reviewer=dict(calls_this_turn=0, event_count=0))
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3'])
+            self.assertFalse(flags['usage_collector_verified'])                    # the hook smoke never calls the reviewer
+            self.assertEqual(detail['hook3']['reviewer_smoke_turns'], [])
+            cases = {'reviewer call failed (Not logged in)': dict(calls_this_turn=2, calls_succeeded_this_turn=0, event_count=0),
+                     'call succeeded but no reviewer request collected': dict(calls_this_turn=1, calls_succeeded_this_turn=1, event_count=0)}
+            for name, reviewer in cases.items():
+                with self.subTest(name):
+                    self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2']}, reviewer=reviewer)
+                    self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])[0]['usage_collector_verified'])
+            self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']}, usage_complete=False)
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])[0]['usage_collector_verified'])
+            self.smoke(runs, 'rev3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']})
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 'hook3', 'rev3'])
+            self.assertTrue(flags['usage_collector_verified'], flags)
+            self.assertEqual(detail['rev3']['reviewer_smoke_turns'], ['rev3/0001'])
+            # a reviewer call in an arm 1/2 run proves nothing about arm 3
+            self.smoke(runs, 'odd1', 1, {'implementer': ['claude-opus-5-5']}, reviewer=self.REVIEWER_OK)
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['odd1', 's2', 'hook3'])[0]['usage_collector_verified'])
 
     def test_attestation_is_limited_and_hashed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,6 +322,88 @@ class FreezeReplaceTest(unittest.TestCase):
             self.assertIn('protocol version change', err)
             self.assertEqual(json.loads(out.read_text()), second)
             self.assertEqual(len(list(Path(tmp).glob('readiness.superseded-*.json'))), 1)
+
+    def supersede(self, tmp, inventory, root, *extra):
+        out = Path(tmp) / 'readiness.json'
+        argv = ['freeze_readiness.py', '--output', str(out), '--runs', str(root / '.runs')] + list(extra)
+        flags = {k: True for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
+                                   'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
+        smoke = (flags, {'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'}, {'s%d' % a: {'arm': a} for a in (1, 2, 3)})
+        err = io.StringIO()
+        with patch.object(sys, 'argv', argv), patch.object(freeze_readiness, 'clean_baseline', return_value=('abc', [])), \
+             patch.object(freeze_readiness, 'images', return_value=(dict(self.FOUND), [])), \
+             patch.object(freeze_readiness, 'smoke_evidence', return_value=smoke), \
+             patch.object(freeze_readiness, 'inventory', return_value=inventory), patch.object(freeze_readiness, 'ROOT', root), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            try:
+                code = freeze_readiness.main()
+            except SystemExit as exc:
+                code = exc.code
+        return code, err.getvalue(), out
+
+    def experiment_root(self, tmp):
+        root = Path(tmp) / 'claude'
+        for arm in (1, 2, 3):
+            for core in range(1, 11):
+                write(root / 'docs/experiments' / str(arm) / ('core%d' % core) / 'run.json', {'status': 'NOT_STARTED'})
+        write(root / 'docs/results/cycles.json', [{'cycle': c, 'status': 'NOT_STARTED'} for c in range(1, 11)])
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '--allow-empty',
+                        '-m', 'setup'], check=True)
+        return root
+
+    def test_supersede_before_runs_replaces_changed_inputs_only_while_nothing_started(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.experiment_root(tmp)
+            code, err, out = self.supersede(tmp, {'claude/runner/launch.py': 'v1'}, root)
+            self.assertEqual(code, 0, err)
+            first = json.loads(out.read_text())
+            first_listing = (Path(tmp) / 'frozen-inputs.json').read_text()
+            # inputs changed after the pilot: --replace refuses (unchanged rule), the supersede path needs a reason
+            changed = {'claude/runner/launch.py': 'v2'}
+            self.assertNotEqual(self.supersede(tmp, changed, root, '--replace')[0], 0)
+            self.assertNotEqual(self.supersede(tmp, changed, root, '--supersede-before-runs')[0], 0)
+            self.assertNotEqual(self.supersede(tmp, changed, root, '--supersede-before-runs', '--reason', 'x', '--pilot-run', 'p')[0], 0)
+            self.assertNotEqual(self.supersede(tmp, changed, root, '--reason', 'x')[0], 0)
+            self.assertEqual(json.loads(out.read_text()), first)                 # nothing changed by the refusals
+            code, err, _ = self.supersede(tmp, changed, root, '--supersede-before-runs', '--reason', 'pilot 01: reviewer token')
+            self.assertEqual(code, 0, err)
+            second = json.loads(out.read_text())
+            self.assertFalse(second['pilot_passed'])
+            self.assertEqual(second['protocol'], first['protocol'])
+            sup = second['supersedes']
+            self.assertEqual(sup['reason'], 'pilot 01: reviewer token')
+            self.assertEqual(sup['previous_contract_sha256'], first['contract_sha256'])
+            self.assertEqual(sup['changed_inputs'], ['claude/runner/launch.py'])
+            self.assertTrue(sup['pilot_passed_reset'])
+            archived = {k: v['archived_as'] for k, v in sup['archived'].items()}
+            self.assertEqual(sorted(archived), ['frozen-inputs.json', 'readiness.json'])
+            self.assertEqual(json.loads((Path(tmp) / archived['readiness.json']).read_text()), first)   # kept, not deleted
+            self.assertEqual((Path(tmp) / archived['frozen-inputs.json']).read_text(), first_listing)
+            self.assertEqual(sup['archived']['readiness.json']['sha256'],
+                             hashlib.sha256((Path(tmp) / archived['readiness.json']).read_bytes()).hexdigest())
+            self.assertEqual(json.loads((Path(tmp) / 'frozen-inputs.json').read_text()), changed)
+
+    def test_supersede_is_refused_once_any_measured_run_started(self):
+        starts = {'run record': lambda r: write(r / 'docs/experiments/2/core1/run.json', {'status': 'SETUP_FAILED'}),
+                  'run directory': lambda r: (r / '.runs/claude-arm3-core01').mkdir(parents=True),
+                  'cycle opened': lambda r: write(r / 'docs/results/cycles.json',
+                                                  [{'cycle': 1, 'status': 'RUNNING'}] + [{'cycle': c, 'status': 'NOT_STARTED'} for c in range(2, 11)]),
+                  'run commit': lambda r: subprocess.run(['git', '-C', str(r), '-c', 'user.email=a@b', '-c', 'user.name=a', 'commit',
+                                                          '-q', '--allow-empty', '-m', 'experiment: claude-arm1-core01 FAILED'], check=True),
+                  'record unreadable': lambda r: (r / 'docs/experiments/1/core4/run.json').write_text('{')}
+        for name, start in starts.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                root = self.experiment_root(tmp)
+                self.assertEqual(freeze_readiness.experiment_started(root), [])
+                self.assertEqual(self.supersede(tmp, {'a': '1'}, root)[0], 0)
+                start(root)
+                self.assertTrue(freeze_readiness.experiment_started(root))
+                code, err, out = self.supersede(tmp, {'a': '2'}, root, '--supersede-before-runs', '--reason', 'late change')
+                self.assertNotEqual(code, 0)
+                self.assertIn('measured run has started', err)
+                self.assertNotIn('supersedes', json.loads(out.read_text()))
+                self.assertEqual(list(Path(tmp).glob('*.superseded-*.json')), [])
 
     def test_replace_blockers(self):
         found = dict(self.FOUND)
@@ -1276,6 +1389,14 @@ class ExportSetupEvidenceTest(unittest.TestCase):
             write(runs / 'empty/manifest.json', {})
             with self.assertRaises(ValueError):                       # a run without a turn proves nothing
                 exporter.export(runs, ['empty'], Path(tmp) / 'out-empty', self.TOKEN)
+
+
+class FirstTurnTimeoutTest(unittest.TestCase):
+    def test_start_cycle_first_turns_default_to_the_run_cap(self):
+        # decision 2026-11-18: no per-turn limit; the runner reduces the timeout to the run time left
+        source = (HERE / 'start_cycle.py').read_text()
+        self.assertIn("default=freeze_readiness.LIMITS['time_limit_seconds']", source)
+        self.assertEqual(freeze_readiness.LIMITS['time_limit_seconds'], 28800)
 
 
 if __name__ == '__main__':

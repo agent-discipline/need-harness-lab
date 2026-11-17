@@ -172,6 +172,7 @@ def smoke_evidence(runs, run_ids):
                                 'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
     detail, actual, arms, tools = {}, {}, set(), {}
     ok_turns, all_ok_complete, cache_seen, token_ok, roles_ok, selftests_ok, hooks_ok = 0, True, False, True, True, True, False
+    reviewer_turns = []                                 # arm 3 smoke turns in which the second reviewer was really called
     for run_id in run_ids:
         run = Path(runs) / run_id
         manifest = json.loads((run / 'manifest.json').read_text())
@@ -191,6 +192,9 @@ def smoke_evidence(runs, run_ids):
         all_ok_complete = all_ok_complete and bool(good) and all(r.get('usage_complete') is True for r in good)
         cache_seen = cache_seen or any(all(isinstance(((r.get('usage_cross_check') or {}).get('reported') or {}).get(k), int)
                                            for k in launch.USAGE_KEYS) for r in good)
+        proven = ['%s/%s' % (run_id, p.parent.name) for p in sorted((run / 'turns').glob('*/result.json'))
+                  if arm == 3 and reviewer_smoke_turn(json.loads(p.read_text()))]
+        reviewer_turns += proven
         observed = manifest.get('actual_role_models') or {}
         checks = role_check(arm, observed, SMOKE_ROLES.get(arm, ()), run)
         roles_ok = roles_ok and bool(checks) and all(checks.values())
@@ -199,7 +203,8 @@ def smoke_evidence(runs, run_ids):
             actual[str(arm)] = observed[main_role][0]
         detail[run_id] = dict(arm=arm, manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good),
                               observed_role_models=observed, role_model_check=checks,
-                              observed_tools=sorted(tools.get(arm, ())))
+                              observed_tools=sorted(tools.get(arm, ())), image_ids=turn_image_ids(run),
+                              reviewer_smoke_turns=proven)
     # same tools in every arm; arm 3 differs only by the subagent surface
     base = [tools[a] for a in (1, 2) if a in tools]
     same_tools = bool(base) and 3 in tools and all(b == base[0] for b in base) and \
@@ -208,9 +213,32 @@ def smoke_evidence(runs, run_ids):
     flags['hook_enforcement_verified'] = hooks_ok
     flags['oauth_token_source_verified'] = bool(run_ids) and token_ok
     flags['cache_observation_verified'] = cache_seen
-    flags['usage_collector_verified'] = bool(run_ids) and all_ok_complete
+    # spec 11.5: the collector is verified only with a real reviewer call in an arm 3 smoke (authentication of the
+    # reviewer and collection of its usage under the reviewer role), not with the PM's usage alone
+    flags['usage_collector_verified'] = bool(run_ids) and all_ok_complete and bool(reviewer_turns)
     flags['role_models_verified'] = bool(run_ids) and roles_ok and 3 in arms and bool(arms & {1, 2})
     return flags, actual, detail
+
+
+def reviewer_smoke_turn(result):
+    """An arm 3 smoke turn that proves the second reviewer end to end: the turn ended ok with complete usage, at least
+    one reviewer call of this turn exited 0, and reviewer-role requests were collected from its transcripts."""
+    reviewer = result.get('reviewer') or {}
+    return (result.get('status') == 'ok' and result.get('usage_complete') is True
+            and (reviewer.get('calls_succeeded_this_turn') or 0) >= 1 and (reviewer.get('event_count') or 0) >= 1
+            and 'reviewer' in (result.get('roles') or []) and not result.get('reviewer_usage_pending'))
+
+
+def turn_image_ids(run):
+    """Image ids the run's turns actually ran on (container-inspect.json of each turn; None where unreadable)."""
+    ids = set()
+    for path in sorted(Path(run).glob('turns/*/container-inspect.json')):
+        try:
+            data = json.loads(path.read_text())
+            ids.add(data[0].get('Image') if isinstance(data, list) and data else None)
+        except (OSError, ValueError, AttributeError):
+            ids.add(None)
+    return sorted(ids, key=str)
 
 
 def pilot_evidence(runs, run_id, contract_sha256, runner_image):
@@ -261,6 +289,68 @@ def replace_blockers(previous, frozen, digest, found, listing=None):
     return failures
 
 
+def experiment_started(root=None, runs=None):
+    """Evidence that a measured run (claude-armA-coreNN) has started, read from what start_cycle.py itself uses: each
+    run's record (docs/experiments/<arm>/core<N>/run.json status), its run directory (.runs/<run id>), the cycle table
+    (docs/results/cycles.json status) and run commits ('experiment: <run id> ...'). Empty list = nothing has started.
+    A record that cannot be read counts as started (unknown is never "not started")."""
+    import start_cycle                                  # run ids of a cycle (start_cycle.run_plan): one naming source
+    root = Path(root or ROOT)
+    runs = Path(runs or root / '.runs')
+    found = []
+    for cycle in range(1, 11):
+        for arm in (1, 2, 3):
+            run_id = start_cycle.run_plan(cycle, arm)[0]
+            record = root / 'docs/experiments' / str(arm) / ('core%d' % cycle) / 'run.json'
+            try:
+                status = json.loads(record.read_text()).get('status')
+            except (OSError, ValueError, AttributeError) as exc:
+                found.append('%s: record unreadable (%s)' % (run_id, exc))
+                continue
+            if status != 'NOT_STARTED':
+                found.append('%s: status %s' % (run_id, status))
+            if (runs / run_id).exists():
+                found.append('%s: run directory exists' % run_id)
+    try:
+        cycles = json.loads((root / 'docs/results/cycles.json').read_text())
+        found += ['cycle %s: status %s' % (c.get('cycle'), c.get('status')) for c in cycles if c.get('status') != 'NOT_STARTED']
+    except (OSError, ValueError, AttributeError) as exc:
+        found.append('cycles.json unreadable (%s)' % exc)
+    done = subprocess.run(['git', '-C', str(root), 'log', '--format=%s'], capture_output=True, text=True)
+    if done.returncode:
+        found.append('git log unreadable: ' + done.stderr.strip()[-200:])
+    else:
+        found += ['commit: ' + line for line in done.stdout.splitlines() if line.startswith('experiment: claude-arm')]
+    return found
+
+
+def supersede_record(output, reason, now, frozen):
+    """Archive the readiness being superseded and its frozen-inputs.json next to them (renamed, never deleted) and
+    describe the supersession for the new readiness."""
+    previous = json.loads(output.read_text())
+    listing = output.with_name('frozen-inputs.json')
+    try:
+        old = json.loads(listing.read_text())
+    except (OSError, ValueError):
+        old = None
+    stamp = now.replace(':', '-')
+    archived = {}
+    for path, name in ((output, 'readiness.superseded-%s.json' % stamp), (listing, 'frozen-inputs.superseded-%s.json' % stamp)):
+        if path.exists():
+            digest = sha(path)
+            target = path.with_name(name)
+            if target.exists():
+                raise ValueError('archive %s already exists' % target)
+            path.rename(target)
+            archived[path.name] = {'archived_as': name, 'sha256': digest}
+    return {'reason': reason, 'at': now, 'previous_contract_sha256': previous.get('contract_sha256'),
+            'previous_image_digests': previous.get('image_digests'), 'previous_frozen_at': previous.get('frozen_at'),
+            'archived': archived, 'pilot_passed_reset': True,
+            'changed_inputs': sorted(k for k in old.keys() | frozen.keys() if old.get(k) != frozen.get(k))
+            if isinstance(old, dict) else None,
+            'rule': 'replaced before any measured run started (freeze_readiness.experiment_started was empty)'}
+
+
 def attested(path):
     """{flag: {"value": bool, "evidence": [repo-relative paths]}} for ATTESTABLE flags only; evidence is hashed."""
     data = json.loads(Path(path).read_text())
@@ -292,8 +382,28 @@ def main():
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp) '
                    'with re-derived flags; refused when the frozen inputs or image ids changed (protocol version change)')
+    p.add_argument('--supersede-before-runs', action='store_true',
+                   help='replace the freeze although frozen inputs or image ids changed, ONLY while no measured run has '
+                   'started (experiment_started); needs --reason; archives readiness.json and frozen-inputs.json, records '
+                   'the supersession and resets pilot_passed (no --pilot-run). Same protocol name.')
+    p.add_argument('--reason', help='with --supersede-before-runs: why the freeze is replaced (required)')
     a = p.parse_args()
-    if a.output.exists() and not a.replace:
+    if a.supersede_before_runs:
+        if a.replace:
+            p.error('--supersede-before-runs and --replace are different paths; give one')
+        if not (a.reason or '').strip():
+            p.error('--supersede-before-runs requires --reason')
+        if a.pilot_run:
+            p.error('--supersede-before-runs resets pilot_passed; the pilot is run again under the new freeze (no --pilot-run)')
+        if not a.output.exists():
+            p.error('nothing to supersede: %s does not exist' % a.output)
+        started = experiment_started(runs=a.runs)
+        if started:
+            p.error('a measured run has started (%s): the freeze can no longer be superseded; a change requires a protocol '
+                    'version change and a re-run of every arm' % '; '.join(started[:10]))
+    elif a.reason:
+        p.error('--reason applies only to --supersede-before-runs')
+    if a.output.exists() and not (a.replace or a.supersede_before_runs):
         p.error('readiness exists; a protocol freeze is not overwritten (use --replace to supersede and keep the old one)')
     head, dirty = clean_baseline()
     if dirty:
@@ -309,7 +419,7 @@ def main():
     frozen = inventory()
     digest = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
     runner = found['payment-claude-runner:' + launch.CLI_VERSION]
-    if a.output.exists():
+    if a.output.exists() and a.replace:
         changed = replace_blockers(json.loads(a.output.read_text()), frozen, digest, found,
                                    a.output.with_name('frozen-inputs.json'))
         if changed:
@@ -328,7 +438,9 @@ def main():
         **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE}, pilot_passed=pilot_passed,
         evidence=dict(smoke_runs=detail, attested=attest_evidence, pilot=pilot_detail), frozen_at=now,
         note='flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed')
-    if a.output.exists():
+    if a.supersede_before_runs:
+        readiness['supersedes'] = supersede_record(a.output, a.reason.strip(), now, frozen)
+    elif a.output.exists():
         a.output.rename(a.output.with_name('readiness.superseded-%s.json' % now.replace(':', '-')))
     a.output.write_text(json.dumps(readiness, indent=2, ensure_ascii=False) + '\n')
     a.output.with_name('frozen-inputs.json').write_text(json.dumps(frozen, indent=2) + '\n')
