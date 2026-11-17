@@ -790,6 +790,21 @@ class FinishRunTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:                              # proxy on another model
             root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-sonnet-4')
             self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], False)
+
+    def test_arm3_finish_requires_the_user_proxy_but_the_pilot_check_does_not(self):
+        with tempfile.TemporaryDirectory() as tmp:                              # no proxy request observed
+            root, run, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01')
+            _, _, _, fields = self.finish(root, 'claude-arm3-core01')
+            self.assertIs(fields['all_role_models_verified'], False)
+            checks = self.record(root / 'docs/experiments/3/core1')['evidence_derivation']['all_role_models_verified']['checks']
+            self.assertEqual(checks, {'pm': True, 'worker': True, 'reviewer': True, 'user-proxy': False})
+            manifest = json.loads((run / 'manifest.json').read_text())
+            fr = finish_run.freeze_readiness                                      # the freeze's pilot role set is unchanged
+            self.assertEqual(fr.PILOT_ROLES, ('pm', 'worker', 'reviewer'))
+            self.assertTrue(all(fr.run_role_check(run, manifest, fr.PILOT_ROLES).values()))
+        with tempfile.TemporaryDirectory() as tmp:                              # control: proxy on the agreed model
+            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-opus-5-5')
+            self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], True)
         with tempfile.TemporaryDirectory() as tmp:                              # criterion judged without evidence
             root, _, folder = finish_fixture(tmp)
             verdict = json.loads((folder / 'verdict.json').read_text())
@@ -799,7 +814,7 @@ class FinishRunTest(unittest.TestCase):
 
     def test_evidence_fields_use_the_freeze_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01')
+            root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-opus-5-5')
             fr = finish_run.freeze_readiness
             with patch.object(fr, 'run_role_check', wraps=fr.run_role_check) as roles, \
                  patch.object(fr, 'run_isolation_check', wraps=fr.run_isolation_check) as isolation:

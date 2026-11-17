@@ -79,6 +79,10 @@ AGREED = {(1, 'implementer'): launch.MODELS[1][0], (2, 'implementer'): launch.MO
 # Roles each kind of evidence must show. Smoke runs prove the main role of every arm; the arm 3 pilot proves the rest.
 SMOKE_ROLES = {1: ('implementer',), 2: ('implementer',), 3: ('pm',)}
 PILOT_ROLES = ('pm', 'worker', 'reviewer')
+# Roles a finished run must show (scripts/finish_run.py, all_role_models_verified). Arm 3 also needs the user proxy: the
+# pre-implementation interview is mandatory in arm 3, so an arm 3 run without an observed proxy request is not verified.
+# The freeze's pilot check keeps PILOT_ROLES (a proxy request is checked there only when one was made).
+FINISH_ROLES = {1: ('implementer',), 2: ('implementer',), 3: PILOT_ROLES + ('user-proxy',)}
 
 
 def model_matches(observed, agreed):
@@ -117,8 +121,8 @@ def role_check(arm, observed, required, run=None):
 
 def run_role_check(run, manifest, required):
     """role_check over one run's own records: the manifest's observed role models (turns) plus, per request, the
-    user-proxy consultations of the run, which must be on the agreed proxy model. Used at the freeze (pilot) and at
-    each run's finish (scripts/finish_run.py)."""
+    user-proxy consultations of the run, which must be on the agreed proxy model. A required 'user-proxy' without any
+    proxy request stays False. Used at the freeze (pilot, PILOT_ROLES) and at each run's finish (FINISH_ROLES)."""
     arm = manifest.get('arm')
     models = role_check(arm, manifest.get('actual_role_models') or {}, required, run)
     proxy_models = sorted({e['model'] for e in launch.reconcile_events(Path(run))[0] if e.get('role') == 'user-proxy'})

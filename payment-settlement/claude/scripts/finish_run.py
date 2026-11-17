@@ -31,8 +31,8 @@ VERDICT = 'verdict.json'
 # caps a passing last turn may have run past (the feedback cap stops the 31st delivery before it is sent)
 OVERSHOOT_CAPS = ('CENSORED_BUDGET', 'CENSORED_TIME')
 NOT_FINISHABLE = ('NOT_STARTED', 'SETUP_FAILED')        # setup failures follow the runbook's recovery, not this script
-# roles each arm must show with its agreed model (the same sets the freeze uses: smoke runs and the arm 3 pilot)
-RUN_ROLES = {1: freeze_readiness.SMOKE_ROLES[1], 2: freeze_readiness.SMOKE_ROLES[2], 3: freeze_readiness.PILOT_ROLES}
+# roles each arm must show with its agreed model at the finish (arm 3 includes the user proxy; the pilot check differs)
+RUN_ROLES = freeze_readiness.FINISH_ROLES
 
 
 def sha(path):

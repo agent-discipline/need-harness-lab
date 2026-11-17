@@ -130,7 +130,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 |---|---|
 | `all_acceptance_passed` | 판정표 20개 모두 `PASS` + 모든 기준에 근거 파일이 있고 전부 존재 |
 | `usage_complete` | 실행 폴더(`.runs/<id>`)에서 종료 기록 시점에 계산한 run 장부의 `usage_complete` |
-| `all_role_models_verified` | manifest의 역할별 관측 모델 + 요청 이벤트(대리 사용자 포함)를 합의 모델과 대조 — 동결과 같은 함수 `freeze_readiness.run_role_check`. 있어야 할 역할(1·2번 `implementer`, 3번 `pm`·`worker`·`reviewer`)이 관측되지 않으면 false. explorer의 Sonnet 예외는 요청 단위 |
+| `all_role_models_verified` | manifest의 역할별 관측 모델 + 요청 이벤트(대리 사용자 포함)를 합의 모델과 대조 — 동결과 같은 함수 `freeze_readiness.run_role_check`. 있어야 할 역할(1·2번 `implementer`, 3번 `pm`·`worker`·`reviewer`·`user-proxy` — `freeze_readiness.FINISH_ROLES`)이 관측되지 않으면 false. 3번은 사전 인터뷰가 의무이므로 대리 사용자 호출이 한 번도 관측되지 않은 run은 false다(동결의 파일럿 검사는 `PILOT_ROLES` = `pm`·`worker`·`reviewer` 그대로). explorer의 Sonnet 예외는 요청 단위 |
 | `isolation_verified` | 그 run의 init self-test와 3번의 호출 전 self-test가 모두 통과 + 그 run의 도구 목록이 동결 파일(manifest가 가리키는 `readiness.json`의 `evidence.smoke_runs`)의 그 조건 도구 목록과 같음 — `freeze_readiness.run_isolation_check`. 세 조건 간 비교는 동결 때 한 번 |
 
 통과했는데 네 칸 중 하나라도 false면 상태는 `PASSED`로 쓰이고 `commit_run.py`가 커밋을 막는다. 우회 경로는 없다: 진행자는 거기서 멈추고 원인을 `issues.md`에 적어 메인에 보고하며, 메인이 사용자에게 보고한다(다음 사이클은 시작하지 않는다). 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
