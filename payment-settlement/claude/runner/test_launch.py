@@ -745,6 +745,22 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(result['reviewer']['calls_failed_this_turn'], 1)
             self.assertFalse(json.loads((dest / 'ledger.json').read_text())['usage_complete'])
 
+    def test_refused_reviewer_requests_are_counted_and_do_not_make_the_turn_incomplete(self):
+        pm = [{'type': 'assistant', 'requestId': 'req-pm', 'sessionId': manifest()['session_id'], 'message': {'model': 'p', 'usage': USAGE}}]
+        log = 'R1 refused reason=snapshot: symbolic link in the review directory: x\nR2 refused reason=a request carries exactly "cwd" and "prompt"\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.arm3_dest(root)
+            result, _ = self.arm3_turn(root, False, pm, log, {})
+            self.assertTrue(result['usage_complete'])
+            self.assertEqual(result['incomplete'], [])
+            self.assertEqual([r['call'] for r in result['reviewer']['requests_refused_this_turn']], ['R1', 'R2'])
+            self.assertEqual(result['reviewer']['calls_this_turn'], 0)
+            self.assertEqual(json.loads((dest / 'ledger.json').read_text())['reviewer_requests_refused'], 2)
+            result2, _ = self.arm3_turn(root, True, pm + [dict(pm[0], requestId='req-pm2')], log + 'R3 refused reason=y\n', {})
+            self.assertEqual([r['call'] for r in result2['reviewer']['requests_refused_this_turn']], ['R3'])   # not recounted
+            self.assertEqual(json.loads((dest / 'ledger.json').read_text())['reviewer_requests_refused'], 3)
+
     def test_cost_of_another_session_or_after_a_gap_is_not_attributed(self):
         reported = {'total_cost_usd': 3.0, 'session_ids': ['other']}
         cost = launch.turn_cost(reported, None, 'pinned')
@@ -1734,7 +1750,14 @@ class FableReviewHelperTest(unittest.TestCase):
             with self.subTest(request=request):
                 self.assertEqual(self.raw_request(sock, request)['exit'], 94)
         self.assertFalse((self.out / 'args').exists())                         # the CLI never started
-        self.assertEqual(self.log_lines(), [])                                 # a refused request is not an attempt
+        lines = self.log_lines()                                               # recorded as refusals, never as attempts
+        self.assertEqual(len(lines), 8, lines)
+        self.assertTrue(all(launch.CALL_REFUSED.fullmatch(l) and not launch.CALL_STARTED.fullmatch(l) for l in lines), lines)
+        import socket as socketlib                                             # an empty connection (readiness probe)
+        with socketlib.socket(socketlib.AF_UNIX) as conn:                      # is not recorded
+            conn.connect(str(sock))
+        time.sleep(0.3)
+        self.assertEqual(len(self.log_lines()), 8)
 
     def test_links_special_files_and_oversized_directories_are_refused(self):
         sock, _ = self.serve(extra=['--max-files', '3', '--max-bytes', '100'])
@@ -1767,6 +1790,76 @@ class FableReviewHelperTest(unittest.TestCase):
                 self.assertIn(reason, done.stderr)
         self.assertFalse((self.out / 'args').exists())
         self.assertEqual(list((self.home / 'snapshots').iterdir()), [])        # refused snapshots are removed too
+        reasons = [launch.CALL_REFUSED.fullmatch(l).group(2) for l in self.log_lines()]
+        self.assertTrue(reasons and all(r for r in reasons))                   # each refusal recorded with its reason
+        self.assertTrue(any('symbolic link' in r for r in reasons))
+
+    def test_only_what_the_requester_could_read_itself_is_copied(self):
+        spec_ = importlib.util.spec_from_file_location('fable_review', self.HERE / 'fable_review.py')
+        fr = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(fr)
+        me, other = os.getuid(), os.getuid() + 1
+        src = self.root / 'perm'
+        (src / 'sub').mkdir(parents=True)
+        (src / 'sub' / 'ok.txt').write_text('ok')
+        os.chmod(src / 'sub' / 'ok.txt', 0o644)
+        os.chmod(src / 'sub', 0o755)
+        os.chmod(src, 0o755)
+        def copy(uid, name):
+            fd = os.open(str(src), os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                return fr.snapshot(fd, str(self.base / name), uid)
+            finally:
+                os.close(fd)
+        self.assertEqual(copy(other, 'c1')['files'], 1)                       # world-readable: another uid could read it
+        os.chmod(src / 'sub' / 'ok.txt', 0o600)                               # now only its owner can
+        self.assertEqual(copy(me, 'c2')['files'], 1)                          # the owner asks: copied
+        with self.assertRaisesRegex(ValueError, 'cannot read the file itself: sub/ok.txt'):
+            copy(other, 'c3')                                                  # anyone else: refused, never left out
+        os.chmod(src / 'sub' / 'ok.txt', 0o644)
+        os.chmod(src / 'sub', 0o700)
+        with self.assertRaisesRegex(ValueError, 'cannot read the directory itself: sub'):
+            copy(other, 'c4')
+        os.chmod(src / 'sub', 0o755)
+        os.link(src / 'sub' / 'ok.txt', src / 'hard.txt')                      # a hard link is judged by its inode
+        os.chmod(src / 'hard.txt', 0o600)
+        with self.assertRaisesRegex(ValueError, 'cannot read the file'):
+            copy(other, 'c5')
+        os.unlink(src / 'hard.txt')
+        os.chmod(src / 'sub' / 'ok.txt', 0o644)
+        real_fstat = fr.os.fstat
+        def other_device(fd):                                                  # a mount point inside the directory
+            st = real_fstat(fd)
+            if os.readlink('/proc/self/fd/%d' % fd).endswith('/sub'):
+                return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1) + tuple(st)[3:])
+            return st
+        with patch.object(fr.os, 'fstat', other_device), self.assertRaisesRegex(ValueError, 'another file system'):
+            copy(me, 'c6')
+        # the requested directory itself and the way to it follow the same rule
+        with self.assertRaisesRegex(ValueError, 'cannot enter'):            # the temporary base is 0700: no way in
+            os.close(fr.open_dir(str(src), other))
+        os.chmod(self.base, 0o755)
+        os.chmod(self.root, 0o755)
+        os.close(fr.open_dir(str(src), other))                                # 0755 all the way: another uid could
+        os.chmod(src, 0o700)
+        with self.assertRaisesRegex(ValueError, 'cannot read'):
+            os.close(fr.open_dir(str(src), other))
+        os.close(fr.open_dir(str(src), me))
+
+    def test_a_caller_gone_during_the_snapshot_gets_no_cli_and_a_refusal_record(self):
+        spec_ = importlib.util.spec_from_file_location('fable_review', self.HERE / 'fable_review.py')
+        fr = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(fr)
+        reviewer = fr.Reviewer('claude-fable-5-2', str(self.cfg), str(self.home), str(self.fake), 'tok', str(self.setpriv))
+        fd = os.open(str(self.mirror), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            self.assertIsNone(reviewer.run(fd, b'x', lambda: True, os.getuid()))
+        finally:
+            os.close(fd)
+        self.assertFalse((self.out / 'args').exists())                         # the CLI was never started
+        lines = self.log_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(launch.CALL_REFUSED.fullmatch(lines[0]).group(2), 'client disconnected before the reviewer started')
 
     def test_a_disconnected_caller_cancels_the_call_and_leaves_it_unobserved(self):
         sock, _ = self.serve()

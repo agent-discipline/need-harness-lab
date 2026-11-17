@@ -834,6 +834,8 @@ CALL_STARTED = re.compile(r'(\S+) started session=([0-9a-f-]{36}) model=(\S+)')
 CALL_EXIT = re.compile(r'(\S+) exit=(-?\d+)')
 # the helper stopped the reviewer CLI because the caller disconnected (runner/fable_review.py): usage unobserved
 CALL_CANCELLED = re.compile(r'(\S+) cancelled session=([0-9a-f-]{36}) reason=(\S+)')
+# a request the helper refused before any CLI started (no session, no usage): counted, never an attempt with usage
+CALL_REFUSED = re.compile(r'(\S+) refused reason=(.*)')
 
 def reviewer_dir_names(name, output):
     """Names directly inside the reviewer directory of the stopped container, or None when they cannot be established.
@@ -931,11 +933,13 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
     log_absent = log_rc != 0 and names is not None and 'reviewer-calls.log' not in names
     log_unknown = log_rc != 0 and not log_absent
     projects_absent = projects_rc != 0 and names is not None and 'projects' not in names
-    started, finished, cancelled = {}, {}, {}
+    started, finished, cancelled, refused = {}, {}, {}, {}
     for line in (log.read_text().splitlines() if log_rc == 0 else []):
         hit = CALL_STARTED.fullmatch(line)
         if hit:
             started[hit.group(1)] = hit.group(2)
+        elif CALL_REFUSED.fullmatch(line):
+            refused[CALL_REFUSED.fullmatch(line).group(1)] = CALL_REFUSED.fullmatch(line).group(2)
         elif CALL_CANCELLED.fullmatch(line):
             cancelled[CALL_CANCELLED.fullmatch(line).group(1)] = CALL_CANCELLED.fullmatch(line).group(3)
         elif CALL_EXIT.fullmatch(line):
@@ -944,6 +948,7 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
     ledger = dest / 'reviewer-calls.json'
     recorded = set(json.loads(ledger.read_text())['calls']) if ledger.exists() else set()
     new_calls = sorted(set(started) - recorded)
+    new_refused = sorted(set(refused) - recorded)
     events, new_ids, stats, transcripts = [], [], {}, {}
     projects = output / 'reviewer-projects'
     if projects_rc == 0:
@@ -983,6 +988,7 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
                'calls_finished_total': len(set(finished) & set(started)),
                'calls_succeeded_this_turn': sum(1 for c in new_calls if finished.get(c) == 0),
                'calls_failed_this_turn': len(failed),        # exit != 0, cancelled or no exit line
+               'requests_refused_this_turn': [{'call': c, 'reason': refused[c]} for c in new_refused],
                'calls_cancelled_this_turn': [{'call': c, 'session': started[c], 'reason': cancelled[c]}
                                              for c in new_calls if c in cancelled],
                'failed_attempts_without_requests': [{'call': c, 'session': started[c]} for c in failed if started[c] in zero],
@@ -990,7 +996,7 @@ def account_reviewer(output, dest, seen, run_id, turn_id, arm, log_rc, projects_
                'projects_rc': projects_rc, 'projects_absent': projects_absent, 'reviewer_dir_rc': dir_rc,
                'reviewer_dir_names': names, 'reviewer_dir_leftover': leftover, 'transcript_stats': stats,
                'event_count': len(events), 'incomplete': len(incomplete), 'raw_rc': raw_rc, **costs}
-    return events, new_ids, incomplete, summary, (None if log_unknown else sorted(started))
+    return events, new_ids, incomplete, summary, (None if log_unknown else sorted(set(started) | set(refused)))
 
 def reviewer_call_costs(raw_dir, sessions):
     """CLI cost estimate of each reviewer call this turn, from the helper's raw/<session>.json (copied to reviewer-raw/).
@@ -1202,6 +1208,8 @@ def run_ledger(dest):
         'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null)',
         'reviewer_calls_failed': sum(((d.get('reviewer') or {}).get('calls_failed_this_turn') or 0) for k, _, d in calls if k == 'turn'),
         'reviewer_failed_attempts_without_requests': failed_attempts,
+        'reviewer_requests_refused': sum(len((d.get('reviewer') or {}).get('requests_refused_this_turn') or [])
+                                         for k, _, d in calls if k == 'turn'),
         'updated_at': utc()}
 
 def write_ledger(dest):

@@ -33,11 +33,15 @@ LIB=/usr/local/lib/fable-review/fable_review.py
     --ambient-caps=+dac_read_search,+setpcap \
     python3 -I "$LIB" serve --socket "$SOCK" --model "$MODEL" --config-dir "$DIR" --home /home/fablereview \
     --root /tmp --root /workspace --peer-uid 1000 --token-fd 4 </dev/null >&2 2>&2 & )
+# ready = the helper accepts a connection on the published socket (an empty connection is its readiness probe), not
+# merely that the socket file exists (it may have died right after publishing it)
+probe() { python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect(sys.argv[1]); s.close()' "$SOCK" 2>/dev/null; }
+ready=0
 for _ in $(seq 1 150); do
-  [ -S "$SOCK" ] && break
+  if [ -S "$SOCK" ] && probe; then ready=1; break; fi
   sleep 0.1
 done
-if [ ! -S "$SOCK" ]; then
+if [ "$ready" != 1 ]; then
   say "reviewer helper did not become ready; the PM is not started"
   exit 91
 fi

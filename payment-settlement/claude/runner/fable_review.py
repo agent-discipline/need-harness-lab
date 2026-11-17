@@ -27,7 +27,10 @@ transcripts live in its own config dir so the runner attributes their usage to t
 Exit codes of the client: 2 arguments / unusable prompt, 94 request refused by the helper, 95 helper unreachable or
 broken reply, 98 no reviewer in this run (no socket: arms 1/2).
 Wire format: 8-byte big-endian length + UTF-8 JSON request; the client keeps the connection open until the reply
-(JSON, until EOF) arrives — closing it earlier cancels the call.
+(JSON, until EOF) arrives — closing it earlier cancels the call. A connection closed without any byte is the start
+script's readiness probe and is not recorded. Every other request that never reaches the CLI (malformed, wrong uid,
+path refused, snapshot refused, caller gone before the CLI started) is recorded as '<call> refused reason=…' (no
+session, no usage); only the requester's own readable files are ever copied.
 """
 import argparse
 from datetime import datetime, timezone
@@ -104,28 +107,56 @@ def validate(raw, roots):
     return cwd, prompt.encode('utf-8')
 
 
-def open_dir(path):
-    """Open path component by component from / without following any symbolic link; returns a directory fd."""
+def requester_may(st, uid, directory):
+    """Whether the requester could read this itself: it owns it, or others may read it (a directory: read and
+    search). The helper's DAC_READ_SEARCH is never lent to the requester."""
+    if st.st_uid == uid:
+        return True
+    need = (stat.S_IROTH | stat.S_IXOTH) if directory else stat.S_IROTH
+    return st.st_mode & need == need
+
+
+def open_dir(path, uid=None):
+    """Open path component by component from / without following any symbolic link; returns a directory fd. With uid
+    (the requester): every directory on the way must be searchable by the requester and the requested directory
+    readable and searchable by it."""
     fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in [p for p in path.split('/') if p]:
+        parts = [p for p in path.split('/') if p]
+        for i, part in enumerate(parts):
             try:
                 nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except OSError as exc:
                 raise ValueError('cwd %s cannot be opened without following links (%s at %r)' % (path, exc.strerror, part))
             os.close(fd)
             fd = nxt
+            if uid is not None:
+                st = os.fstat(fd)
+                last = i == len(parts) - 1
+                ok = requester_may(st, uid, True) if last else (st.st_uid == uid or st.st_mode & stat.S_IXOTH)
+                if not ok:
+                    raise ValueError('the requester cannot %s %s itself' % ('read' if last else 'enter', '/' + '/'.join(parts[:i + 1])))
         return fd
     except BaseException:
         os.close(fd)
         raise
 
 
-def snapshot(src_fd, dest):
+def snapshot(src_fd, dest, uid=None):
     """Copy the directory open at src_fd into dest (created, owned by this account): regular files and directories
-    only, never through a symbolic link, EXCLUDED names left out. Raises ValueError naming the first refusal (a link, a
-    special file, a limit). Returns {'files', 'bytes', 'excluded'}."""
+    only, never through a symbolic link, never onto another file system (st_dev of the requested directory), and with
+    uid only what the requester could read itself (requester_may, checked on the opened file or directory, so a hard
+    link is judged by its inode). EXCLUDED names are left out. Raises ValueError naming the first refusal (a link, a
+    special file, another file system, a file the requester cannot read, a limit) — nothing is left out silently.
+    Returns {'files', 'bytes', 'excluded'}."""
     totals = {'files': 0, 'bytes': 0, 'excluded': []}
+    device = os.fstat(src_fd).st_dev
+
+    def check(st, path, directory):
+        if st.st_dev != device:
+            raise ValueError('another file system (mount point) in the review directory: %s' % path)
+        if uid is not None and not requester_may(st, uid, directory):
+            raise ValueError('the requester cannot read %s itself: %s' % ('the directory' if directory else 'the file', path))
 
     def walk(fd, target, rel):
         os.mkdir(target, 0o700)
@@ -142,6 +173,7 @@ def snapshot(src_fd, dest):
             if stat.S_ISDIR(st.st_mode):
                 child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 try:
+                    check(os.fstat(child), path, True)
                     walk(child, os.path.join(target, name), path)
                 finally:
                     os.close(child)
@@ -151,8 +183,10 @@ def snapshot(src_fd, dest):
                     raise ValueError('review directory holds more than %d files' % MAX_FILES)
                 src = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
                 try:
-                    if not stat.S_ISREG(os.fstat(src).st_mode):
+                    opened = os.fstat(src)
+                    if not stat.S_ISREG(opened.st_mode):
                         raise ValueError('not a regular file when opened: %s' % path)
+                    check(opened, path, False)
                     with open(src, 'rb', closefd=False) as reader, open(os.path.join(target, name), 'xb') as writer:
                         while True:
                             chunk = reader.read(1 << 20)
@@ -199,7 +233,15 @@ class Reviewer:
         with self.lock, (self.dir / 'reviewer-calls.log').open('a') as stream:
             stream.write(line + '\n')
 
-    def run(self, src_fd, prompt, cancelled):
+    def refused(self, reason):
+        """Record a request that never reached the CLI (no session, no usage): '<call> refused reason=<text>'."""
+        call = self.call_id()
+        try:
+            self.append('%s refused reason=%s' % (call, ' '.join(str(reason).split())[:300]))
+        except OSError as exc:
+            log('cannot record the refusal %s: %s' % (call, exc))
+
+    def run(self, src_fd, prompt, cancelled, uid=None):
         """One reviewer attempt on a snapshot of the directory open at src_fd. Returns (exit code, stdout, stderr), or
         None when cancelled() became true before the CLI finished (the CLI is stopped and the call logged as cancelled)."""
         sid = str(uuid.uuid4())
@@ -209,10 +251,15 @@ class Reviewer:
             os.mkdir(work, 0o700)
             cwd = os.path.join(work, 'review')
             try:
-                copied = snapshot(src_fd, cwd)
+                copied = snapshot(src_fd, cwd, uid)
             except (ValueError, OSError) as exc:
+                self.refused('snapshot: %s' % exc)
                 return 94, '', '[fable-review] request refused: the review directory cannot be snapshotted: %s\n' % exc
             log('snapshot %s files=%d bytes=%d excluded=%s' % (sid, copied['files'], copied['bytes'], copied['excluded']))
+            if cancelled():                             # the caller left while the snapshot was made: no CLI
+                self.refused('client disconnected before the reviewer started')
+                log('caller disconnected during the snapshot %s; CLI not started' % sid)
+                return None
             return self.call(sid, cwd, prompt, cancelled)
         finally:
             try:
@@ -343,18 +390,25 @@ def serve(args):
             conn = self.request
             src_fd = None
             try:
+                head = conn.recv(8, socket.MSG_PEEK)
+            except OSError:
+                head = b''
+            if not head:                                  # a connection without any byte is a readiness probe, not a request
+                return
+            try:
                 raw = read_request(conn)
                 uid = peer_uid(conn)
                 if args.peer_uid is not None and uid != args.peer_uid:
                     raise ValueError('requests are accepted only from uid %d (got %d)' % (args.peer_uid, uid))
                 cwd, prompt = validate(raw, roots)
-                src_fd = open_dir(cwd)
+                src_fd = open_dir(cwd, args.peer_uid)
             except (ValueError, OSError, struct.error) as exc:
                 log('refused: %s' % exc)
+                reviewer.refused(exc)
                 reply = {'exit': 94, 'stdout': '', 'stderr': '[fable-review] request refused: %s\n' % exc}
             else:
                 try:
-                    done = reviewer.run(src_fd, prompt, lambda: disconnected(conn))
+                    done = reviewer.run(src_fd, prompt, lambda: disconnected(conn), args.peer_uid)
                 finally:
                     os.close(src_fd)
                 if done is None:
