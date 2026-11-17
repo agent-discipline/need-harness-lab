@@ -4,6 +4,10 @@
 directory .runs/<run> (ledger computed on the spot, manifest, request events, self-tests), the freeze (readiness.json
 named in the manifest) and the cap record censored.json.
 
+Order (spec 10.1): judging -> verdict.json -> launch.py normalize -> capture_turn.py -> this script -> discard ->
+commit_run.py. Every finalized turn must already be captured in the record folder (refused otherwise), so the hashes
+recorded here are those of the files as committed.
+
 PASSED/FAILED are never arguments: PASSED only when all of C01..C20 are PASS in verdict.json. INVALID_INFRA (an
 execution-environment failure unrelated to the implementation) is the only status given by argument, with a reason and
 evidence files. A run is finished once; a correction needs --supersede --reason and keeps the previous run.json beside
@@ -122,6 +126,25 @@ def terminal(passed, censored):
     return 'FAILED'
 
 
+def capture_state(run, folder):
+    """The finish comes after normalize and capture_turn (spec 10.1), so the record folder must already hold every turn
+    the run directory finalized (status ok/failed — what capture_turn accepts), byte-identical result.json. Returns
+    (turns not captured or captured from another result, turns capture_turn cannot take: cut short / not finalized)."""
+    missing, not_capturable = [], []
+    for turn in sorted(p for p in (run / 'turns').iterdir() if p.is_dir()) if (run / 'turns').is_dir() else []:
+        try:
+            status = json.loads((turn / 'result.json').read_text()).get('status')
+        except (OSError, ValueError, AttributeError):
+            status = None
+        if status not in ('ok', 'failed'):
+            not_capturable.append(turn.name)
+            continue
+        copy = folder / 'turns' / turn.name / 'result.json'
+        if not copy.is_file() or sha(copy) != sha(turn / 'result.json'):
+            missing.append(turn.name)
+    return missing, not_capturable
+
+
 def readiness_of(manifest):
     path = manifest.get('readiness')
     try:
@@ -173,6 +196,11 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
         raise ValueError('run %s is already finished (%s); a correction needs --supersede --reason' % (run_id, record.get('status')))
     if supersede_reason is not None and (not finished or not supersede_reason.strip()):
         raise ValueError('--supersede needs a finished record and a non-empty --reason')
+    uncaptured, not_capturable = capture_state(run, folder)
+    if uncaptured:
+        raise ValueError('turns %s of %s are not captured in %s (or differ from the run directory): the finish comes '
+                         'after normalize and capture_turn.py, so the evidence hashes are those of the committed files'
+                         % (', '.join(uncaptured), run_id, folder / 'turns'))
     censored = json.loads((run / 'censored.json').read_text()) if (run / 'censored.json').exists() else None
     verdict = read_verdict(folder, run_id) if (folder / VERDICT).exists() else None
     invalid = None
@@ -207,7 +235,8 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
     # before a call) and "completed + overshoot" (a call went past the cap) apart
     record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_reached=cap is not None, cap=cap,
                   cap_status=cap and cap['status'], cap_when=cap and cap['when'], cap_call=cap and cap['call'],
-                  cap_overshoot=cap and cap['overshoot'], finished_at=now, evidence_derivation=derivation, **fields)
+                  cap_overshoot=cap and cap['overshoot'], finished_at=now, evidence_derivation=derivation,
+                  turns_not_capturable=not_capturable, **fields)
     tmp = record_path.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(record_path)

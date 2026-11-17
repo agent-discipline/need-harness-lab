@@ -19,7 +19,7 @@
 - `harness-source/`: 하네스 v4.3 commit 7b0ef7b의 `git archive` 사본(`SOURCE.json`). Codex 쪽 사본(1754f16)과 의도적으로 다르다
 - `prompts/3-harness.md`: Claude 전용(네이티브 훅·Fable PM·구현·테스트·리뷰 워커 Opus·`fable-review`·컨테이너 환경 사실)
 - `runner/`: Claude Code 2.1.326 격리 실행기 ([runner/README.md](runner/README.md))
-- `scripts/finish_run.py`: 메인이 쓴 판정표(기록 폴더의 `verdict.json`, C01~C20)·실행 폴더·동결 파일·`censored.json`에서 run의 종료 상태와 `commit_run.py`가 요구하는 증거 네 칸을 도출해 `run.json`에 기록(run당 1회, 정정은 `--supersede --reason`, `INVALID_INFRA`만 인자). 형식 예시 `docs/results/verdict.example.json`
+- `scripts/finish_run.py`: 메인이 쓴 판정표(기록 폴더의 `verdict.json`, C01~C20)·실행 폴더·동결 파일·`censored.json`에서 run의 종료 상태와 `commit_run.py`가 요구하는 증거 네 칸을 도출해 `run.json`에 기록(`normalize`·`capture_turn` 뒤에 실행 — 기록되지 않은 턴이 있으면 거부, run당 1회, 정정은 `--supersede --reason`, `INVALID_INFRA`만 인자). 형식 예시 `docs/results/verdict.example.json`
 - `scripts/record_evaluation_cost.py`: 진행자 세션·판정 어댑터 작성 1건의 토큰을 실험 전체 단위 평가 비용 장부 `docs/results/evaluation-cost.jsonl`에 한 줄씩 덧붙인다(run 장부·상한·조건 비용 밖)
 - `scripts/{start_cycle,freeze_readiness,consult_contract,capture_turn,load_check}.py`: Codex 판 스크립트의 Claude 실행기 이식본(`test_scripts.py`)
 - `docs/runbook.md`, `docs/isolation-and-measurement.md`: Claude 판 절차와 측정 차이

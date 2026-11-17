@@ -688,7 +688,7 @@ class EvaluationCostLedgerTest(unittest.TestCase):
 
 def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results=None, tools=None, models=None,
                    usage_complete=True, selftest=True, readiness=True, record_status='RUNNING', censored=None, turns=1,
-                   proxy_model=None):
+                   proxy_model=None, captured=True):
     """A run directory, its frozen readiness and its record folder with verdict.json and evidence files."""
     launch = finish_run.launch
     root = Path(tmp) / 'claude'
@@ -723,6 +723,9 @@ def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results
     folder = root / ('docs/pilots/%s' % run_id if pilot else 'docs/experiments/%d/core1' % arm)
     if not pilot:
         write(folder / 'run.json', {'run_id': run_id, 'status': record_status, 'isolation_verified': True})
+    for t in sorted((run / 'turns').glob('*')) if captured else []:             # what capture_turn.py leaves
+        (folder / 'turns' / t.name).mkdir(parents=True)
+        shutil.copy2(t / 'result.json', folder / 'turns' / t.name / 'result.json')
     results = results or {}
     criteria = {c: {'result': results.get(c, 'PASS'), 'evidence': ['acceptance-http.json'], 'note': 'observed'}
                 for c in finish_run.CRITERIA}
@@ -915,6 +918,32 @@ class FinishRunTest(unittest.TestCase):
             root, _, _ = finish_fixture(tmp)
             with self.assertRaises(ValueError):
                 self.finish(root, supersede_reason='r')
+
+    def test_finish_comes_after_every_finalized_turn_is_captured(self):
+        with tempfile.TemporaryDirectory() as tmp:                              # turn 0002 not captured yet
+            root, run, folder = finish_fixture(tmp, turns=2, captured=False)
+            (folder / 'turns/0001').mkdir(parents=True)
+            shutil.copy2(run / 'turns/0001/result.json', folder / 'turns/0001/result.json')
+            before = (folder / 'run.json').read_bytes()
+            with self.assertRaises(ValueError) as ctx:
+                self.finish(root)
+            self.assertIn('0002', str(ctx.exception))
+            self.assertNotIn('0001', str(ctx.exception))
+            self.assertEqual((folder / 'run.json').read_bytes(), before)
+            (folder / 'turns/0002').mkdir()                                       # captured from another result
+            (folder / 'turns/0002/result.json').write_text('{"status": "ok"}')
+            with self.assertRaises(ValueError):
+                self.finish(root)
+            shutil.copy2(run / 'turns/0002/result.json', folder / 'turns/0002/result.json')
+            self.assertEqual(self.finish(root)[1], 'PASSED')
+            self.assertEqual(self.record(folder)['turns_not_capturable'], [])
+        with tempfile.TemporaryDirectory() as tmp:                              # a cut-short turn cannot be captured
+            root, run, folder = finish_fixture(tmp, turns=2)
+            (run / 'turns/0003').mkdir()
+            write(run / 'turns/0003/invocation.json', {'turn_kind': 'feedback', 'started_at': finish_run.launch.utc()})
+            _, _, _, fields = self.finish(root)
+            self.assertEqual(self.record(folder)['turns_not_capturable'], ['0003'])
+            self.assertIs(fields['usage_complete'], False)                      # and the ledger stays incomplete
 
     def test_runs_that_never_sent_a_turn_are_refused(self):
         for kw in (dict(record_status='NOT_STARTED'), dict(record_status='SETUP_FAILED'), dict(turns=0)):
