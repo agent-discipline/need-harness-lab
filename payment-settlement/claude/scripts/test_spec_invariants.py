@@ -34,6 +34,7 @@ PROTOCOL = 'payment-settlement-v3-claude'
 SPEC_LIMITS = {'token_limit': 20_000_000, 'time_limit_seconds': 8 * 3600, 'feedback_limit': 30}
 TOKEN = 'sk-ant-oat01-SPECINVARIANT-scripts-0123456789'
 PINNED_IMAGE = 'sha256:' + '7' * 64            # differs from the readiness runner digest in ready() on purpose
+RUNNER_IMAGE = 'sha256:' + 'a' * 64            # the runner image being frozen (= ReFreezeRefusesChangedInputs.IMAGES runner)
 U1 = {'input_tokens': 10, 'cache_creation_input_tokens': 20, 'cache_read_input_tokens': 30, 'output_tokens': 40}
 FLAGS = ('isolation_verified', 'usage_collector_verified', 'harness_adapter_verified', 'acceptance_suite_verified',
          'pilot_passed', 'oauth_token_source_verified', 'role_models_verified', 'cache_observation_verified',
@@ -65,6 +66,11 @@ def current_contract_sha():
 def write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value) + '\n')
+
+
+def ran_on(runs, run_id, image, turn='0001'):
+    """The turn's container inspect record (spec 11 보강 5-a: the smoke run's turns ran on `image`)."""
+    write(runs / run_id / 'turns' / turn / 'container-inspect.json', [{'Image': image, 'Config': {'Image': image}}])
 
 
 class LimitsAndProtocol(unittest.TestCase):
@@ -123,6 +129,7 @@ class ModelsPerSpec(unittest.TestCase):
         write(runs / run_id / 'turns/0001/result.json', dict(
             status='ok', session_id_confirmed=True, usage_complete=True,
             config_volume=dict(credentials_file_in_volume=False), usage_cross_check=dict(reported=U1)))
+        ran_on(runs, run_id, RUNNER_IMAGE)
 
     def test_role_models_verified_only_when_observed_ids_are_opus_and_fable(self):
         # spec 5 인증 스모크: 실제 모델 ID가 Opus 5.5·Fable 5.2로 기록되는지 확인
@@ -131,7 +138,7 @@ class ModelsPerSpec(unittest.TestCase):
             runs = Path(tmp)
             self.smoke(runs, 'a1', 1, {'main': OPUS}, {'implementer': [OPUS + '-20261101']})
             self.smoke(runs, 'a3', 3, arm3_req, {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})
-            flags, actual, _ = freeze_readiness.smoke_evidence(runs, ['a1', 'a3'])
+            flags, actual, _ = freeze_readiness.smoke_evidence(runs, ['a1', 'a3'], RUNNER_IMAGE)
             self.assertTrue(flags['role_models_verified'])
             self.assertTrue(actual['1'].startswith(OPUS) and actual['3'] == FABLE)
             wrong = {
@@ -147,11 +154,11 @@ class ModelsPerSpec(unittest.TestCase):
                 with self.subTest(name):
                     self.smoke(runs, run_id, arm, req, obs)
                     pair = [run_id, 'a3'] if arm != 3 else ['a1', run_id]
-                    self.assertFalse(freeze_readiness.smoke_evidence(runs, pair)[0]['role_models_verified'], name)
+                    self.assertFalse(freeze_readiness.smoke_evidence(runs, pair, RUNNER_IMAGE)[0]['role_models_verified'], name)
 
     def test_no_flag_is_true_without_evidence(self):
         # spec 5: preflight.py 전 항목 true(가짜 true 금지)
-        flags, actual, _ = freeze_readiness.smoke_evidence(Path('/nonexistent'), [])
+        flags, actual, _ = freeze_readiness.smoke_evidence(Path('/nonexistent'), [], RUNNER_IMAGE)
         self.assertFalse(any(flags.values()))
         self.assertEqual(actual, {})
         with tempfile.TemporaryDirectory() as tmp:
@@ -447,6 +454,7 @@ def smoke_run(runs, run_id, arm, tools, observed=None):
     write(runs / run_id / 'turns/0001/result.json', dict(
         status='ok', session_id_confirmed=True, usage_complete=True,
         config_volume=dict(credentials_file_in_volume=False), usage_cross_check=dict(reported=U1)))
+    ran_on(runs, run_id, RUNNER_IMAGE)
 
 
 # spec 11 보강 5-a: 그 조건의 기대 목록 = the runner's allow-list of arms 1/2 (arm 3: that list + subagent tool)
@@ -462,7 +470,7 @@ class SameToolsEvidence(unittest.TestCase):
             smoke_run(runs, 's1', 1, t1)
             smoke_run(runs, 's2', 2, t2)
             smoke_run(runs, 's3', 3, t3)
-            return freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['isolation_verified']
+            return freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], RUNNER_IMAGE)[0]['isolation_verified']
 
     def test_same_surface_plus_subagents_in_arm3_only(self):
         self.assertTrue(self.isolation(BASE_TOOLS, BASE_TOOLS, BASE_TOOLS | {'Task'}))
@@ -967,7 +975,7 @@ class SmokeEvidenceIsPerRun(unittest.TestCase):
                 manifest = json.loads((runs / run_id / 'manifest.json').read_text())
                 manifest['image'] = image
                 write(runs / run_id / 'manifest.json', manifest)
-                write(runs / run_id / 'turns/0001/container-inspect.json', [{'Image': image, 'Config': {'Image': image}}])
+                ran_on(runs, run_id, image)
             output = Path(tmp) / 'results' / 'readiness.json'
             output.parent.mkdir()
             code, out = readiness_cli(['--runs', str(runs), '--smoke-run', 'a1', '--smoke-run', 'a2', '--smoke-run', 'a3',
@@ -987,12 +995,83 @@ class SmokeEvidenceIsPerRun(unittest.TestCase):
                     self.assertIs(readiness['role_models_verified'], False,
                                   'a smoke run on another image backed role_models_verified')
 
+    def two_turn_smokes(self, runs, second_turn_image):
+        """Smokes a1/a3 on the frozen image; a1 has a second ok turn whose inspect record says `second_turn_image`
+        (None: the second turn has no inspect record)."""
+        smokes = ModelsPerSpec('test_requested_models_per_arm')
+        smokes.smoke(runs, 'a1', 1, {'main': OPUS}, {'implementer': [OPUS]})
+        smokes.smoke(runs, 'a3', 3, {'main': FABLE, 'worker': OPUS, 'reviewer': FABLE},
+                     {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})
+        first = runs / 'a1/turns/0001/result.json'
+        write(runs / 'a1/turns/0002/result.json', json.loads(first.read_text()))
+        if second_turn_image is not None:
+            ran_on(runs, 'a1', second_turn_image, turn='0002')
+
+    def test_every_turn_of_a_smoke_run_must_have_run_on_the_frozen_image(self):
+        # 5-a: 스모크 근거는 이번에 동결하는 runner 이미지에서 돈 run만 인정한다 (a run, i.e. all of its turns)
+        cases = {'second turn on the frozen image': (self.RUNNER, True),
+                 'second turn on another image': (self.OTHER, False),
+                 'second turn without an inspect record': (None, False)}
+        for name, (image, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                runs = Path(tmp)
+                self.two_turn_smokes(runs, image)
+                flags = freeze_readiness.smoke_evidence(runs, ['a1', 'a3'], self.RUNNER)[0]
+                self.assertIs(flags['role_models_verified'], expected, name)
+
+    def test_smoke_evidence_cannot_be_derived_without_naming_the_frozen_image(self):
+        # 5-a: no way to accept a smoke run without naming the image being frozen (no switch that turns the check off)
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            self.two_turn_smokes(runs, self.RUNNER)
+            self.assertIs(freeze_readiness.smoke_evidence(runs, ['a1', 'a3'], self.RUNNER)[0]['role_models_verified'],
+                          True)                                                                  # control
+            with self.assertRaises(TypeError):
+                freeze_readiness.smoke_evidence(runs, ['a1', 'a3'])
+            for blank in (None, '', False, '*'):
+                with self.subTest(image=blank):
+                    try:
+                        flags = freeze_readiness.smoke_evidence(runs, ['a1', 'a3'], blank)[0]
+                    except (TypeError, ValueError):
+                        continue
+                    self.assertFalse([k for k, v in flags.items() if v is True],
+                                     'image %r accepted smoke runs: %r' % (blank, flags))
+
+    def test_a_freeze_whose_runner_image_is_not_known_takes_no_smoke_as_evidence(self):
+        # 5-a through the CLI: without the runner image id there is no image the smokes can be checked against
+        images = {k: v for k, v in self.IMAGES.items() if 'runner' not in k}
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp) / 'runs'
+            smokes = ModelsPerSpec('test_requested_models_per_arm')
+            smokes.smoke(runs, 'a1', 1, {'main': OPUS}, {'implementer': [OPUS]})
+            smokes.smoke(runs, 'a3', 3, {'main': FABLE, 'worker': OPUS, 'reviewer': FABLE},
+                         {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})
+            output = Path(tmp) / 'results' / 'readiness.json'
+            output.parent.mkdir()
+            missing = [k for k in self.IMAGES if 'runner' in k]
+            argv = ['freeze_readiness.py', '--runs', str(runs), '--smoke-run', 'a1', '--smoke-run', 'a3', '--output', str(output)]
+            out = io.StringIO()
+            with patch.object(sys, 'argv', argv), patch.object(freeze_readiness, 'images', return_value=(images, missing)), \
+                 patch.object(freeze_readiness, 'clean_baseline', return_value=('f' * 40, [])), \
+                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                try:
+                    code = freeze_readiness.main() or 0
+                except SystemExit as exc:
+                    code = exc.code or 0
+                except Exception as exc:                       # a refusal by exception still writes no freeze
+                    code = repr(exc)
+            out = out.getvalue()
+            if code == 0 and output.exists():
+                readiness = json.loads(output.read_text())
+                for flag in ('role_models_verified', 'isolation_verified', 'usage_collector_verified'):
+                    self.assertIsNot(readiness.get(flag), True, '%s true without a known runner image: %s' % (flag, out))
+
     def isolation(self, tools_by_run):
         with tempfile.TemporaryDirectory() as tmp:
             runs = Path(tmp)
             for run_id, (arm, tools) in tools_by_run.items():
                 smoke_run(runs, run_id, arm, tools)
-            return freeze_readiness.smoke_evidence(runs, list(tools_by_run))[0]['isolation_verified']
+            return freeze_readiness.smoke_evidence(runs, list(tools_by_run), RUNNER_IMAGE)[0]['isolation_verified']
 
     def test_every_smoke_run_must_show_its_arms_tool_surface(self):
         good = {'a1': (1, BASE_TOOLS), 'a2': (2, BASE_TOOLS), 'a3': (3, BASE_TOOLS | {'Task'})}
@@ -1005,6 +1084,44 @@ class SmokeEvidenceIsPerRun(unittest.TestCase):
         for name, runs in cases.items():
             with self.subTest(name):
                 self.assertFalse(self.isolation(runs), name)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# No test of this module may reach the host's Docker daemon: while it runs, DOCKER_HOST names a socket that does not
+# exist and the first `docker` on PATH refuses (exit 125) and notes that it was called. The process environment is
+# restored afterwards, so other test modules of the same discover run are unaffected.
+# ---------------------------------------------------------------------------------------------------------------------
+_saved_environ = {}
+_no_docker = None
+
+
+def setUpModule():
+    global _no_docker
+    import shutil as _shutil  # noqa: F401  (kept local: the scripts module does not import shutil)
+    _no_docker = tempfile.mkdtemp(prefix='nodocker')
+    blocked = os.path.join(_no_docker, 'docker')
+    with open(blocked, 'w') as f:
+        f.write('#!/bin/sh\necho "$*" >> %s/called\necho "spec tests: docker is blocked" >&2\nexit 125\n' % _no_docker)
+    os.chmod(blocked, 0o755)
+    for key in ('DOCKER_HOST', 'PATH', 'DOCKER_CONTEXT'):
+        _saved_environ[key] = os.environ.get(key)
+    os.environ['DOCKER_HOST'] = 'unix://%s/no-daemon.sock' % _no_docker
+    os.environ.pop('DOCKER_CONTEXT', None)
+    os.environ['PATH'] = _no_docker + os.pathsep + (os.environ.get('PATH') or '/usr/bin:/bin')
+
+
+def tearDownModule():
+    import shutil as _shutil
+    for key, value in _saved_environ.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    called = os.path.join(_no_docker, 'called')
+    calls = open(called).read() if os.path.exists(called) else ''
+    _shutil.rmtree(_no_docker, ignore_errors=True)
+    if calls:
+        raise AssertionError('a test called the real docker command line: %s' % calls[:500])
 
 
 if __name__ == '__main__':

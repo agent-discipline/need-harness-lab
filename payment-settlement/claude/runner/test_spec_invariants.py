@@ -114,14 +114,15 @@ def env_values(cmd):
 
 def drive_turn(root, run_id, *, resume=False, kind=None, reported=None, projects=None, projects_rc=0, stderr=b'',
                reviewer_log=None, reviewer_projects=None, side_effect=None, stdout_extra=b'', timeout=5, record=None,
-               selftest=None, total_cost=0.1, results=None, reviewer_raw=None, via_cli=False):
+               selftest=None, total_cost=0.1, results=None, reviewer_raw=None, via_cli=False, image_id=None):
     """Run launch.turn with a fake docker. projects: {relative path: [line dict or raw str]}.
     kind: the declared turn kind of a resumed turn (--kind); a resumed turn without one is the caller's choice to test.
     selftest: optional side effect of the (no-cost) hook self-test, e.g. to let wall-clock time pass during it.
     total_cost: total_cost_usd of the stream result (None: the field is absent). results: several result events of one
     turn instead (list of dicts merged over a success result of the pinned session). reviewer_raw: {file name: dict|str}
     the reviewer volume's raw/ holds ({} = raw/ missing; None = the generic copy below). via_cli: go through
-    `launch.py turn` argument parsing (timeout None = --timeout-seconds not given)."""
+    `launch.py turn` argument parsing (timeout None = --timeout-seconds not given). image_id: the image id `docker inspect`
+    reports for the turn's container (None: an empty inspect record)."""
     if resume and kind is None:
         kind = 'feedback'          # default for the generic accounting tests: an evaluator feedback turn
     dest = root / '.runs' / run_id
@@ -157,7 +158,10 @@ def drive_turn(root, run_id, *, resume=False, kind=None, reported=None, projects
                 side_effect(dest)
             return SimpleNamespace(returncode=0)
         if cmd[:2] == ['docker', 'inspect']:
-            return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            if image_id is None:
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            inspect = [{'Image': image_id, 'Config': {'Image': manifest.get('image'), 'Env': []}}]
+            return SimpleNamespace(returncode=0, stdout=json.dumps(inspect).encode(), stderr=b'')
         if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/reviewer-calls.log'):
             if reviewer_log is None:
                 return SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: No such file or directory')
@@ -418,7 +422,7 @@ for top, dirs, files in os.walk('.', followlinks=False):
 token = %(token)r
 record = dict(argv=a, cwd=os.getcwd(), stdin=sys.stdin.read(), token_in_env=any(token in v for v in os.environ.values()),
               token_var=bool(os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')), logged_before_start=logged, session=sid, tree=tree,
-              config_dir=os.environ.get('CLAUDE_CONFIG_DIR'))
+              config_dir=os.environ.get('CLAUDE_CONFIG_DIR'), via_drop=os.environ.get('LAB_SPEC_VIA_CAPABILITY_DROP'))
 with open(base / 'calls.jsonl', 'a') as f:
     f.write(json.dumps(record) + '\n')
 mode = (base / 'mode').read_text().strip()
@@ -451,6 +455,46 @@ sys.exit(1 if mode == 'error' else 0)
 '''
 
 
+# Stand-in for `setpriv` (the helper's test-only `serve --setpriv` names it; the container start script never does). The
+# helper must start the reviewer CLI only through it, asking it to clear the bounding, inheritable and ambient capability
+# sets (runbook: `setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all`). It records what it was asked to
+# drop; in mode 'ok' it then runs the rest of its command line (the CLI) with a marker in the environment, in the other
+# modes it fails the way a real `setpriv` without the privilege does (the CLI never starts).
+SETPRIV_STANDIN = r'''#!%(python)s
+import json, os, pathlib, sys
+base = pathlib.Path(%(base)r)
+a = sys.argv[1:]
+mode_file = base / 'setpriv-mode'
+mode = mode_file.read_text().strip() if mode_file.exists() else 'ok'
+drops, i = {}, 0
+while i < len(a) and a[i].startswith('-'):
+    if a[i] == '--':
+        i += 1
+        break
+    name, eq, value = a[i].partition('=')
+    if not eq and name in ('--bounding-set', '--inh-caps', '--ambient-caps') and i + 1 < len(a):
+        value, i = a[i + 1], i + 1
+    drops[name] = value if (eq or name in ('--bounding-set', '--inh-caps', '--ambient-caps')) else True
+    i += 1
+command = a[i:]
+with open(base / 'setpriv.jsonl', 'a') as f:
+    f.write(json.dumps(dict(argv=a, drops=drops, command=command, mode=mode)) + '\n')
+if mode == 'fail':
+    sys.stderr.write('setpriv: setting bounding set: Operation not permitted\n')
+    sys.exit(127)
+if mode == 'fail-1':
+    sys.stderr.write('setpriv: capng_apply failed\n')
+    sys.exit(1)
+if mode == 'exit-0-without-running':
+    sys.exit(0)
+if not command:
+    sys.stderr.write('setpriv: no command\n')
+    sys.exit(127)
+os.environ['LAB_SPEC_VIA_CAPABILITY_DROP'] = '1'
+os.execv(command[0], command)
+'''
+
+
 def frame(raw):
     import struct
     return struct.pack('>Q', len(raw)) + raw
@@ -468,6 +512,7 @@ class ReviewerHelperFixture(unittest.TestCase):
     socket in a temporary directory and accepts the current uid. No docker is involved."""
 
     helper_model = FABLE
+    use_setpriv_standin = True        # False: the helper uses the real `setpriv`, as the container start script does
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -485,6 +530,12 @@ class ReviewerHelperFixture(unittest.TestCase):
         stub = self.base / 'claude-stub'
         stub.write_text(STUB_CLI % {'python': sys.executable, 'base': str(self.base), 'text': REVIEW_TEXT, 'token': TOKEN})
         os.chmod(stub, 0o755)
+        standin = []
+        if self.use_setpriv_standin:
+            setpriv = self.base / 'setpriv-standin'
+            setpriv.write_text(SETPRIV_STANDIN % {'python': sys.executable, 'base': str(self.base)})
+            os.chmod(setpriv, 0o755)
+            standin = ['--setpriv', str(setpriv)]
         self.helper_err = open(self.base / 'helper.stderr', 'wb')
         # the token reaches the helper through an inherited descriptor (serve --token-fd), never its environment
         token_r, token_w = os.pipe()
@@ -494,7 +545,7 @@ class ReviewerHelperFixture(unittest.TestCase):
             self.proc = subprocess.Popen(
                 [sys.executable, '-I', str(HERE / 'fable_review.py'), 'serve', '--socket', self.socket, '--model', self.helper_model,
                  '--config-dir', str(self.config), '--home', str(self.base / 'home'), '--cli', str(stub),
-                 '--root', str(self.allowed), '--peer-uid', str(os.getuid()), '--token-fd', str(token_r)],
+                 '--root', str(self.allowed), '--peer-uid', str(os.getuid()), '--token-fd', str(token_r)] + standin,
                 env={'PATH': os.environ.get('PATH', '/usr/bin:/bin')}, pass_fds=(token_r,),
                 stdin=subprocess.DEVNULL, stdout=self.helper_err, stderr=self.helper_err, preexec_fn=limit_file_size)
         finally:
@@ -522,6 +573,11 @@ class ReviewerHelperFixture(unittest.TestCase):
 
     def calls(self):
         path = self.base / 'calls.jsonl'
+        return [json.loads(l) for l in path.read_text().splitlines()] if path.exists() else []
+
+    def drops(self):
+        """What the setpriv stand-in was asked to do, one record per start."""
+        path = self.base / 'setpriv.jsonl'
         return [json.loads(l) for l in path.read_text().splitlines()] if path.exists() else []
 
     def client(self, cwd, prompt, extra=()):
@@ -3695,16 +3751,20 @@ class ReviewerSmokeBacksTheUsageCollector(unittest.TestCase):
     """Spec 11.5: 3번 조건 스모크가 리뷰어를 실제로 한 번 호출해, 리뷰어 인증과 사용량 수집이 동결 전에 검증된다
     (usage_collector_verified의 근거에 포함). Smoke runs are produced by the runner with a fake docker."""
 
+    RUNNER_IMAGE = 'sha256:' + 'a' * 64           # the runner image being frozen (spec 11 보강 5-a)
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.root = make_root(cls.tmp.name)
         cls.runs = cls.root / '.runs'
+        img = cls.RUNNER_IMAGE
         for arm in (1, 2):
             init_run(cls.root, 's%d' % arm, arm)
-            drive_turn(cls.root, 's%d' % arm, reported=U1, projects={'-workspace/s.jsonl': [assistant('r%d' % arm, OPUS, U1)]})
+            drive_turn(cls.root, 's%d' % arm, reported=U1, projects={'-workspace/s.jsonl': [assistant('r%d' % arm, OPUS, U1)]},
+                       image_id=img)
         init_run(cls.root, 'hook3', 3)
-        drive_turn(cls.root, 'hook3', reported=U1, projects={'-workspace/s.jsonl': [assistant('h-pm', FABLE, U1)]})
+        drive_turn(cls.root, 'hook3', reported=U1, projects={'-workspace/s.jsonl': [assistant('h-pm', FABLE, U1)]}, image_id=img)
         variants = {
             'ok': reviewer_attempt(sid_of(11), 0, [assistant('rv-ok', FABLE, U2, session=sid_of(11))],
                                    raw_result(sid_of(11), False, U2, 0.25)),
@@ -3717,14 +3777,15 @@ class ReviewerSmokeBacksTheUsageCollector(unittest.TestCase):
         for name, (log, rprojects, raws) in variants.items():
             init_run(cls.root, 'rv-' + name, 3)
             drive_turn(cls.root, 'rv-' + name, reported=U1, projects={'-workspace/s.jsonl': [assistant('pm-' + name, FABLE, U1)]},
-                       reviewer_log=log, reviewer_projects=rprojects, reviewer_raw=raws)
+                       reviewer_log=log, reviewer_projects=rprojects, reviewer_raw=raws, image_id=img)
 
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def collector(self, *extra):
-        return FREEZE.smoke_evidence(self.runs, ['s1', 's2', 'hook3'] + list(extra))[0]['usage_collector_verified']
+    def collector(self, *extra, image=None):
+        return FREEZE.smoke_evidence(self.runs, ['s1', 's2', 'hook3'] + list(extra),
+                                     self.RUNNER_IMAGE if image is None else image)[0]['usage_collector_verified']
 
     def test_without_a_reviewer_smoke_the_collector_is_not_verified(self):
         self.assertIs(self.collector(), False)
@@ -3917,6 +3978,105 @@ class CancelledReviewerCall(ReviewerHelperFixture):
         self.assertNotIn(sid, json.dumps(result['reviewer'].get('failed_attempts_without_requests')))
 
 
+CAP_SETS = ('--bounding-set', '--inh-caps', '--ambient-caps')
+
+
+class ReviewerCliHasNoCapabilities(ReviewerHelperFixture):
+    """1-b. 프로젝트 설정(훅·MCP·환경)과 git 설정이 토큰을 가진 사용자로 실행되는 경로가 없어야 한다 — with the mechanism the
+    runbook (준비 절) and runner/README.md give: the reviewer CLI is started without any capability, through
+    `setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all`. Brief (T-blind-8): if the drop cannot be performed,
+    no reviewer CLI runs at all (fail closed) and the call is a failure, not a silent success."""
+
+    def test_every_reviewer_cli_start_clears_the_bounding_inheritable_and_ambient_sets(self):
+        for prompt in ('first review', 'second review'):
+            self.assertEqual(self.client(self.allowed / 'sub', prompt).returncode, 0)
+        self.assertEqual(self.send({'cwd': str(self.allowed / 'sub'), 'prompt': 'raw request'}).get('exit'), 0)
+        calls, drops = self.calls(), self.drops()
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(drops), len(calls), 'a reviewer CLI start did not go through the capability drop')
+        for call, drop in zip(calls, drops):
+            for name in CAP_SETS:
+                self.assertEqual(drop['drops'].get(name), '-all', '%s not cleared: %r' % (name, drop['argv']))
+            self.assertEqual(call['via_drop'], '1', 'the reviewer CLI was started outside the capability drop')
+            self.assertEqual(drop['command'][1:], call['argv'], 'the dropped command is not the reviewer CLI')
+            self.assertEqual(Path(drop['command'][0]).name, 'claude-stub')
+
+    def test_a_drop_that_cannot_be_performed_runs_no_reviewer_and_fails_the_call(self):
+        sub = self.allowed / 'sub'
+        for mode in ('fail', 'fail-1', 'exit-0-without-running'):
+            with self.subTest(mode):
+                (self.base / 'setpriv-mode').write_text(mode)
+                before = len(self.drops())
+                done = self.client(sub, 'review')
+                self.assertNotEqual(done.returncode, 0, 'a failed capability drop passed as a reviewed call')
+                self.assertNotIn(REVIEW_TEXT, done.stdout.decode(errors='replace'))
+                reply = self.send({'cwd': str(sub), 'prompt': 'review'})
+                self.assertIsNotNone(reply)
+                self.assertNotEqual(reply.get('exit'), 0, reply)
+                self.assertNotIn(REVIEW_TEXT, json.dumps(reply))
+                self.assertEqual(len(self.drops()), before + 2, 'the stand-in was not asked to drop capabilities')
+                self.assertEqual(self.calls(), [], 'the reviewer CLI ran although the capability drop failed')
+        (self.base / 'setpriv-mode').write_text('ok')
+        self.assertEqual(self.client(sub, 'review').returncode, 0)                    # control
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_an_attempt_whose_drop_failed_is_still_on_the_attempt_log(self):
+        # spec 11.1: 호출마다 시도를 먼저 기록하는 기존 성질(중단돼도 증거가 남음)
+        (self.base / 'setpriv-mode').write_text('fail')
+        self.assertNotEqual(self.client(self.allowed / 'sub', 'review').returncode, 0)
+        log = self.config / 'reviewer-calls.log'
+        self.assertTrue(log.is_file())
+        self.assertRegex(log.read_text(), r'started session=\S+ model=%s' % FABLE)
+
+    def test_the_reviewer_cli_reads_no_project_settings_or_mcp_and_uses_its_own_config_dir(self):
+        # runbook 준비 절: 리뷰어 CLI는 --setting-sources user --strict-mcp-config, 리뷰어 config dir; serve --help: snapshots
+        # live under <home>/snapshots
+        self.assertEqual(self.client(self.allowed / 'sub', 'review').returncode, 0)
+        [call] = self.calls()
+        argv = call['argv']
+        self.assertIn('--strict-mcp-config', argv)
+        self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user')
+        self.assertEqual(call['config_dir'], str(self.config))
+        snapshots = (self.base / 'home' / 'snapshots').resolve()
+        self.assertTrue(str(Path(call['cwd']).resolve()).startswith(str(snapshots) + os.sep), call['cwd'])
+
+
+def has_setpcap():
+    try:
+        for line in Path('/proc/self/status').read_text().splitlines():
+            if line.startswith('CapEff:'):
+                return bool(int(line.split()[1], 16) & (1 << 8))           # CAP_SETPCAP
+    except OSError:
+        pass
+    return os.geteuid() == 0
+
+
+class ReviewerHelperWithoutThePrivilegeFailsClosed(ReviewerHelperFixture):
+    """Brief (T-blind-8) + runbook: the helper started as the container start script starts it (no stand-in) on a host
+    where the capability drop is not permitted: no reviewer CLI runs and the call fails."""
+    use_setpriv_standin = False
+
+    def setUp(self):
+        if has_setpcap():
+            self.skipTest('this process may drop capabilities; the fail-closed path is not reachable here')
+        super().setUp()
+
+    def test_no_reviewer_runs_without_a_working_capability_drop(self):
+        done = self.client(self.allowed / 'sub', 'review')
+        self.assertNotEqual(done.returncode, 0, 'the reviewer ran without its capability drop')
+        self.assertNotIn(REVIEW_TEXT, done.stdout.decode(errors='replace'))
+        self.assertEqual(self.calls(), [])
+
+
+class StartScriptNeverNamesTheStandIn(unittest.TestCase):
+    """Brief (T-blind-8): the test-only `serve --setpriv` option is never passed by the container start script."""
+
+    def test_the_container_start_script_and_client_do_not_pass_the_stand_in_option(self):
+        for name in ('lab-arm3-start.sh', 'fable-review.sh'):
+            with self.subTest(name):
+                self.assertNotIn('--setpriv', (HERE / name).read_text())
+
+
 class SmokeEvidenceIsPerRun(ReviewerSmokeBacksTheUsageCollector):
     """5-a. 실패한 턴이 있는 스모크 run은 사용량 수집 검증의 근거가 되지 못한다. (image and tool-surface parts:
     scripts/test_spec_invariants.py SmokeEvidenceIsPerRun)"""
@@ -3930,14 +4090,43 @@ class SmokeEvidenceIsPerRun(ReviewerSmokeBacksTheUsageCollector):
                                                 raw_result(sid, False, U2, 0.25))
         init_run(self.root, 'rv-mixed', 3)
         drive_turn(self.root, 'rv-mixed', reported=U1, projects={'-workspace/s.jsonl': [assistant('pm-mixed', FABLE, U1)]},
-                   reviewer_log=log, reviewer_projects=rprojects, reviewer_raw=raws)
+                   reviewer_log=log, reviewer_projects=rprojects, reviewer_raw=raws, image_id=self.RUNNER_IMAGE)
         self.assertIs(self.collector('rv-mixed'), True)                    # control before the failed turn
         attempt_turn(self.root, 'rv-mixed', resume=True, kind='feedback')  # a second turn that fails
+        turn_dirs = sorted((self.runs / 'rv-mixed/turns').iterdir())
+        # the failed turn ran on the frozen image too: only its failure can make the run no evidence
+        (turn_dirs[-1] / 'container-inspect.json').write_text(json.dumps(
+            [{'Image': self.RUNNER_IMAGE, 'Config': {'Image': 'img', 'Env': []}}]))
         statuses = [json.loads((d / 'result.json').read_text())['status']
-                    for d in sorted((self.runs / 'rv-mixed/turns').iterdir()) if (d / 'result.json').exists()]
+                    for d in turn_dirs if (d / 'result.json').exists()]
         self.assertIn('ok', statuses)
         self.assertTrue([s for s in statuses if s != 'ok'], statuses)
         self.assertIs(self.collector('rv-mixed'), False)
+
+    def test_a_reviewer_smoke_on_another_image_does_not_verify_the_collector(self):
+        # 5-a: 스모크 근거는 이번에 동결하는 runner 이미지에서 돈 run만 인정한다
+        other = 'sha256:' + '9' * 64
+        sid = sid_of(22)
+        log, rprojects, raws = reviewer_attempt(sid, 0, [assistant('rv-other', FABLE, U2, session=sid)],
+                                                raw_result(sid, False, U2, 0.25))
+        init_run(self.root, 'rv-other', 3)
+        drive_turn(self.root, 'rv-other', reported=U1, projects={'-workspace/s.jsonl': [assistant('pm-other', FABLE, U1)]},
+                   reviewer_log=log, reviewer_projects=rprojects, reviewer_raw=raws, image_id=other)
+        self.assertIs(self.collector('rv-other'), False, 'a reviewer smoke on another image verified the collector')
+        self.assertIs(self.collector('rv-ok', image=other), False, 'smokes on the frozen image counted for another image')
+        self.assertIs(self.collector('rv-ok'), True)                                          # control
+
+    def test_the_image_check_cannot_be_left_out(self):
+        # 5-a: no way to accept a smoke run without naming the image being frozen
+        with self.assertRaises(TypeError):
+            FREEZE.smoke_evidence(self.runs, ['s1', 's2', 'hook3', 'rv-ok'])
+        for blank in (None, '', False):
+            with self.subTest(image=blank):
+                try:
+                    flags = FREEZE.smoke_evidence(self.runs, ['s1', 's2', 'hook3', 'rv-ok'], blank)[0]
+                except (TypeError, ValueError):
+                    continue
+                self.assertFalse(any(v is True for v in flags.values()), 'a blank image switched the check off: %r' % flags)
 
 
 class CostOnlyFromThePinnedSession(CostIsCumulativePerSession):
@@ -3967,6 +4156,44 @@ class CostOnlyFromThePinnedSession(CostIsCumulativePerSession):
         by_call = {c['call']: c for c in ledger['cost_by_call']}
         self.assertIsNone(by_call['turn/0003'].get('pinned_session_increase_usd'),
                           'the increase 1.0 -> 3.0 was attributed to turn 3 although turn 2 was not observed')
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# No test of this module may reach the host's Docker daemon: while it runs, DOCKER_HOST names a socket that does not
+# exist and the first `docker` on PATH refuses (exit 125) and notes that it was called. The process environment is
+# restored afterwards, so other test modules of the same discover run are unaffected.
+# ---------------------------------------------------------------------------------------------------------------------
+_saved_environ = {}
+_no_docker = None
+
+
+def setUpModule():
+    global _no_docker
+    import shutil as _shutil  # noqa: F401  (kept local: the scripts module does not import shutil)
+    _no_docker = tempfile.mkdtemp(prefix='nodocker')
+    blocked = os.path.join(_no_docker, 'docker')
+    with open(blocked, 'w') as f:
+        f.write('#!/bin/sh\necho "$*" >> %s/called\necho "spec tests: docker is blocked" >&2\nexit 125\n' % _no_docker)
+    os.chmod(blocked, 0o755)
+    for key in ('DOCKER_HOST', 'PATH', 'DOCKER_CONTEXT'):
+        _saved_environ[key] = os.environ.get(key)
+    os.environ['DOCKER_HOST'] = 'unix://%s/no-daemon.sock' % _no_docker
+    os.environ.pop('DOCKER_CONTEXT', None)
+    os.environ['PATH'] = _no_docker + os.pathsep + (os.environ.get('PATH') or '/usr/bin:/bin')
+
+
+def tearDownModule():
+    import shutil as _shutil
+    for key, value in _saved_environ.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    called = os.path.join(_no_docker, 'called')
+    calls = open(called).read() if os.path.exists(called) else ''
+    _shutil.rmtree(_no_docker, ignore_errors=True)
+    if calls:
+        raise AssertionError('a test called the real docker command line: %s' % calls[:500])
 
 
 if __name__ == '__main__':
