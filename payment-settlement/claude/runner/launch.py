@@ -1049,21 +1049,46 @@ def turn(args):
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')
 
+RAW_ENTRY = re.compile(r'f /vol/raw/([0-9a-f-]{36})\.json')
+
 def discard(args):
-    """Record what the run's volumes hold (names only), then remove the volumes. The run directory stays."""
+    """End of run: list what the run's volumes hold (names only), check that every reviewer call result in the
+    reviewer volume was recovered into the run directory, then remove the volumes. The run directory stays.
+    Refuses (removing nothing) when a reviewer result was never recovered; fails loudly when a removal fails, and
+    writes discard-<time>.json either way (complete=true only when every volume is gone)."""
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
-    record = {'at': utc(), 'volumes': {}}
+    record = {'at': utc(), 'volumes': {}, 'refused': None}
+    listings = {}
     for key in ('config_volume', 'reviewer_volume', 'codex_volume'):   # codex_volume: manifests created before v3-claude
         volume = manifest.get(key)
-        if not volume:
-            continue
-        rc, out, err = helper(manifest, "find /vol -printf '%y %p\\n' | sort", ['type=volume,src=%s,dst=/vol' % volume])
-        removed = subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True, text=True, check=False)
-        record['volumes'][volume] = {'listing_rc': rc, 'entries': out.splitlines() if rc == 0 else None,
-                                     'removed': removed.returncode == 0, 'stderr': removed.stderr[-500:]}
+        if volume:
+            rc, out, err = helper(manifest, "find /vol -printf '%y %p\\n' | sort", ['type=volume,src=%s,dst=/vol' % volume])
+            listings[key] = (volume, rc, out.splitlines() if rc == 0 else None)
+    if 'reviewer_volume' in listings:
+        _, rc, entries = listings['reviewer_volume']
+        recovered = {p.stem for p in dest.glob('turns/*/reviewer-raw/*.json')}
+        in_volume = {m.group(1) for line in entries or [] for m in [RAW_ENTRY.fullmatch(line)] if m}
+        if rc != 0:
+            record['refused'] = 'reviewer volume could not be listed; recovery of reviewer results unknown'
+        elif in_volume - recovered:
+            record['refused'] = 'reviewer results not recovered into the run: ' + ', '.join(sorted(in_volume - recovered))
+    for key, (volume, rc, entries) in listings.items():
+        entry = {'listing_rc': rc, 'entries': entries, 'removed': False, 'stderr': ''}
+        if not record['refused']:
+            removed = subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True, text=True, check=False)
+            entry.update(removed=removed.returncode == 0, stderr=removed.stderr[-500:])
+        record['volumes'][volume] = entry
+    record['complete'] = not record['refused'] and all(v['removed'] for v in record['volumes'].values())
     write_json(dest / ('discard-%s.json' % utc().replace(':', '-')), record)
     print(json.dumps({v: r['removed'] for v, r in record['volumes'].items()}))
+    if not record['complete']:
+        raise RuntimeError('volume cleanup incomplete: ' + (record['refused'] or 'a volume could not be removed (see discard-*.json)'))
+
+def discard_complete(dest):
+    """Evidence for the next cycle: the run's latest discard record removed every volume."""
+    records = sorted(Path(dest).glob('discard-*.json'))
+    return bool(records) and json.loads(records[-1].read_text()).get('complete') is True
 
 def role_model(manifest, role, events=()):
     """Requested model label per role (normalization label only; actual models come from the transcripts)."""

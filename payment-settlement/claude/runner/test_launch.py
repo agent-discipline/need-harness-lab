@@ -803,6 +803,43 @@ class RunLimitTest(unittest.TestCase):
             (root / 'b').mkdir()
             self.assertIsNone(launch.record_overshoot(self.make_run(root / 'b', tokens_per_turn=5)))
 
+class DiscardTest(unittest.TestCase):
+    def run_discard(self, dest, reviewer_entries, rm_rc=0):
+        def fake_helper(m, script, mounts, network_none=True):
+            if 'rev-vol' in mounts[0]:
+                return 0, ''.join(e + '\n' for e in reviewer_entries), ''
+            return 0, 'd /vol\n', ''
+        args = SimpleNamespace(runs=dest.parent, run_id=dest.name)
+        with patch.object(launch, 'helper', side_effect=fake_helper), \
+             patch.object(launch.subprocess, 'run', return_value=SimpleNamespace(returncode=rm_rc, stderr='busy')) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            try:
+                launch.discard(args)
+                error = None
+            except RuntimeError as exc:
+                error = exc
+        return error, run
+
+    def test_reviewer_results_must_be_recovered_before_volumes_go(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'a'
+            (dest / 'turns/0001/reviewer-raw').mkdir(parents=True)
+            launch.write_json(dest / 'manifest.json', manifest(3, run_id='a'))
+            sid = 'aaaaaaaa-0000-4000-8000-000000000021'
+            entries = ['d /vol', 'd /vol/raw', 'f /vol/raw/%s.json' % sid, 'f /vol/reviewer-calls.log']
+            error, run = self.run_discard(dest, entries)
+            self.assertIn('not recovered', str(error))
+            run.assert_not_called()                                    # nothing removed
+            self.assertFalse(launch.discard_complete(dest))
+            (dest / 'turns/0001/reviewer-raw' / (sid + '.json')).write_text('{}')
+            error, run = self.run_discard(dest, entries, rm_rc=1)       # removal failure is loud
+            self.assertIn('could not be removed', str(error))
+            self.assertFalse(launch.discard_complete(dest))
+            error, run = self.run_discard(dest, entries)
+            self.assertIsNone(error)
+            self.assertEqual(run.call_count, 2)                        # config + reviewer volume
+            self.assertTrue(launch.discard_complete(dest))
+
 class FableReviewWrapperTest(unittest.TestCase):
     """runner/fable-review.sh with a fake `claude` on PATH (no model call)."""
     WRAPPER = Path(__file__).with_name('fable-review.sh')
