@@ -44,6 +44,13 @@ NO_SUBAGENT_TOOLS = ('Agent', 'Task', 'Workflow')   # fan-out surfaces that must
 # manifest observed_tools); the selftest asserts they are on every arm's observed tool surface.
 WEB_TOOLS = ('WebSearch', 'WebFetch')
 ALLOWED_TOOLS_ARM12 = ('Bash', 'Read', 'Edit', 'Write', 'NotebookEdit', 'Glob', 'Grep', 'ToolSearch') + WEB_TOOLS
+# Arm 3 = the same list + the subagent surface only (the CLI names its subagent tool 'Task'; '--tools ...,Task' yields it
+# on the init event, checked on 2.1.326 without network). Nothing else: no skills, schedulers, messaging, worktrees.
+SUBAGENT_TOOLS = ('Task',)
+ALLOWED_TOOLS_ARM3 = ALLOWED_TOOLS_ARM12 + SUBAGENT_TOOLS
+
+def allowed_tools(manifest):
+    return ALLOWED_TOOLS_ARM3 if manifest.get('arm') == 3 else ALLOWED_TOOLS_ARM12
 # Run caps (protocol v3-claude): every role of the run counts (pm/implementer/worker/reviewer/user-proxy), tokens are
 # input + cache read + cache creation + output. Feedback = follow-up prompts delivered to the run's session (successful
 # turns after the first one). Whichever cap is reached first ends the run as CENSORED_* (censored.json).
@@ -146,9 +153,15 @@ if [ -z "$TOOLS" ]; then report cli_init_missing 1; fail=1; fi
 for t in $WEB_TOOLS; do case ",$TOOLS," in *",$t,"*) ;; *) report web_tool_missing "$t"; fail=1;; esac; done
 if [ "$HARNESS" = 0 ]; then
   for t in $DENIED_TOOLS; do case ",$TOOLS," in *",$t,"*) report denied_tool_present "$t"; fail=1;; esac; done
-  # observed surface must be a subset of the allow-list (a tool nobody enumerated is a failure, not a silent leak)
-  IFS=',' read -ra OBSERVED <<< "$TOOLS"
-  for t in "${OBSERVED[@]}"; do [ -n "$t" ] || continue; case ",$ALLOWED_TOOLS," in *",$t,"*) ;; *) report tool_outside_allowlist "$t"; fail=1;; esac; done
+fi
+# every arm: observed surface must be a subset of its allow-list (a tool nobody enumerated is a failure, not a silent leak)
+IFS=',' read -ra OBSERVED <<< "$TOOLS"
+for t in "${OBSERVED[@]}"; do [ -n "$t" ] || continue; case ",$ALLOWED_TOOLS," in *",$t,"*) ;; *) report tool_outside_allowlist "$t"; fail=1;; esac; done
+# arm 3 = arms 1/2 list + subagent surface: the subagent tools must really be there, and nothing beyond them is extra
+if [ "$HARNESS" = 1 ]; then
+  for t in $SUBAGENT_TOOLS; do case ",$TOOLS," in *",$t,"*) ;; *) report subagent_tool_missing "$t"; fail=1;; esac; done
+  for t in "${OBSERVED[@]}"; do [ -n "$t" ] || continue; case " $SUBAGENT_TOOLS " in *" $t "*) continue;; esac
+    case ",$BASE_TOOLS," in *",$t,"*) ;; *) report tool_beyond_base_and_subagents "$t"; fail=1;; esac; done
 fi
 # Workspace must be a readable git repository for the user inside the container (hooks classify by toplevel).
 git -C /workspace rev-parse --show-toplevel >/dev/null 2>&1; rc=$?; report workspace_git_exit "$rc"; [ "$rc" = 0 ] || fail=1
@@ -257,10 +270,12 @@ def selftest(manifest):
     os.chmod(expected.name, 0o644)
     mounts.append('type=bind,src=%s,dst=/expected/harness-hashes.json,readonly' % expected.name)
     settings_sha = hashlib.sha256((ROOT / 'runner/harness-settings.json').read_bytes()).hexdigest()
-    extra = '' if manifest.get('requested_worker_model') else '--tools ' + ','.join(ALLOWED_TOOLS_ARM12)
-    script = 'export MODEL=%s HARNESS=%d SETTINGS_SHA=%s MIN_HOOKS=%d DENIED_TOOLS="%s" ALLOWED_TOOLS="%s" WEB_TOOLS="%s" EXTRA_ARGS="%s"\n' % (
+    extra = '--tools ' + ','.join(allowed_tools(manifest))
+    script = ('export MODEL=%s HARNESS=%d SETTINGS_SHA=%s MIN_HOOKS=%d DENIED_TOOLS="%s" ALLOWED_TOOLS="%s" BASE_TOOLS="%s" '
+              'SUBAGENT_TOOLS="%s" WEB_TOOLS="%s" EXTRA_ARGS="%s"\n') % (
         manifest['requested_model'], 1 if harness else 0, settings_sha, MIN_HOOKS, ' '.join(NO_SUBAGENT_TOOLS),
-        ','.join(ALLOWED_TOOLS_ARM12), ' '.join(WEB_TOOLS), extra) + SELFTEST
+        ','.join(allowed_tools(manifest)), ','.join(ALLOWED_TOOLS_ARM12), ' '.join(SUBAGENT_TOOLS), ' '.join(WEB_TOOLS),
+        extra) + SELFTEST
     try:
         rc, out, err = helper(manifest, script, mounts)
     finally:
@@ -269,7 +284,8 @@ def selftest(manifest):
     for line in out.splitlines():
         if '=' in line:
             key, value = line.split('=', 1)
-            if key in ('hook_missing', 'denied_tool_present', 'tool_outside_allowlist', 'web_tool_missing'):
+            if key in ('hook_missing', 'denied_tool_present', 'tool_outside_allowlist', 'web_tool_missing',
+                       'subagent_tool_missing', 'tool_beyond_base_and_subagents'):
                 report.setdefault(key, []).append(value)
             else:
                 report.setdefault(key, value)
@@ -346,8 +362,7 @@ def claude_command(manifest, resume, max_turns=None, max_budget_usd=None):
         command += ['--max-turns', str(max_turns)]
     if max_budget_usd:
         command += ['--max-budget-usd', str(max_budget_usd)]
-    if not manifest.get('requested_worker_model'):
-        command += ['--tools', ','.join(ALLOWED_TOOLS_ARM12)]              # arms 1/2: allow-list (Codex parity)
+    command += ['--tools', ','.join(allowed_tools(manifest))]              # every arm: allow-list (arm 3 adds subagents)
     return command
 
 def docker_command(manifest, env_file, name, resume, max_turns=None, max_budget_usd=None):

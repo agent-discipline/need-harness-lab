@@ -78,7 +78,9 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn('bind,src=', ' '.join(m for m in mounts if 'workspace' not in m))   # no credential file mounted
         self.assertIn('CLAUDE_CODE_SUBAGENT_MODEL=worker-y', cmd)
         self.assertIn('CLAUDE_CODE_SUBAGENT_EFFORT=high', cmd)
-        self.assertNotIn('--tools', cmd)
+        tools = cmd[cmd.index('--tools') + 1].split(',')              # arm 3 = arms 1/2 list + subagent surface
+        self.assertEqual(set(tools) - set(launch.SUBAGENT_TOOLS), set(launch.ALLOWED_TOOLS_ARM12))
+        self.assertEqual(set(tools) & set(launch.SUBAGENT_TOOLS), set(launch.SUBAGENT_TOOLS))
         self.assertNotIn('docker.sock', ' '.join(cmd))
         # arms 1/2 never receive the reviewer switch, so fable-review refuses there
         self.assertNotIn('LAB_REVIEWER', ' '.join(launch.docker_command(manifest(), Path('/e'), 'n', resume=False)))
@@ -658,6 +660,31 @@ class RunnerTest(unittest.TestCase):
                 self.assertEqual(report['web_tool_missing'], ['WebSearch', 'WebFetch'])
                 self.assertFalse(report['passed'])
         self.assertTrue(set(launch.WEB_TOOLS) <= set(launch.ALLOWED_TOOLS_ARM12))
+
+    def test_selftest_script_holds_arm3_to_base_plus_subagents(self):
+        """Run the selftest's tool checks locally against a fake claude that reports a chosen init tool surface."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / 'bin').mkdir()
+            fake = base / 'bin/claude'
+            fake.write_text('#!/usr/bin/env python3\nimport json, os\n'
+                            'print(json.dumps({"type": "system", "subtype": "init", "tools": os.environ["FAKE_TOOLS"].split(",")}))\n')
+            os.chmod(fake, 0o755)
+            captured = {}
+            def fake_helper(m, script, mounts, network_none=True):
+                captured['script'] = script
+                return 0, 'selftest_failed=0\n', ''
+            with patch.object(launch, 'helper', side_effect=fake_helper):
+                launch.selftest(manifest(3, workspace=str(base / 'runs/r/workspace')))
+            script = captured['script']
+            checks = script[:script.index('# Workspace must be')].replace('/tmp', str(base)) + '\nreport selftest_failed "$fail"\n'
+            def run(tools):
+                env = dict(os.environ, PATH=str(base / 'bin') + ':' + os.environ['PATH'], FAKE_TOOLS=','.join(tools))
+                out = subprocess.run(['bash', '-c', checks], capture_output=True, text=True, env=env).stdout
+                return dict(l.split('=', 1) for l in out.splitlines() if '=' in l)
+            self.assertEqual(run(launch.ALLOWED_TOOLS_ARM3)['selftest_failed'], '0')
+            self.assertEqual(run(launch.ALLOWED_TOOLS_ARM12)['subagent_tool_missing'], 'Task')
+            self.assertEqual(run(launch.ALLOWED_TOOLS_ARM3 + ('Skill',))['tool_outside_allowlist'], 'Skill')
 
     def test_expected_harness_hashes_flatten(self):
         m = {'harness_seed': {'sources': {'core.md': {'core.md': 'a'}, 'hooks': {'gate-guard.sh': 'b', 'tests/lib.sh': 'c'}},
