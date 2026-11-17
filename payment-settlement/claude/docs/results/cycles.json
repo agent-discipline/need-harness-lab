@@ -1,0 +1,122 @@
+[
+  {
+    "cycle": 1,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core01",
+      "claude-arm2-core01",
+      "claude-arm3-core01"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 2,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core02",
+      "claude-arm2-core02",
+      "claude-arm3-core02"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 3,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core03",
+      "claude-arm2-core03",
+      "claude-arm3-core03"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 4,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core04",
+      "claude-arm2-core04",
+      "claude-arm3-core04"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 5,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core05",
+      "claude-arm2-core05",
+      "claude-arm3-core05"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 6,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core06",
+      "claude-arm2-core06",
+      "claude-arm3-core06"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 7,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core07",
+      "claude-arm2-core07",
+      "claude-arm3-core07"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 8,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core08",
+      "claude-arm2-core08",
+      "claude-arm3-core08"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 9,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core09",
+      "claude-arm2-core09",
+      "claude-arm3-core09"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  },
+  {
+    "cycle": 10,
+    "status": "NOT_STARTED",
+    "runs": [
+      "claude-arm1-core10",
+      "claude-arm2-core10",
+      "claude-arm3-core10"
+    ],
+    "max_parallel_implementers": 3,
+    "max_parallel_load_tests": 1,
+    "next_cycle_requires": "all three terminal, documented, committed"
+  }
+]

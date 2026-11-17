@@ -86,6 +86,13 @@ def main():
     if current != rows:
         schedule.write_text(json.dumps(rows, indent=2) + "\n")
         print("schedule.json regenerated from codex/docs/results/schedule.json (%d rows)" % len(rows))
+    # One row per cycle (start_cycle.py gates on it); created once, never rewritten once cycles have state.
+    cycles = ROOT / "docs/results/cycles.json"
+    if not cycles.exists():
+        plan = [dict(cycle=core, status="NOT_STARTED", runs=[r["run_id"] for r in rows if r["core"] == core],
+                     max_parallel_implementers=3, max_parallel_load_tests=1,
+                     next_cycle_requires="all three terminal, documented, committed") for core in range(1, 11)]
+        cycles.write_text(json.dumps(plan, indent=2) + "\n")
     print("Prepared 30 independent Claude starter directories and NOT_STARTED journals; no model executed")
 
 if __name__ == "__main__":
