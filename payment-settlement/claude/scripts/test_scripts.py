@@ -17,6 +17,7 @@ sys.path.insert(0, str(HERE))
 import capture_turn
 import consult_contract
 import freeze_readiness
+import finish_run
 import preflight
 import record_evaluation_cost
 import start_cycle
@@ -667,6 +668,72 @@ class EvaluationCostTest(unittest.TestCase):
             self.assertEqual(len(list((run / 'evaluation').iterdir())), 2)
             (run / 'evaluation/0003').mkdir()                              # a record cut short is listed, not skipped
             self.assertEqual(launch.run_ledger(run)['evaluation_cost']['unreadable'], ['evaluation/0003'])
+
+
+class FinishRunTest(unittest.TestCase):
+    """Decision 2026-11-17: passed + last call over the token/time cap = PASSED with the overshoot recorded."""
+
+    def make(self, tmp, tokens):
+        root = Path(tmp) / 'claude'
+        run = root / '.runs/claude-arm1-core01'
+        write(run / 'manifest.json', {'run_id': 'claude-arm1-core01', 'arm': 1, 'core': 1})
+        t = run / 'turns/0001'
+        write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': finish_run.launch.utc()})
+        write(t / 'result.json', {'status': 'ok', 'usage_complete': True})
+        (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r1', model='m', role='implementer', turn='0001',
+            usage=dict(input_tokens=tokens, cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=0))) + '\n')
+        write(root / 'docs/experiments/1/core1/run.json', {'run_id': 'claude-arm1-core01', 'status': 'RUNNING'})
+        return root, run
+
+    def finish(self, root, verdict):
+        return finish_run.finish('claude-arm1-core01', verdict, root / '.runs', root)
+
+    def record(self, root):
+        return json.loads((root / 'docs/experiments/1/core1/run.json').read_text())
+
+    def test_passed_run_that_overshot_on_its_last_call_is_passed_with_the_overshoot_kept(self):
+        launch = finish_run.launch
+        with tempfile.TemporaryDirectory() as tmp:
+            root, run = self.make(tmp, 20_000_500)
+            launch.record_overshoot(run)                                  # what the runner does after the last call
+            before = (run / 'censored.json').read_bytes()
+            _, status, overshoot = self.finish(root, 'PASSED')
+            self.assertEqual(status, 'PASSED')
+            record = self.record(root)
+            self.assertEqual((record['status'], record['cap_reached'], record['verdict']), ('PASSED', True, 'PASSED'))
+            self.assertEqual(record['cap_overshoot']['censored_status'], 'CENSORED_BUDGET')
+            self.assertEqual(record['cap_overshoot']['overshoot'], {'token_limit': 500})
+            self.assertIn('PASSED', __import__('commit_run').TERMINAL)
+            self.assertEqual((run / 'censored.json').read_bytes(), before)   # the cap record is kept as it was
+            with self.assertRaises(RuntimeError):                         # and still blocks every further paid call
+                launch.limit_gate(run, next_is_feedback=False)
+            self.finish(root, 'FAILED')                                   # not passed: censored as before
+            record = self.record(root)
+            self.assertEqual((record['status'], record['cap_overshoot']), ('CENSORED_BUDGET', None))
+
+    def test_without_a_cap_the_verdict_is_the_status_and_a_before_call_censor_cannot_pass(self):
+        launch = finish_run.launch
+        with tempfile.TemporaryDirectory() as tmp:
+            root, run = self.make(tmp, 10)
+            for verdict in ('PASSED', 'FAILED', 'INVALID_INFRA'):
+                self.finish(root, verdict)
+                self.assertEqual((self.record(root)['status'], self.record(root)['cap_overshoot'], self.record(root)['cap_reached']),
+                                 (verdict, None, False))
+        with tempfile.TemporaryDirectory() as tmp:
+            root, run = self.make(tmp, 20_000_000)                        # exactly at the cap: refused before the next call
+            with self.assertRaises(RuntimeError):
+                launch.limit_gate(run, next_is_feedback=True)
+            with self.assertRaises(ValueError):
+                self.finish(root, 'PASSED')
+            self.assertEqual(self.record(root)['status'], 'RUNNING')
+            self.finish(root, 'FAILED')
+            self.assertEqual(self.record(root)['status'], 'CENSORED_BUDGET')
+        turns = {'status': 'CENSORED_TURNS', 'first': {'when': 'before call'}}
+        with self.assertRaises(ValueError):
+            finish_run.terminal('PASSED', turns)
+        self.assertEqual(finish_run.terminal('FAILED', turns), ('CENSORED_TURNS', None))
+        timed = {'status': 'CENSORED_TIME', 'first': {'when': 'after call', 'overshoot': {'time_limit_seconds': 4.2}}}
+        self.assertEqual(finish_run.terminal('PASSED', timed)[1]['overshoot'], {'time_limit_seconds': 4.2})
 
 
 class LoadCheckTest(unittest.TestCase):

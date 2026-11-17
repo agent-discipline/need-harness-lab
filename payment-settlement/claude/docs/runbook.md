@@ -58,7 +58,15 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 `--kind` 없는 재개 턴은 유료 호출 전에 거부된다. `turn_kind`가 없는(또는 `invocation.json`이 없는) 턴 디렉터리가 있으면 상한 계산이 실패하고(건너뛰지 않음) 그 run의 다음 호출은 막힌다. `limit_gate` 결과(`invocation.json`의 `limits_before_call`)와 `ledger.json`에 `turn_kinds`(`delivered`: 성공 전달 수 `initial`·`feedback`·`answer` / `declared`: 시도별 선언 종류 수)와 `answer_turns`(limit 상태)가 남는다. 실패한 `feedback` 턴은 세지 않고, 그 `recovery`가 성공하면 1회로 센다(종전 "성공 턴만 센다" 규칙 유지).
 
-상한에 닿으면 `censored.json`(상태·그때의 사용량)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)을 기록한다. 산출물은 지우지 않는다. 진행자는 `censored.json`의 상태를 그 run의 `run.json` `status`로 옮긴 뒤 종료 절차를 밟는다. 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
+상한에 닿으면 `censored.json`(상태·그때의 사용량)을 남기고 호출을 거부하며, 이후 모든 호출도 거부한다. 호출 도중 넘으면 호출 뒤 `censored.json`에 초과분(`overshoot`)을 기록한다. 산출물은 지우지 않는다. 상한은 **다음 유료 호출을 막는 규칙**이다(2026-11-17 결정): `censored.json`은 지우거나 고치지 않으며, 그 run에는 완료 여부와 관계없이 더 이상 호출이 나가지 않는다. 종료 상태는 진행자가 손으로 옮기지 않고 `scripts/finish_run.py --run-id <id> --verdict PASSED|FAILED|INVALID_INFRA`(평가자 판정)로 `run.json`에 쓴다:
+
+| 평가자 판정 | `censored.json` | `run.json` `status` | 함께 남는 것 |
+|---|---|---|---|
+| `PASSED` | 없음 | `PASSED` | `cap_reached=false` |
+| `PASSED` | `CENSORED_BUDGET`/`CENSORED_TIME`, `first.when="after call"`(마지막 호출 도중 초과) | `PASSED` | `cap_reached=true`, `cap_overshoot`(어느 상한·초과량·그때 사용량) — 결과 표에서 "완료 + 초과"로 구분 |
+| `PASSED` | 그 밖(`before call` 차단, `CENSORED_TURNS`) | 거부(통과 판정 이후에 호출을 시도했다는 뜻이므로 기록 확인) | — |
+| `FAILED` | 있음 | `censored.json`의 `CENSORED_*` | `cap_reached=true` |
+| `FAILED`/`INVALID_INFRA` | 없음 | 판정 그대로 | — | 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
 
 ## 실패한 턴의 복구
 
@@ -66,7 +74,7 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 ## 종료와 커밋
 
-run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ①′ 평가 비용 기록(아래 절) → ② `launch.py normalize --run-id <id>` → ③ `scripts/capture_turn.py`로 남은 턴 기록(`ledger.json`이 기록에 복사된다) → ④ `launch.py discard --run-id <id>` → ⑤ `commit_run.py`. ④는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
+run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ①′ 평가 비용 기록(아래 절) → ①″ 평가자 판정 뒤 `finish_run.py`로 종료 상태 기록(위 상한 절의 표) → ② `launch.py normalize --run-id <id>` → ③ `scripts/capture_turn.py`로 남은 턴 기록(`ledger.json`이 기록에 복사된다) → ④ `launch.py discard --run-id <id>` → ⑤ `commit_run.py`. ④는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
 
 `scripts/commit_run.py --arm N --core M`(Codex 판의 바이트 복사본 — Codex 쪽이 바뀌면 `verify_setup.py` 패리티가 깨지므로 그때 다시 복사한다)이 상태·문서(`summary.md`·`transcript.md`·`events.jsonl`·`usage-summary.json`·**`issues.md`** — 그 시행에서 발생한 문제와 해결)·이전 시행 커밋 여부를 확인한 뒤 해당 core와 기록만 커밋한다. 원격 push는 하지 않는다. 실험 종료 후 `launch.py discard --run-id <id>`가 run별 Docker volume의 파일 목록(내용 아님)을 `discard-<시각>.json`에 기록한 뒤 volume을 제거한다. `credentials_file_in_volume`이 `null`이면 조회 실패이므로 "없음"으로 읽지 않는다.
 
