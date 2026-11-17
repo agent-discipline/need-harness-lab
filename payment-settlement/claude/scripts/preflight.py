@@ -13,8 +13,13 @@ AUTH = ("subscription-oauth-token",)
 # Agreed protocol v3-claude (2026-11-17): a ledger or readiness from another protocol or with other limits never passes.
 PROTOCOL = "payment-settlement-v3-claude"
 LIMITS = {"token_limit": 20000000, "time_limit_seconds": 28800, "feedback_limit": 30}
+# Two gates in protocol order (freeze -> pilot -> cycles): starting the pilot cannot require the pilot's own result;
+# starting a measured cycle requires everything. There is no other stage and no way to waive any other flag.
+STAGE_WAIVED = {"pilot": ("pilot_passed",), "cycle": ()}
 
-def blockers(manifest):
+def blockers(manifest, stage="cycle"):
+    if stage not in STAGE_WAIVED:
+        raise ValueError("stage must be pilot or cycle")
     failures = [f"{key}: missing/unverified" for key in REQUIRED if not manifest.get(key)]
     if manifest.get("protocol") != PROTOCOL:
         failures.append(f"protocol must be {PROTOCOL}")
@@ -24,7 +29,8 @@ def blockers(manifest):
     if manifest.get("cache_policy") != "observed-cache":
         failures.append("claude runner supports only observed-cache")
     # Verification flags must be the literal boolean true; strings such as "pending" never pass.
-    failures += [f"{key}: must be boolean true (got {manifest.get(key)!r})" for key in FLAGS if manifest.get(key) is not True]
+    failures += [f"{key}: must be boolean true (got {manifest.get(key)!r})" for key in FLAGS
+                 if key not in STAGE_WAIVED[stage] and manifest.get(key) is not True]
     if manifest.get("auth") not in AUTH:
         failures.append("auth must be one of " + ", ".join(AUTH))
     if manifest.get("reasoning_effort") != "high":
@@ -50,9 +56,11 @@ def blockers(manifest):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
+    parser.add_argument("--stage", choices=tuple(STAGE_WAIVED), default="cycle",
+                        help="pilot: before the pilot run (pilot_passed not yet possible); cycle: before measured cycles")
     args = parser.parse_args()
-    failed = blockers(json.loads(args.manifest.read_text()))
-    print(json.dumps({"ready": not failed, "blockers": failed}, ensure_ascii=False, indent=2))
+    failed = blockers(json.loads(args.manifest.read_text()), args.stage)
+    print(json.dumps({"stage": args.stage, "ready": not failed, "blockers": failed}, ensure_ascii=False, indent=2))
     return 2 if failed else 0
 
 if __name__ == "__main__":

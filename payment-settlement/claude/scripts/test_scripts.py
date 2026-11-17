@@ -55,6 +55,18 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(preflight.blockers(dict(arm3, hook_enforcement_verified='yes')))
 
 
+class PreflightStageTest(unittest.TestCase):
+    def test_pilot_stage_waives_only_the_pilot_result(self):
+        base = dict(ready(), arm=3, actual_model='claude-fable-5-2', requested_worker_model='claude-opus-5-5', pilot_passed=False)
+        self.assertEqual(preflight.blockers(base, 'pilot'), [])
+        self.assertIn('pilot_passed: must be boolean true (got False)', preflight.blockers(base))       # default = cycle
+        self.assertTrue(preflight.blockers(dict(base, role_models_verified=False), 'pilot'))
+        self.assertTrue(preflight.blockers(dict(base, hook_enforcement_verified='true'), 'pilot'))
+        with self.assertRaises(ValueError):
+            preflight.blockers(base, 'anything')
+        self.assertTrue(start_cycle.gate(dict(ready(), pilot_passed=False), 1))   # cycles always use the full gate
+
+
 class FreezeTest(unittest.TestCase):
     def smoke(self, runs, run_id, arm, roles, selftest=None, usage_complete=True, credentials=False):
         requested = 'claude-fable-5-2' if arm == 3 else 'claude-opus-5-5'
