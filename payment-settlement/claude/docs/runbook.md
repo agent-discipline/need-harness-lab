@@ -76,6 +76,7 @@ run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ② `lau
 - [x] config volume에 `.credentials.json` 없음(`.claude.json`·policy-limits·remote-settings만) — 폐기 절차는 파일 목록 기록 후 `docker volume rm`
 - [x] `context_variant`: CLI가 두 모델 모두 `contextWindow 1000000`을 보고 — `[1m]` 접미 없이 1M 적용, `default` 유지
 - [ ] `result.usage`의 sidechain 포함 여부·`CLAUDE_CODE_SUBAGENT_MODEL` 전파: 파일럿 run의 산출물로 판정(`freeze_readiness.py --pilot-run`, worker 모델 일치 포함) — 그 전까지 `usage_cross_check`는 관측치
+- [ ] 하네스 조건 워커 모델: 구현·테스트·리뷰 워커는 `claude-opus-5-5`(`CLAUDE_CODE_SUBAGENT_MODEL`), 탐색 워커 `explorer`는 하네스 정의대로 Sonnet. 2.1.326 번들 판독상 에이전트 정의의 모델이 이 환경변수보다 우선하고 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`만 그것을 덮는다(실행기는 FORCE를 설정하지 않는다) — **파일럿의 요청 단위 모델 기록으로 확인할 항목**. 판정은 요청마다: transcript `agent-*.meta.json`의 `agentType`이 `explorer`인 요청만 Sonnet 허용, 나머지 워커 요청은 Opus 5.5(`freeze_readiness.py --pilot-run`). PM이 Agent 호출에 `model: opus` 같은 별칭을 넘기면 별칭이 가리키는 버전이 쓰이므로 이 경우도 요청 단위 기록으로 판정된다
 - [ ] 서브에이전트 effort: 실행기는 요청마다 transcript의 `perTurnEffort`를 `observed_tools_and_effort.by_role.<role>.efforts`에 남긴다. 값이 없는 요청은 `unobserved`다. 파일럿에서 worker 요청에 `high`가 기록되지 않으면 **effort 전파 미검증**을 결과의 한계로 적는다(설정했다는 사실은 증거가 아니다)
 - [ ] 본 실험 `--max-turns`/`--max-budget-usd` 값 고정(스모크는 3~4턴·1 USD)
 - [x] **D5 웹 도구**: 세 조건 모두 허용하고 기록(2026-11-17 결정). self-test가 모든 arm에 `WebSearch`/`WebFetch`가 노출되는지 단정한다(`docs/results/setup/v3/`)
@@ -83,6 +84,6 @@ run 종료 순서: ① 마지막 턴 종료(또는 `censored.json`) → ② `lau
 - [ ] 본 실험 개시 전 토큰 재발급(최초 토큰은 채팅 경유 노출 — `docs/auth-token.md`)
 - [ ] C01..C20 판정기·DB adapter·장애 주입 완성(Codex 쪽 공유) 후 파일럿 1회
 - [ ] 이미지 digest·모델·계약·평가기·seed 동결 및 baseline commit 기록
-- [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴) → 사용자가 대리 사용자 모델을 정한 뒤 `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3> --user-proxy-model <id>`로 동결(세 조건이 모두 없으면 동결 거부, 플래그는 증거 파일에서만 도출)
+- [ ] v3-claude 인증 스모크(새 토큰, **arm 1·2·3 각각** 1턴) → `scripts/freeze_readiness.py --smoke-run <arm1> --smoke-run <arm2> --smoke-run <arm3>`로 동결(대리 사용자 모델은 합의값 `claude-opus-5-5`로 기록된다)(세 조건이 모두 없으면 동결 거부, 플래그는 증거 파일에서만 도출)
 - [ ] 파일럿 개시 전: `preflight.py --stage pilot <ledger+readiness>` 전 항목 true (`pilot_passed`만 면제, 가짜 true 금지 — 프로토콜·상한 포함)
 - [ ] 파일럿 뒤: `freeze_readiness.py ... --pilot-run <id> --replace`로 `pilot_passed`를 파일럿 산출물에서 도출 → 사이클 개시 게이트(`start_cycle.py`, 항상 `--stage cycle` 기준)

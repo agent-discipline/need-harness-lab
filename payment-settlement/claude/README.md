@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | 1 — minimal | `prompts/common.md` + `1-minimal.md` (Codex와 바이트 동일) | `claude-opus-5-5` · high | 금지(도구 allow-list `--tools`, self-test가 부분집합 단정) | 없음(빈 config volume) |
 | 2 — detailed | 동일 + `../docs/requirements.md`·`resources.md`·`slo.md` (Codex와 바이트 동일) | `claude-opus-5-5` · high | 금지 | 없음 |
-| 3 — harness-auto-native | 2와 동일 + `prompts/3-harness.md`(Claude 전용) | PM `claude-fable-5-2` · high, 워커 `claude-opus-5-5` · high, 두 번째 리뷰어 `claude-fable-5-2` | `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`·`CLAUDE_CODE_SUBAGENT_EFFORT=high` | **하네스 v4.3(7b0ef7b) 원본 훅 그대로 설치·강제**. 도구는 1·2번 허용 목록 + `Task`(서브에이전트) |
+| 3 — harness-auto-native | 2와 동일 + `prompts/3-harness.md`(Claude 전용) | PM `claude-fable-5-2` · high, 구현·테스트·리뷰 워커 `claude-opus-5-5` · high, 탐색 워커(explorer)는 하네스 정의(Sonnet), 두 번째 리뷰어 `claude-fable-5-2`, 대리 사용자 `claude-opus-5-5` | `CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5`·`CLAUDE_CODE_SUBAGENT_EFFORT=high` | **하네스 v4.3(7b0ef7b) 원본 훅 그대로 설치·강제**. 도구는 1·2번 허용 목록 + `Task`(서브에이전트) |
 
 웹 도구(`WebSearch`·`WebFetch`)는 세 조건 모두 허용하고 사용을 기록한다.
 
@@ -17,7 +17,7 @@
 - `{1,2,3}/core1..10`: `template/`과 바이트 동일한 starter (`scripts/verify_setup.py`가 30개 검사)
 - `template/`, `compose.yaml`, `prompts/{common,1-minimal,feedback,slo}.md`, `scripts/{lab,commit_run}.py`: `../codex/`와 바이트 동일 복사본
 - `harness-source/`: 하네스 v4.3 commit 7b0ef7b의 `git archive` 사본(`SOURCE.json`). Codex 쪽 사본(1754f16)과 의도적으로 다르다
-- `prompts/3-harness.md`: Claude 전용(네이티브 훅·Fable PM·Opus 워커·`fable-review`·컨테이너 환경 사실)
+- `prompts/3-harness.md`: Claude 전용(네이티브 훅·Fable PM·구현·테스트·리뷰 워커 Opus·`fable-review`·컨테이너 환경 사실)
 - `runner/`: Claude Code 2.1.326 격리 실행기 ([runner/README.md](runner/README.md))
 - `scripts/{start_cycle,freeze_readiness,consult_contract,capture_turn,load_check}.py`: Codex 판 스크립트의 Claude 실행기 이식본(`test_scripts.py`)
 - `docs/runbook.md`, `docs/isolation-and-measurement.md`: Claude 판 절차와 측정 차이
