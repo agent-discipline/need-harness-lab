@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -841,41 +842,18 @@ def consult_completed(folder):
 def consult_folders(dest):
     return sorted(p for p in (Path(dest) / 'consults').iterdir() if p.is_dir()) if (Path(dest) / 'consults').is_dir() else []
 
-# Evaluation cost (spec 2: 진행자·판정 어댑터 ... 역할별로 분리 기록; 0: 판정 어댑터 비용은 평가 비용으로 분리): the
-# experiment conductor and the judging adapter write records under <run>/evaluation/NNNN/record.json
-# (scripts/record_evaluation_cost.py). They are not requests of the run: never in the run cap, never in the arm's cost.
-EVALUATION_ROLES = ('conductor', 'judging-adapter')
+def cost_value(value):
+    """A cost argument (USD): a finite number >= 0, nothing else (argparse type)."""
+    try:
+        number_ = float(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError('must be a number')
+    if not math.isfinite(number_) or number_ < 0:
+        raise argparse.ArgumentTypeError('must be a finite number >= 0')
+    return number_
 
-def evaluation_cost(dest):
-    """The run's evaluation-cost block. A role without any record is 'not recorded' (never zero); an unreadable record
-    is listed, not skipped; token or cost sums are None when any record lacks them."""
-    folder = Path(dest) / 'evaluation'
-    records, unreadable = [], []
-    for path in sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []:
-        try:
-            record = json.loads((path / 'record.json').read_text())
-            if not isinstance(record, dict) or record.get('role') not in EVALUATION_ROLES:
-                raise ValueError('unknown role')
-            records.append(record)
-        except (OSError, ValueError):
-            unreadable.append(str(path.relative_to(dest)))
-    roles = {}
-    for role in EVALUATION_ROLES:
-        own = [r for r in records if r['role'] == role]
-        if not own:
-            roles[role] = {'status': 'not recorded'}
-            continue
-        totals = [number(r.get('total_tokens')) for r in own]
-        costs = [number(r.get('cost_usd')) for r in own]
-        split = [r.get('usage') for r in own]
-        roles[role] = {'status': 'recorded', 'records': len(own), 'models': sorted({str(r.get('model')) for r in own}),
-                       'total_tokens': None if None in totals else sum(totals),
-                       'usage': sum_usage([{'usage': u} for u in split]) if all(isinstance(u, dict) for u in split) else None,
-                       'cost_usd': None if None in costs else round(sum(costs), 6),
-                       'sources': sorted({str(r.get('tokens_source')) for r in own})}
-    return {'roles': roles, 'unreadable': unreadable, 'counted_in_run_cap': False, 'counted_in_arm_cost': False,
-            'note': 'evaluation cost (experiment conductor, judging adapter): recorded per run, outside the run cap and '
-                    'the arm cost; "not recorded" means no record exists, not zero'}
+# Evaluation cost (experiment conductor, judging adapter) is not part of any run: it is recorded experiment-wide in
+# docs/results/evaluation-cost.jsonl (scripts/record_evaluation_cost.py), never in a run ledger, cap or arm cost.
 
 def total_tokens(usage):
     return sum(usage[k] for k in USAGE_KEYS)           # input + cache read + cache creation + output (cached input counts)
@@ -928,7 +906,6 @@ def run_ledger(dest):
         'cost_usd': None if cost_unobserved else round(sum(costs), 6), 'cost_unobserved': cost_unobserved,
         'cost_note': 'CLI total_cost_usd estimates (subscription: billed_cost null); whether a resumed session reports '
                      'per-invocation or cumulative cost is not verified before the pilot',
-        'evaluation_cost': evaluation_cost(dest),
         'updated_at': utc()}
 
 def write_ledger(dest):

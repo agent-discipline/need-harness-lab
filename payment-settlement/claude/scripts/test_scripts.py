@@ -613,18 +613,11 @@ class ConsultContractTest(unittest.TestCase):
                              (3, 1, ['0002', '0003']))
 
 
-class EvaluationCostTest(unittest.TestCase):
-    def run_dir(self, tmp):
-        run = Path(tmp) / 'runs/claude-arm1-core01'
-        write(run / 'manifest.json', {'run_id': 'claude-arm1-core01', 'arm': 1})
-        t = run / 'turns/0001'
-        write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': '2026-11-17T00:00:00+00:00'})
-        write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'cost': {'pinned_session_usd': 0.5, 'reviewer_applicable': False}})
-        (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='r1', model='m', role='implementer', turn='0001', usage=USAGE)) + '\n')
-        return run
+class EvaluationCostLedgerTest(unittest.TestCase):
+    """Spec 10.4: experiment-level append-only ledger, one line per conductor session or adapter authoring."""
 
-    def cli(self, tmp, *extra):
-        argv = ['record_evaluation_cost.py', '--runs', str(Path(tmp) / 'runs'), '--run-id', 'claude-arm1-core01'] + list(extra)
+    def cli(self, ledger, *extra):
+        argv = ['record_evaluation_cost.py', '--ledger', str(ledger)] + list(extra)
         err = io.StringIO()
         with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             try:
@@ -632,42 +625,63 @@ class EvaluationCostTest(unittest.TestCase):
             except SystemExit as exc:
                 return exc.code, err.getvalue()
 
-    def test_conductor_and_judging_adapter_are_evaluation_cost_outside_cap_and_arm_cost(self):
+    def lines(self, ledger):
+        return [json.loads(l) for l in ledger.read_text().splitlines()]
+
+    def test_default_ledger_is_experiment_wide(self):
+        self.assertEqual(record_evaluation_cost.default_ledger(),
+                         record_evaluation_cost.ROOT / 'docs/results/evaluation-cost.jsonl')
+
+    def test_lines_are_appended_with_role_session_model_tokens_source_runs_and_time(self):
         with tempfile.TemporaryDirectory() as tmp:
-            run = self.run_dir(tmp)
-            launch = record_evaluation_cost.launch
-            before = launch.run_ledger(run)
-            self.assertEqual(before['evaluation_cost']['roles'],
-                             {'conductor': {'status': 'not recorded'}, 'judging-adapter': {'status': 'not recorded'}})
-            code, err = self.cli(tmp, '--role', 'conductor', '--model', 'claude-opus-5-5', '--input-tokens', '100',
-                                 '--cache-creation-input-tokens', '0', '--cache-read-input-tokens', '900', '--output-tokens',
-                                 '50', '--source', 'agent completion notice', '--cost-usd', '0.3')
+            ledger = Path(tmp) / 'evaluation-cost.jsonl'
+            code, err = self.cli(ledger, '--role', 'conductor', '--session', 'agent-1', '--model', 'claude-opus-5-5',
+                                 '--input-tokens', '100', '--cache-creation-input-tokens', '0', '--cache-read-input-tokens',
+                                 '900', '--output-tokens', '50', '--source', 'agent completion notice usage',
+                                 '--run-id', 'claude-arm1-core01', '--run-id', 'claude-arm2-core01', '--includes-judging-adapter')
             self.assertEqual(code, 0, err)
-            ledger = json.loads((run / 'ledger.json').read_text())
-            block = ledger['evaluation_cost']
-            self.assertEqual(block['roles']['conductor']['total_tokens'], 1050)
-            self.assertEqual(block['roles']['conductor']['cost_usd'], 0.3)
-            self.assertEqual(block['roles']['judging-adapter'], {'status': 'not recorded'})
-            self.assertFalse(block['counted_in_run_cap'] or block['counted_in_arm_cost'])
-            # the run's own sums are untouched: no role, no tokens, no cost, no cap usage
-            self.assertEqual(set(ledger['roles']), {'implementer'})
-            self.assertEqual((ledger['total_tokens'], ledger['cost_usd']), (before['total_tokens'], before['cost_usd']))
-            self.assertEqual(launch.limit_state(run)['used']['token_limit'], before['total_tokens'])
-            code, err = self.cli(tmp, '--role', 'judging-adapter', '--model', 'claude-opus-5-5', '--total-tokens', '40',
-                                 '--source', 'completion notice total only')
+            before = ledger.read_bytes()
+            code, err = self.cli(ledger, '--role', 'judging-adapter', '--session', 'agent-2', '--model', 'claude-opus-5-5',
+                                 '--total-tokens', '40', '--source', 'completion notice total only', '--run-id', 'claude-pilot-01',
+                                 '--cost-usd', '0.2')
             self.assertEqual(code, 0, err)
-            adapter = launch.run_ledger(run)['evaluation_cost']['roles']['judging-adapter']
-            self.assertEqual((adapter['total_tokens'], adapter['usage'], adapter['cost_usd']), (40, None, None))
-            # incomplete or contradictory input is refused, nothing written
-            for bad in (['--role', 'conductor', '--model', 'm', '--input-tokens', '1', '--source', 's'],
-                        ['--role', 'conductor', '--model', 'm', '--source', 's'],
-                        ['--role', 'pm', '--model', 'm', '--total-tokens', '1', '--source', 's'],
-                        ['--role', 'conductor', '--model', 'm', '--total-tokens', '-1', '--source', 's'],
-                        ['--role', 'conductor', '--model', 'm', '--total-tokens', '1', '--source', ' ']):
-                self.assertNotEqual(self.cli(tmp, *bad)[0], 0, bad)
-            self.assertEqual(len(list((run / 'evaluation').iterdir())), 2)
-            (run / 'evaluation/0003').mkdir()                              # a record cut short is listed, not skipped
-            self.assertEqual(launch.run_ledger(run)['evaluation_cost']['unreadable'], ['evaluation/0003'])
+            self.assertTrue(ledger.read_bytes().startswith(before))          # appended, earlier line untouched
+            first, second = self.lines(ledger)
+            self.assertEqual((first['role'], first['session'], first['model'], first['total_tokens'], first['run_ids'],
+                              first['includes_judging_adapter'], first['usage_split_observed']),
+                             ('conductor', 'agent-1', 'claude-opus-5-5', 1050, ['claude-arm1-core01', 'claude-arm2-core01'],
+                              True, True))
+            self.assertEqual((second['usage'], second['total_tokens'], second['cost_usd']), (None, 40, 0.2))
+            for line in (first, second):
+                self.assertTrue(line['recorded_at'] and line['tokens_source'])
+                self.assertFalse(line['counted_in_run_cap'] or line['counted_in_arm_cost'])
+
+    def test_bad_input_and_a_second_line_for_the_same_session_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / 'evaluation-cost.jsonl'
+            ok = ['--role', 'conductor', '--session', 's', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r1']
+            self.assertEqual(self.cli(ledger, *ok)[0], 0)
+            for bad in (ok,                                                      # same role + session again
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--input-tokens', '1', '--source', 'x', '--run-id', 'r'],
+                        ['--role', 'pm', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '-1', '--source', 'x', '--run-id', 'r'],
+                        ['--role', 'conductor', '--session', ' ', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'a/b'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
+                         '--run-id', 'r'],
+                        ['--role', 'judging-adapter', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x',
+                         '--run-id', 'r', '--includes-judging-adapter'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
+                         '--cost-usd', 'nan'],
+                        ['--role', 'conductor', '--session', 't', '--model', 'm', '--total-tokens', '1', '--source', 'x', '--run-id', 'r',
+                         '--cost-usd', '-0.5']):
+                self.assertNotEqual(self.cli(ledger, *bad)[0], 0, bad)
+            self.assertEqual(len(self.lines(ledger)), 1)
+            with ledger.open('a') as stream:                                     # a damaged ledger is inspected, not appended to
+                stream.write('not json\n')
+            ok[3] = 'u'
+            self.assertNotEqual(self.cli(ledger, *ok)[0], 0)
 
 
 class FinishRunTest(unittest.TestCase):
