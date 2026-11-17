@@ -292,7 +292,8 @@ class FrozenContract(unittest.TestCase):
 
 
 class UserProxyAccounting(unittest.TestCase):
-    """Spec 2: 진행자·판정 어댑터·대리 사용자의 토큰은 역할별로 분리 기록한다 / 자격증명 값은 ... 남기지 않는다."""
+    """Spec 2 (the user-proxy part): 대리 사용자의 토큰은 역할별로 분리 기록한다 / 관측하지 못한 사용량은 0으로 채우지 않는다 /
+    자격증명 값은 ... 남기지 않는다. (Conductor and judging adapter: runner/test_spec_invariants.py EvaluationCostIsSeparate.)"""
 
     def run_proxy(self, tmp, copy_ok=True, leak=False, model=OPUS, arm=3, censored=False, turns=()):
         """turns: kinds of turns already delivered in the run (each 'ok'), as the runner records them."""
@@ -533,6 +534,123 @@ class UserProxyAndFeedbackCap(UserProxyAccounting):
                 code, _, state, _ = self.run_proxy(tmp, arm=arm)
                 self.assertNotEqual(code, 0)
                 self.assertFalse([c for c in state['calls'] if c[:2] == ['docker', 'create']])
+
+
+CONTRACT_DOCS = ('requirements.md', 'resources.md', 'acceptance.md', 'answer-policy.md')
+
+
+class UserProxyReceivesTheFourContractDocuments(UserProxyAccounting):
+    """§0 추가 결정(2026-11-17) 대리 사용자 입력 문서 → 4개 유지(requirements · resources · acceptance · answer-policy);
+    docs/answer-policy.md:3 "입력은 requirements.md, resources.md, acceptance.md와 이 문서만 허용한다. 다른 arm의 결과,
+    솔루션 코드, hidden 판정 데이터는 제공하지 않는다." """
+    test_user_proxy_usage_is_recorded_under_its_own_role_and_session = None
+    test_credential_leaked_by_the_user_proxy_is_scrubbed_and_fails_the_call = None
+    test_unobserved_user_proxy_usage_is_not_zero_filled = None
+
+    def consult(self, tmp):
+        code, out, state, console = self.run_proxy(tmp)
+        self.assertEqual(code, 0, console)
+        return out, state
+
+    def test_proxy_input_is_exactly_the_four_contract_documents_and_the_questions(self):
+        shared = HERE.parents[1] / 'docs'
+        with tempfile.TemporaryDirectory() as tmp:
+            out, state = self.consult(tmp)
+            prompt = (out / 'prompt.txt').read_text()
+            for name in CONTRACT_DOCS:
+                self.assertIn((shared / name).read_text().strip(), prompt, '%s not given to the proxy in full' % name)
+            self.assertIn('질문', prompt)
+            headings = {line[2:].strip() for line in prompt.splitlines() if line.startswith('# ') and line.strip().endswith('.md')}
+            self.assertEqual(headings, set(CONTRACT_DOCS), 'documents given to the proxy: %s' % sorted(headings))
+            for other in sorted(shared.glob('*.md')):
+                if other.name not in CONTRACT_DOCS:
+                    self.assertNotIn(other.read_text().strip(), prompt, '%s given to the proxy' % other.name)
+            packet = out / 'packet'
+            if packet.exists():                                   # the preserved input copy, when kept, is the same four
+                self.assertEqual(sorted(p.name for p in packet.rglob('*') if p.is_file()), sorted(CONTRACT_DOCS))
+
+    def test_proxy_sees_no_workspace_run_state_or_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, state = self.consult(tmp)
+            create = state['create']
+            for flag in ('--mount', '-v', '--volume', '--volumes-from'):
+                self.assertNotIn(flag, create)
+            self.assertFalse([a for a in create if str(a).startswith(('--mount=', '--volume=', '-v='))])
+            self.assertEqual(create[create.index('--tools') + 1], '', 'the proxy is given tools')
+            prompt = (out / 'prompt.txt').read_text()
+            self.assertNotIn(str(self.run_dir), prompt)
+
+
+def readiness_cli(argv, images, inventory=None):
+    """freeze_readiness.py main with the local image lookup and git baseline replaced (no docker, no git)."""
+    patches = [patch.object(sys, 'argv', ['freeze_readiness.py'] + argv),
+               patch.object(freeze_readiness, 'images', return_value=(images, [])),
+               patch.object(freeze_readiness, 'clean_baseline', return_value=('f' * 40, []))]
+    if inventory is not None:
+        patches.append(patch.object(freeze_readiness, 'inventory', return_value=inventory))
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        stack.enter_context(contextlib.redirect_stdout(out))
+        stack.enter_context(contextlib.redirect_stderr(out))
+        try:
+            code = freeze_readiness.main()
+        except SystemExit as exc:
+            code = exc.code
+    return code or 0, out.getvalue()
+
+
+class ReFreezeRefusesChangedInputs(unittest.TestCase):
+    """Spec 2: 판정 기준과 요구사항은 동결 후 바꾸지 않는다. 바꾸면 프로토콜 버전을 올리고 전 조건 재실행이다.
+    Re-freezing (--replace) may re-derive flags but never carries changed frozen inputs or a changed image into the freeze."""
+
+    IMAGES = {'payment-claude-runner:2.1.326': 'sha256:' + 'a' * 64, 'postgres:16': 'sha256:' + 'b' * 64}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        runs = Path(self.tmp.name) / 'runs'
+        smokes = ModelsPerSpec('test_requested_models_per_arm')
+        smokes.smoke(runs, 'a1', 1, {'main': OPUS}, {'implementer': [OPUS]})
+        smokes.smoke(runs, 'a2', 2, {'main': OPUS}, {'implementer': [OPUS]})
+        smokes.smoke(runs, 'a3', 3, {'main': FABLE, 'worker': OPUS, 'reviewer': FABLE},
+                     {'pm': [FABLE], 'worker': [OPUS], 'reviewer': [FABLE]})
+        self.output = Path(self.tmp.name) / 'results' / 'readiness.json'
+        self.output.parent.mkdir()
+        self.argv = ['--runs', str(runs), '--smoke-run', 'a1', '--smoke-run', 'a2', '--smoke-run', 'a3', '--output', str(self.output)]
+        code, out = readiness_cli(self.argv, self.IMAGES)
+        self.assertEqual(code, 0, out)
+        self.frozen = self.output.read_bytes()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_replace_with_unchanged_inputs_is_accepted(self):
+        # control: --replace itself works when nothing frozen changed
+        code, out = readiness_cli(self.argv + ['--replace'], self.IMAGES)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(json.loads(self.output.read_text())['contract_sha256'], json.loads(self.frozen)['contract_sha256'])
+
+    def test_replace_after_a_frozen_input_changed_is_refused(self):
+        for rel in ('docs/acceptance.md', 'docs/requirements.md', 'docs/answer-policy.md', 'claude/prompts/feedback.md'):
+            with self.subTest(rel):
+                changed = dict(freeze_readiness.inventory())
+                self.assertIn(rel, changed)
+                changed[rel] = '0' * 64
+                code, out = readiness_cli(self.argv + ['--replace'], self.IMAGES, inventory=changed)
+                self.assertNotEqual(code, 0, 'changed %s accepted by --replace' % rel)
+                self.assertEqual(self.output.read_bytes(), self.frozen)
+
+    def test_replace_after_the_runner_image_changed_is_refused(self):
+        changed = dict(self.IMAGES, **{'payment-claude-runner:2.1.326': 'sha256:' + 'c' * 64})
+        code, out = readiness_cli(self.argv + ['--replace'], changed)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.output.read_bytes(), self.frozen)
+
+    def test_a_second_freeze_without_replace_never_overwrites(self):
+        code, out = readiness_cli(self.argv, self.IMAGES)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.output.read_bytes(), self.frozen)
 
 
 if __name__ == '__main__':

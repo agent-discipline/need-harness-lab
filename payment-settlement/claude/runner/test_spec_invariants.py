@@ -1,8 +1,10 @@
 """Spec-derived invariant tests for runner/launch.py (no docker, no model call, no network).
 
-Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 2 and 5.
+Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 0, 2 and 5
+(with docs/answer-policy.md and claude/docs/runbook.md for the interface names).
 Each test names the spec sentence it checks. Expected values come from the spec, not from the implementation.
 """
+import atexit
 import contextlib
 from datetime import datetime, timedelta, timezone
 import importlib.util
@@ -10,7 +12,9 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -86,14 +90,27 @@ def assistant(rid, model, usage, session='s', sidechain=False):
     return line
 
 
+def selftest_patch(effect=None):
+    """The hook self-test is a no-cost helper container; it passes, optionally after running `effect(manifest)`."""
+    if effect is None:
+        return patch.object(launch, 'selftest', return_value=SELFTEST_OK)
+
+    def run(manifest, *a, **k):
+        effect(manifest)
+        return SELFTEST_OK
+    return patch.object(launch, 'selftest', side_effect=run)
+
+
 def env_values(cmd):
     return dict(cmd[i + 1].split('=', 1) for i, arg in enumerate(cmd) if arg == '--env' and '=' in cmd[i + 1])
 
 
 def drive_turn(root, run_id, *, resume=False, kind=None, reported=None, projects=None, projects_rc=0, stderr=b'',
-               reviewer_log=None, reviewer_projects=None, side_effect=None, stdout_extra=b'', timeout=5, record=None):
+               reviewer_log=None, reviewer_projects=None, side_effect=None, stdout_extra=b'', timeout=5, record=None,
+               selftest=None):
     """Run launch.turn with a fake docker. projects: {relative path: [line dict or raw str]}.
-    kind: the declared turn kind of a resumed turn (--kind); a resumed turn without one is the caller's choice to test."""
+    kind: the declared turn kind of a resumed turn (--kind); a resumed turn without one is the caller's choice to test.
+    selftest: optional side effect of the (no-cost) hook self-test, e.g. to let wall-clock time pass during it."""
     if resume and kind is None:
         kind = 'feedback'          # default for the generic accounting tests: an evaluator feedback turn
     dest = root / '.runs' / run_id
@@ -147,7 +164,7 @@ def drive_turn(root, run_id, *, resume=False, kind=None, reported=None, projects
     out, err = io.StringIO(), io.StringIO()
     with patch.object(launch.subprocess, 'run', side_effect=fake_run), \
          patch.object(launch, 'volume_listing', return_value={'rc': 0, 'entries': [], 'credentials_file_in_volume': False}), \
-         patch.object(launch, 'session_exists', return_value=resume), patch.object(launch, 'selftest', return_value=SELFTEST_OK), \
+         patch.object(launch, 'session_exists', return_value=resume), selftest_patch(selftest), \
          contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             launch.turn(args)
@@ -662,14 +679,108 @@ def write_turns(dest, turns):
         previous = counts_as
 
 
+def load_script(name):
+    spec = importlib.util.spec_from_file_location('spec_inv_' + name, HERE.parent / 'scripts' / (name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(HERE.parent / 'scripts'))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(HERE.parent / 'scripts'))
+    return module
+
+
+consult_contract = load_script('consult_contract')
+PROXY_OUTCOMES = ('ok', 'exit-nonzero', 'empty-response', 'credential-leak', 'timeout')
+
+
+def proxy_readiness(directory):
+    path = Path(directory) / 'proxy-readiness.json'
+    path.write_text(json.dumps({'protocol': 'payment-settlement-v3-claude', 'user_proxy_model': OPUS,
+                                'image_digests': {'runner': 'sha256:frozen'}, 'token_limit': 20_000_000,
+                                'time_limit_seconds': 28_800, 'feedback_limit': 30}))
+    return path
+
+
+def proxy_call(runs, run_id, outcome='ok', *, timeout_seconds=None, record=None, usage=U1, request_id='req-proxy'):
+    """One user-proxy consultation through scripts/consult_contract.py (the public interface) with a fake docker.
+    outcome: 'ok' | 'exit-nonzero' | 'empty-response' | 'credential-leak' | 'timeout'. record: list of (cmd, timeout).
+    Returns (exit code, console). The consult folder it leaves is exactly what a real call leaves."""
+    runs = Path(runs)
+    env = env_file(runs.parent)
+    questions = runs.parent / 'questions.md'
+    questions.write_text('질문: 정산 기준 시각은?')
+    state = {}
+
+    def fake_run(cmd, **kw):
+        if record is not None:
+            record.append((list(cmd), kw.get('timeout')))
+        if cmd[:2] == ['docker', 'create']:
+            state['session'] = cmd[cmd.index('--session-id') + 1]
+            return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+        if cmd[:2] == ['docker', 'start']:
+            if outcome == 'timeout':
+                raise subprocess.TimeoutExpired(cmd, kw.get('timeout'))
+            text = {'empty-response': '', 'credential-leak': 'APPROVED ' + TOKEN}.get(outcome, 'APPROVED')
+            kw['stdout'].write(json.dumps({'type': 'result', 'result': text, 'session_id': state['session'],
+                                           'usage': usage}).encode() + b'\n')
+            return SimpleNamespace(returncode=1 if outcome == 'exit-nonzero' else 0)
+        if cmd[:2] == ['docker', 'cp']:
+            target = Path(cmd[-1]) / '-tmp'
+            target.mkdir(parents=True, exist_ok=True)
+            line = {'type': 'assistant', 'requestId': request_id, 'sessionId': state['session'],
+                    'message': {'model': OPUS, 'usage': usage}}
+            (target / (state['session'] + '.jsonl')).write_text(json.dumps(line) + '\n')
+            return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+        return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
+    argv = ['consult_contract.py', '--run-id', run_id, '--questions', str(questions), '--runs', str(runs),
+            '--model', OPUS, '--env-file', str(env), '--readiness', str(proxy_readiness(runs.parent))]
+    if timeout_seconds is not None:
+        argv += ['--timeout-seconds', str(timeout_seconds)]
+    console = io.StringIO()
+    with patch.object(sys, 'argv', argv), patch.object(consult_contract.subprocess, 'run', side_effect=fake_run), \
+         contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
+        try:
+            code = consult_contract.main()
+        except SystemExit as exc:
+            code = exc.code
+    return code, console.getvalue()
+
+
+_CONSULT_TEMPLATE = {}
+
+
+def completed_consult_template():
+    """The consults/NNNN folder a real, completed user-proxy call leaves (made once through proxy_call)."""
+    if 'path' not in _CONSULT_TEMPLATE:
+        tmp = tempfile.mkdtemp(prefix='consult-template-')
+        atexit.register(shutil.rmtree, tmp, True)
+        runs = Path(tmp) / 'runs'
+        (runs / 'tpl' / 'turns').mkdir(parents=True)
+        (runs / 'tpl' / 'manifest.json').write_text(json.dumps({'run_id': 'tpl', 'arm': 3, 'core': 1,
+                                                                'session_id': '11111111-2222-4333-8444-555555555555'}))
+        code, console = proxy_call(runs, 'tpl')
+        folders = sorted((runs / 'tpl' / 'consults').iterdir()) if (runs / 'tpl' / 'consults').exists() else []
+        if code != 0 or len(folders) != 1:
+            raise AssertionError('a completed user-proxy call could not be produced: exit %r %s' % (code, console))
+        _CONSULT_TEMPLATE['path'] = folders[0]
+    return _CONSULT_TEMPLATE['path']
+
+
 def write_consults(dest, consults):
+    """Completed user-proxy consultations as a real call leaves them (exit 0, non-empty response, its usage record),
+    with the given request events. Each consults/NNNN starts as a copy of a real call's folder."""
+    template = completed_consult_template() if consults else None
     for i, events in enumerate(consults, 1):
         d = dest / 'consults' / ('%04d' % i)
-        d.mkdir(parents=True)
-        (d / 'usage.json').write_text(json.dumps({'role': 'user-proxy', 'usage_complete': True, 'cost_usd': 0.0}))
-        (d / 'response.txt').write_text('답변 %d' % i)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(template, d)
         (d / 'events.jsonl').write_text(''.join(json.dumps({'id': rid, 'role': role, 'usage': u, 'model': OPUS, 'turn': 'proxy'}) + '\n'
                                                 for rid, role, u in events))
+        usage = json.loads((d / 'usage.json').read_text())
+        usage.update(run_id=dest.name, usage=add(*[u for _, _, u in events]) if events else usage['usage'],
+                     request_ids=[rid for rid, _, _ in events])
+        (d / 'usage.json').write_text(json.dumps(usage))
 
 
 def make_capped_run(tmp, turns, consults=()):
@@ -805,7 +916,7 @@ class RunCaps(unittest.TestCase):
         self.assertLessEqual(starts[0], 120)
 
 
-def attempt_turn(root, run_id, *, resume, kind, session=None):
+def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None):
     """Call launch.turn with a docker stub that only records; returns (error, paid calls).
     A paid call is any `docker create`/`docker start` (the model call happens inside the started container).
     session: what the config volume says about the session transcript (default: exists iff resume)."""
@@ -826,7 +937,7 @@ def attempt_turn(root, run_id, *, resume, kind, session=None):
     with patch.object(launch.subprocess, 'run', side_effect=fake_run), \
          patch.object(launch, 'volume_listing', return_value={'rc': 0, 'entries': [], 'credentials_file_in_volume': False}), \
          patch.object(launch, 'session_exists', return_value=resume if session is None else session), \
-         patch.object(launch, 'selftest', return_value=SELFTEST_OK), \
+         selftest_patch(selftest), \
          contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         try:
             launch.turn(args)
@@ -1083,7 +1194,8 @@ class FeedbackCapCountsOnlyEvaluatorFeedback(unittest.TestCase):
 
 
 class RoleSeparatedLedger(unittest.TestCase):
-    """Spec 2: 진행자·판정 어댑터·대리 사용자의 토큰은 역할별로 분리 기록한다 / 중복 합산이 없다."""
+    """Spec 2 (the user-proxy part only): 대리 사용자의 토큰은 역할별로 분리 기록한다 / 중복 합산이 없다.
+    The conductor and judging-adapter parts of the same sentence are checked in EvaluationCostIsSeparate."""
 
     def test_user_proxy_tokens_are_a_separate_role_in_the_run_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1097,6 +1209,537 @@ class RoleSeparatedLedger(unittest.TestCase):
             self.assertEqual(roles['worker']['usage'], U2)
             self.assertEqual(roles['user-proxy']['usage'], tokens(7, 3))
             self.assertEqual(sum(r['total_tokens'] for r in roles.values()), ledger['total_tokens'])
+
+
+def new_run(base, run_id, arm, turns=(), started=None, consults=0):
+    """A runner-initialized run with turn records on disk. turns: kinds, or (kind, status) pairs.
+    consults: number of completed user-proxy consultations (real-call records, see write_consults)."""
+    root = make_root(Path(base) / run_id)
+    init_run(root, run_id, arm)
+    dest = root / '.runs' / run_id
+    started = started or datetime.now(timezone.utc)
+    role = 'pm' if arm == 3 else 'implementer'
+    records = []
+    for i, k in enumerate(turns):
+        kind, status = (k, 'ok') if isinstance(k, str) else k
+        records.append((started, status, [('t%d' % i, role, tokens(1, 1))], kind))
+    write_turns(dest, records)
+    write_consults(dest, [[('c%d' % i, 'user-proxy', tokens(1, 1))] for i in range(consults)])
+    return root, dest
+
+
+def paid_calls(record):
+    return [c for c, _ in record if c[:2] in (['docker', 'create'], ['docker', 'start'])]
+
+
+def numbers_in(value):
+    if isinstance(value, dict):
+        return [n for v in value.values() for n in numbers_in(v)]
+    if isinstance(value, list):
+        return [n for v in value for n in numbers_in(v)]
+    return [value] if isinstance(value, (int, float)) and not isinstance(value, bool) else []
+
+
+def age_first_turn(dest, started):
+    """Wall-clock time passes: the run's first call now lies at `started`."""
+    inv = dest / 'turns' / '0001' / 'invocation.json'
+    data = json.loads(inv.read_text())
+    data['started_at'] = started.isoformat()
+    inv.write_text(json.dumps(data))
+
+
+class FailedFeedbackIsNotSkipped(unittest.TestCase):
+    """§0 피드백 30회 셈법 "판정 피드백만 셈" + spec 2 상한 피드백 30회: a judging result that was delivered through a turn
+    that then failed may have reached the model, so it cannot drop out of the count by sending a fresh feedback instead
+    (runbook: 앞 턴이 ok가 아니면 재개 턴은 recovery만 허용)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_fresh_feedback_after_a_failed_feedback_makes_no_paid_call(self):
+        for arm in (1, 3):
+            for prior in (0, 29):
+                with self.subTest(arm=arm, ok_feedbacks_before=prior):
+                    run_id = 'ff%d-%d' % (arm, prior)
+                    root, dest = new_run(self.base, run_id, arm, ['initial', *['feedback'] * prior, ('feedback', 'failed')])
+                    error, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
+                    self.assertIsNotNone(error)
+                    self.assertEqual(paid, [])
+
+    def test_failed_feedback_is_continued_by_a_recovery_that_counts_as_that_feedback(self):
+        # control: the failed delivery is continued, and it is the one feedback
+        root, dest = new_run(self.base, 'fr', 1, ['initial', *['feedback'] * 29, ('feedback', 'failed')])
+        error, paid = attempt_turn(root, 'fr', resume=True, kind='recovery')
+        self.assertTrue(paid, 'recovery of a failed feedback never reached the call')
+        # once that recovery is delivered the count is 30, and a further feedback is the 31st
+        root, dest = new_run(self.base, 'fr2', 1, ['initial', *['feedback'] * 29, ('feedback', 'failed'), 'recovery'])
+        self.assertEqual(launch.limit_state(dest)['used']['feedback_limit'], 30)
+        error, paid = attempt_turn(root, 'fr2', resume=True, kind='feedback')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+
+    def test_answer_turn_cannot_replace_the_recovery_of_a_failed_feedback(self):
+        # arm 3 with an undelivered completed consultation: the failed feedback must still be continued first
+        root, dest = new_run(self.base, 'fa', 3, ['initial', ('feedback', 'failed')], consults=1)
+        error, paid = attempt_turn(root, 'fa', resume=True, kind='answer')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+
+    def test_failed_recovery_still_allows_only_a_recovery(self):
+        root, dest = new_run(self.base, 'frr', 1, ['initial', ('feedback', 'failed'), ('recovery', 'failed')])
+        error, paid = attempt_turn(root, 'frr', resume=True, kind='feedback')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        root, dest = new_run(self.base, 'frr2', 1, ['initial', ('feedback', 'failed'), ('recovery', 'failed')])
+        _, paid = attempt_turn(root, 'frr2', resume=True, kind='recovery')
+        self.assertTrue(paid)
+
+
+class AnswerNeedsCompletedConsultation(unittest.TestCase):
+    """§0 피드백 30회 셈법: 질의응답 턴 = 대리 사용자의 답을 PM에게 전하는 턴 (상한 밖, 따로 기록). An answer turn therefore
+    needs a consultation that actually produced an answer: a failed or empty consultation permits none, and one
+    consultation permits one answer turn. Consultations are made through scripts/consult_contract.py with a fake docker."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def deliver_answer(self, root, run_id):
+        result, turn_dir, error, _ = drive_turn(root, run_id, resume=True, kind='answer', reported=U1,
+                                                projects={'-workspace/s.jsonl': [assistant('ans-' + turn_dir_hint(root, run_id), FABLE, U1)]})
+        self.assertIsNone(error)
+        self.assertEqual(result['status'], 'ok')
+
+    def test_failed_or_empty_consultations_permit_no_answer_turn(self):
+        for outcome in PROXY_OUTCOMES[1:]:
+            with self.subTest(outcome):
+                run_id = 'bad-' + outcome
+                root, dest = new_run(self.base, run_id, 3, ['initial'])
+                code, console = proxy_call(root / '.runs', run_id, outcome)
+                self.assertNotEqual(code, 0, console)                          # the failure is visible to the conductor
+                error, paid = attempt_turn(root, run_id, resume=True, kind='answer')
+                self.assertIsNotNone(error, outcome)
+                self.assertEqual(paid, [], outcome)
+                self.assertTrue(launch.run_ledger(dest)['consults_not_completed'], outcome)
+
+    def test_several_failed_consultations_still_permit_no_answer_turn(self):
+        root, dest = new_run(self.base, 'many', 3, ['initial'])
+        for outcome in PROXY_OUTCOMES[1:]:
+            proxy_call(root / '.runs', 'many', outcome)
+        error, paid = attempt_turn(root, 'many', resume=True, kind='answer')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+
+    def test_one_completed_consultation_permits_exactly_one_answer_turn(self):
+        root, dest = new_run(self.base, 'one', 3, ['initial'])
+        code, console = proxy_call(root / '.runs', 'one', 'ok')
+        self.assertEqual(code, 0, console)
+        _, paid = attempt_turn(root, 'one', resume=True, kind='answer')
+        self.assertTrue(paid, 'a completed consultation did not permit its answer turn')     # control
+
+        root, dest = new_run(self.base, 'two', 3, ['initial'])
+        self.assertEqual(proxy_call(root / '.runs', 'two', 'ok')[0], 0)
+        self.deliver_answer(root, 'two')
+        error, paid = attempt_turn(root, 'two', resume=True, kind='answer')
+        self.assertIsNotNone(error, 'one consultation permitted a second answer turn')
+        self.assertEqual(paid, [])
+        proxy_call(root / '.runs', 'two', 'empty-response')                  # a failed one adds nothing
+        error, paid = attempt_turn(root, 'two', resume=True, kind='answer')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        self.assertEqual(proxy_call(root / '.runs', 'two', 'ok')[0], 0)     # a second completed one permits a second
+        self.deliver_answer(root, 'two')
+        self.assertEqual(launch.limit_state(dest)['answer_turns'], 2)
+
+    def test_consult_folder_without_the_calls_completion_record_permits_no_answer(self):
+        # a folder holding a response but no record that the call ran and ended ok is not "a consultation that answered"
+        root, dest = new_run(self.base, 'hand', 3, ['initial'])
+        d = dest / 'consults' / '0001'
+        d.mkdir(parents=True)
+        (d / 'response.txt').write_text('답변')
+        (d / 'usage.json').write_text(json.dumps({'role': 'user-proxy', 'usage_complete': True}))
+        error, paid = attempt_turn(root, 'hand', resume=True, kind='answer')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+
+
+def turn_dir_hint(root, run_id):
+    turns = Path(root) / '.runs' / run_id / 'turns'
+    return str(len(list(turns.iterdir())) if turns.exists() else 0)
+
+
+def init_frozen(root, run_id, arm, readiness, image=None):
+    args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=arm, core=1, image=image,
+                           harness=root / 'harness-source' if arm == 3 else None, network=None, readiness=readiness)
+    with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
+         patch.object(launch, 'selftest', return_value=SELFTEST_OK), patch.object(launch, 'seed_harness', return_value='listing'), \
+         contextlib.redirect_stdout(io.StringIO()):
+        launch.initialize(args)
+    return json.loads((root / '.runs' / run_id / 'manifest.json').read_text())
+
+
+FROZEN_CONTRACT = 'c' * 64
+FROZEN_IMAGE = 'sha256:' + 'f' * 64
+
+
+def write_readiness(directory, contract=FROZEN_CONTRACT, image=FROZEN_IMAGE):
+    path = Path(directory) / ('readiness-%s-%s.json' % (contract[:4], image[-4:]))
+    path.write_text(json.dumps({'protocol': 'payment-settlement-v3-claude', 'contract_sha256': contract,
+                                'image_digests': {'runner': image}, 'user_proxy_model': OPUS}))
+    return path
+
+
+class NothingFrozenChangesAtInit(unittest.TestCase):
+    """Spec 2: 판정 기준과 요구사항은 동결 후 바꾸지 않는다. 바꾸면 프로토콜 버전을 올리고 전 조건 재실행이다.
+    spec 5: 동결 해시 기록 — a run initialised after the freeze runs the frozen image and records the frozen contract hash."""
+
+    def test_run_after_freeze_uses_the_frozen_image_and_records_the_contract_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            readiness = write_readiness(tmp)
+            for arm, image in ((1, None), (2, FROZEN_IMAGE), (3, None)):
+                with self.subTest(arm=arm, image=image):
+                    m = init_frozen(root, 'fz%d' % arm, arm, readiness, image=image)
+                    self.assertEqual(m['image'], FROZEN_IMAGE)
+                    self.assertIs(m['image_frozen'], True)
+                    self.assertEqual(m['contract_sha256'], FROZEN_CONTRACT)
+
+    def test_run_after_freeze_cannot_use_another_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            readiness = write_readiness(tmp)
+            for other in ('payment-claude-runner:2.1.326', 'sha256:' + '0' * 64, 'img'):
+                with self.subTest(other):
+                    with self.assertRaises(Exception):
+                        init_frozen(root, 'other', 1, readiness, image=other)
+                    self.assertFalse((root / '.runs' / 'other' / 'manifest.json').exists())
+
+
+class PilotEvidenceNeedsTheFrozenContractAndImage(unittest.TestCase):
+    """Spec 2: 동결 후 바꾸지 않는다 / §0 보고 단위 + task 07: the pilot that frees the cycles must have run under the freeze —
+    pilot evidence from a pilot made under another contract hash or another image does not count."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.freeze = load_script('freeze_readiness')
+
+    def pilot(self, root, run_id, readiness=None):
+        if readiness is None:
+            init_run(root, run_id, 3)
+        else:
+            init_frozen(root, run_id, 3, readiness)
+        sid = 'aaaaaaaa-0000-4000-8000-0000000000%02d' % len(run_id)
+        projects = {'-workspace/s.jsonl': [assistant('pm-' + run_id, FABLE, U1), assistant('w-' + run_id, OPUS, U2, sidechain=True)],
+                    '-workspace/s/subagents/agent-a1.jsonl': [assistant('w-' + run_id, OPUS, U2, sidechain=True)]}
+        log = 'T1-1 started session=%s model=%s\nT1-1 exit=0\n' % (sid, FABLE)
+        reviewer = {'-mirror/%s.jsonl' % sid: [assistant('rv-' + run_id, FABLE, U2, session=sid)]}
+        result, _, error, _ = drive_turn(root, run_id, reported=U1, projects=projects, reviewer_log=log, reviewer_projects=reviewer)
+        self.assertIsNone(error)
+        self.assertEqual(result['status'], 'ok')
+
+    def passed(self, root, run_id, contract, image):
+        return bool(self.freeze.pilot_evidence(root / '.runs', run_id, contract, image)[0])
+
+    def test_pilot_counts_only_under_the_same_contract_and_frozen_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            self.pilot(root, 'pilot', write_readiness(tmp))
+            self.assertTrue(self.passed(root, 'pilot', FROZEN_CONTRACT, FROZEN_IMAGE), 'control: the frozen pilot does not count')
+            self.assertFalse(self.passed(root, 'pilot', 'd' * 64, FROZEN_IMAGE), 'pilot under another contract counted')
+            self.assertFalse(self.passed(root, 'pilot', FROZEN_CONTRACT, 'sha256:' + '0' * 64), 'pilot on another image counted')
+
+    def test_pilot_made_before_the_freeze_does_not_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            self.pilot(root, 'early')                                       # initialised without readiness, image 'img'
+            self.assertFalse(self.passed(root, 'early', FROZEN_CONTRACT, 'img'))
+            self.assertFalse(self.passed(root, 'early', FROZEN_CONTRACT, FROZEN_IMAGE))
+
+
+class EvaluationCostIsSeparate(unittest.TestCase):
+    """Spec 2: 진행자·판정 어댑터의 토큰은 역할별로 분리 기록한다 / §0: 판정 어댑터 비용은 "평가 비용"으로 분리 기록 /
+    spec 2: 관측하지 못한 사용량은 0으로 채우지 않는다. Evaluation cost is outside the arm's cost and the run's 20M cap."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.recorder = load_script('record_evaluation_cost')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root, self.dest = new_run(self.tmp.name, 'ev', 1, [])
+        write_turn(self.dest, 1, datetime.now(timezone.utc), 'ok', [('run-req', 'implementer', tokens(5_000_000, 5_000_000))],
+                   'initial', 'initial')
+        self.runs = root / '.runs'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def record(self, role, *counters, total=None, cost=None):
+        argv = ['record_evaluation_cost.py', '--runs', str(self.runs), '--run-id', 'ev', '--role', role, '--model', OPUS,
+                '--source', 'completion notice usage']
+        if counters:
+            for flag, value in zip(('--input-tokens', '--cache-creation-input-tokens', '--cache-read-input-tokens',
+                                    '--output-tokens'), counters):
+                argv += [flag, str(value)]
+        if total is not None:
+            argv += ['--total-tokens', str(total)]
+        if cost is not None:
+            argv += ['--cost-usd', str(cost)]
+        out = io.StringIO()
+        with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = self.recorder.main()
+            except SystemExit as exc:
+                code = exc.code
+        self.assertIn(code, (0, None), out.getvalue())
+
+    def test_conductor_and_judging_adapter_are_recorded_per_role_outside_arm_cost_and_cap(self):
+        before = launch.run_ledger(self.dest)
+        self.record('conductor', 10_000_000, 5_000_000, 5_000_000, 1_000_000, cost=7.5)      # 21M: more than the run cap alone
+        self.record('judging-adapter', total=777)
+        ledger = launch.run_ledger(self.dest)
+        evaluation = ledger['evaluation_cost']['roles']
+        self.assertEqual(evaluation['conductor']['total_tokens'], 21_000_000)
+        self.assertEqual(evaluation['conductor']['usage'], {'input_tokens': 10_000_000, 'cache_creation_input_tokens': 5_000_000,
+                                                            'cache_read_input_tokens': 5_000_000, 'output_tokens': 1_000_000})
+        self.assertEqual(evaluation['judging-adapter']['total_tokens'], 777)
+        # the arm's own accounting is untouched
+        self.assertEqual(ledger['total_tokens'], 10_000_000)
+        self.assertEqual(ledger['total_tokens'], before['total_tokens'])
+        self.assertEqual(set(ledger['roles']), {'implementer'})
+        self.assertEqual(ledger['cost_usd'], before['cost_usd'])
+        # and outside the 20M cap: 10M run + 21M evaluation still lets the next call through
+        self.assertEqual(launch.limit_state(self.dest)['used']['token_limit'], 10_000_000)
+        launch.limit_gate(self.dest, next_is_feedback=True)
+        self.assertFalse((self.dest / 'censored.json').exists())
+        # the run's ledger file carries the block
+        launch.write_ledger(self.dest)
+        written = json.loads((self.dest / 'ledger.json').read_text())
+        self.assertEqual(written['evaluation_cost']['roles']['conductor']['total_tokens'], 21_000_000)
+
+    def test_missing_record_is_shown_as_missing_never_as_zero(self):
+        evaluation = launch.run_ledger(self.dest)['evaluation_cost']['roles']
+        for role in ('conductor', 'judging-adapter'):
+            with self.subTest(role):
+                entry = evaluation[role]
+                self.assertIn('not recorded', json.dumps(entry))
+                self.assertEqual(numbers_in(entry), [], 'a missing %s record shows numbers: %s' % (role, entry))
+        # a total-only record leaves the split unobserved, not zero-filled
+        self.record('judging-adapter', total=500)
+        entry = launch.run_ledger(self.dest)['evaluation_cost']['roles']['judging-adapter']
+        self.assertEqual(entry['total_tokens'], 500)
+        self.assertNotEqual(entry.get('usage'), {k: 0 for k in KEYS})
+        self.assertIn('not recorded', json.dumps(launch.run_ledger(self.dest)['evaluation_cost']['roles']['conductor']))
+
+    def test_records_accumulate_and_are_never_overwritten(self):
+        self.record('conductor', total=100)
+        first = sorted((self.dest / 'evaluation').rglob('record.json'))
+        content = first[0].read_bytes()
+        self.record('conductor', total=50)
+        records = sorted((self.dest / 'evaluation').rglob('record.json'))
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0].read_bytes(), content)
+        self.assertEqual(launch.run_ledger(self.dest)['evaluation_cost']['roles']['conductor']['total_tokens'], 150)
+
+
+class NoCallOutlastsTheEightHourCap(unittest.TestCase):
+    """Spec 2: 상한 8시간 — no call of the run (a session turn or a user-proxy consultation) may run past it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.now = datetime.now(timezone.utc)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_proxy_consultation_timeout_is_cut_to_the_remaining_time(self):
+        root, dest = new_run(self.base, 'px', 3, ['initial'], started=self.now - timedelta(hours=8) + timedelta(seconds=120))
+        record = []
+        code, console = proxy_call(root / '.runs', 'px', timeout_seconds=3600, record=record)
+        self.assertEqual(code, 0, console)
+        starts = [t for c, t in record if c[:2] == ['docker', 'start']]
+        self.assertEqual(len(starts), 1)
+        self.assertIsNotNone(starts[0])
+        self.assertLessEqual(starts[0], 120)
+        self.assertGreater(starts[0], 0)
+
+    def test_proxy_consultation_after_eight_hours_makes_no_paid_call(self):
+        root, dest = new_run(self.base, 'px8', 3, ['initial'], started=self.now - timedelta(hours=8, seconds=1))
+        record = []
+        code, _ = proxy_call(root / '.runs', 'px8', timeout_seconds=3600, record=record)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(paid_calls(record), [])
+        self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TIME')
+
+    def test_arm3_turn_timeout_is_recomputed_after_the_hook_selftest(self):
+        # time spent in the self-test is time of the run: the call gets only what is left after it
+        start = self.now - timedelta(hours=8) + timedelta(seconds=120)
+        root, dest = new_run(self.base, 'st', 3, ['initial'], started=start)
+        record = []
+        drive_turn(root, 'st', resume=True, kind='feedback', reported=U2, timeout=3600, record=record,
+                   selftest=lambda m: age_first_turn(dest, start - timedelta(seconds=90)),
+                   projects={'-workspace/s.jsonl': [assistant('t0', FABLE, U1), assistant('r2', FABLE, U2)]})
+        starts = [t for c, t in record if c[:2] == ['docker', 'start']]
+        self.assertEqual(len(starts), 1)
+        self.assertLessEqual(starts[0], 30)
+
+    def test_arm3_selftest_that_reaches_eight_hours_leaves_no_paid_call(self):
+        start = self.now - timedelta(hours=8) + timedelta(seconds=60)
+        root, dest = new_run(self.base, 'st8', 3, ['initial'], started=start)
+        error, paid = attempt_turn(root, 'st8', resume=True, kind='feedback',
+                                   selftest=lambda m: age_first_turn(dest, start - timedelta(seconds=120)))
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TIME')
+
+
+class CapOvershootInTheFinalCall(unittest.TestCase):
+    """§0 추가 결정(2026-11-17) 상한 초과 완료 run의 판정 → "완료 + 초과 표시": 수용 기준을 통과한 run이 그 마지막 턴에서
+    토큰·시간 상한을 넘겼으면 완료로 판정하고 초과분을 함께 기록한다. §2의 "먼저 닿으면 CENSORED_*로 끝낸다"는 다음 호출을
+    막는 규칙으로 읽는다. Spec 2: 실패 run을 결과에서 지우지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.finisher = load_script('finish_run')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.now = datetime.now(timezone.utc)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_record(self, root, arm):
+        return root / 'docs' / 'experiments' / str(arm) / 'core1' / 'run.json'
+
+    def setup_run(self, run_id, arm, prior_tokens, started=None):
+        root = make_root(self.base / run_id)
+        init_run(root, run_id, arm)
+        dest = root / '.runs' / run_id
+        role = 'pm' if arm == 3 else 'implementer'
+        write_turn(dest, 1, started or self.now, 'ok', [('prior', role, prior_tokens)], 'initial', 'initial')
+        record = self.run_record(root, arm)
+        record.parent.mkdir(parents=True)
+        record.write_text(json.dumps({'run_id': run_id, 'arm': arm, 'core': 1, 'status': 'RUNNING'}))
+        return root, dest
+
+    def final_call(self, root, run_id, arm, usage, side_effect=None):
+        model = FABLE if arm == 3 else OPUS
+        result, _, error, _ = drive_turn(root, run_id, resume=True, kind='feedback', reported=usage, side_effect=side_effect,
+                                         projects={'-workspace/s.jsonl': [assistant('last', model, usage)]})
+        return result, error
+
+    def finish(self, root, run_id, verdict):
+        argv = ['finish_run.py', '--run-id', run_id, '--verdict', verdict, '--runs', str(root / '.runs')]
+        out = io.StringIO()
+        with patch.object(self.finisher, 'ROOT', root), patch.object(sys, 'argv', argv), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = self.finisher.main()
+            except SystemExit as exc:
+                code = exc.code
+            except Exception as exc:                 # a refusal raised instead of exiting is still a refusal
+                code, _ = 1, out.write(str(exc))
+        return code or 0, out.getvalue()
+
+    def token_overshoot(self, run_id, arm=3):
+        # 19,999,980 before the final call; the final call adds 1,000 -> 980 over the 20,000,000 cap
+        root, dest = self.setup_run(run_id, arm, tokens(9_999_990, 9_999_990))
+        result, error = self.final_call(root, run_id, arm, tokens(500, 500))
+        self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap during the call left no record')
+        return root, dest
+
+    def assert_no_further_paid_call(self, root, run_id, arm):
+        error, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        if arm == 3:
+            record = []
+            code, _ = proxy_call(root / '.runs', run_id, record=record)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(paid_calls(record), [])
+
+    def test_passed_run_that_crossed_the_token_cap_in_its_final_call_is_completed_with_the_overshoot(self):
+        root, dest = self.token_overshoot('tok')
+        censored = (dest / 'censored.json').read_bytes()
+        code, out = self.finish(root, 'tok', 'PASSED')
+        self.assertEqual(code, 0, out)
+        run = json.loads(self.run_record(root, 3).read_text())
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIs(run['cap_reached'], True)
+        self.assertTrue(run.get('cap_overshoot'), 'overshoot not recorded with the completed run')
+        self.assertIn(980, numbers_in(run['cap_overshoot']), 'token overshoot (20,000,980 - 20,000,000) not recorded')
+        # the cap still stops every further paid call, and the overshoot record stays as it was
+        self.assert_no_further_paid_call(root, 'tok', 3)
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+
+    def test_passed_run_that_crossed_the_time_cap_in_its_final_call_is_completed_with_the_overshoot(self):
+        start = self.now - timedelta(hours=8) + timedelta(seconds=60)
+        root, dest = self.setup_run('tim', 1, tokens(1, 1), started=start)
+        self.final_call(root, 'tim', 1, U2, side_effect=lambda d: age_first_turn(d, start - timedelta(seconds=90)))
+        self.assertTrue((dest / 'censored.json').exists())
+        censored = (dest / 'censored.json').read_bytes()
+        code, out = self.finish(root, 'tim', 'PASSED')
+        self.assertEqual(code, 0, out)
+        run = json.loads(self.run_record(root, 1).read_text())
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIs(run['cap_reached'], True)
+        self.assertTrue(run.get('cap_overshoot'))
+        self.assertTrue([n for n in numbers_in(run['cap_overshoot']) if n > 0])
+        self.assert_no_further_paid_call(root, 'tim', 1)
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+
+    def test_run_that_did_not_pass_stays_censored(self):
+        root, dest = self.token_overshoot('fail')
+        censored = (dest / 'censored.json').read_bytes()
+        code, out = self.finish(root, 'fail', 'FAILED')
+        self.assertEqual(code, 0, out)
+        run = json.loads(self.run_record(root, 3).read_text())
+        self.assertTrue(run['status'].startswith('CENSORED_'), run['status'])
+        self.assertEqual(run['status'], json.loads(censored)['status'])
+        self.assertIs(run['cap_reached'], True)
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+        self.assert_no_further_paid_call(root, 'fail', 3)
+
+    def test_run_stopped_before_a_call_or_by_the_feedback_cap_is_not_completed(self):
+        # only a final call that crossed the token or time cap counts as "완료 + 초과"
+        root, dest = self.setup_run('before', 1, tokens(10_000_000, 10_000_000))
+        attempt_turn(root, 'before', resume=True, kind='feedback')
+        self.assertTrue((dest / 'censored.json').exists())
+        root2, dest2 = new_run(self.base, 'turns', 1, ['initial', *['feedback'] * 30])
+        record2 = self.run_record(root2, 1)
+        record2.parent.mkdir(parents=True)
+        record2.write_text(json.dumps({'run_id': 'turns', 'arm': 1, 'core': 1, 'status': 'RUNNING'}))
+        attempt_turn(root2, 'turns', resume=True, kind='feedback')
+        self.assertEqual(json.loads((dest2 / 'censored.json').read_text())['status'], 'CENSORED_TURNS')
+        for r, d, run_id in ((root, dest, 'before'), (root2, dest2, 'turns')):
+            with self.subTest(run_id):
+                censored = (d / 'censored.json').read_bytes()
+                code, out = self.finish(r, run_id, 'PASSED')
+                self.assertNotEqual(code, 0, out)
+                self.assertNotEqual(json.loads(self.run_record(r, 1).read_text())['status'], 'PASSED')
+                self.assertEqual((d / 'censored.json').read_bytes(), censored)
+                code, out = self.finish(r, run_id, 'FAILED')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(json.loads(self.run_record(r, 1).read_text())['status'], json.loads(censored)['status'])
+
+    def test_uncapped_passed_run_is_completed_without_a_cap_mark(self):
+        # control for the table: no cap record, PASSED stays PASSED with cap_reached false
+        root, dest = self.setup_run('clean', 1, tokens(1, 1))
+        code, out = self.finish(root, 'clean', 'PASSED')
+        self.assertEqual(code, 0, out)
+        run = json.loads(self.run_record(root, 1).read_text())
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIs(run['cap_reached'], False)
 
 
 if __name__ == '__main__':
