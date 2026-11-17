@@ -71,24 +71,45 @@ def clean_baseline():
     return head, dirty.splitlines()
 
 
-def model_matches(observed, requested):
-    """One provider-reported model for the role, and it is the requested id (exact or a dated/suffixed form)."""
-    return bool(requested) and len(observed or []) == 1 and observed[0].startswith(requested)
+# Agreed model per (arm, role) — absolute ids from the protocol (launch.MODELS, launch.REVIEWER_MODEL), never the
+# ids a run happened to request.
+AGREED = {(1, 'implementer'): launch.MODELS[1][0], (2, 'implementer'): launch.MODELS[2][0],
+          (3, 'pm'): launch.MODELS[3][0], (3, 'worker'): launch.MODELS[3][1], (3, 'reviewer'): launch.REVIEWER_MODEL}
+# Roles each kind of evidence must show. Smoke runs prove the main role of every arm; the arm 3 pilot proves the rest.
+SMOKE_ROLES = {1: ('implementer',), 2: ('implementer',), 3: ('pm',)}
+PILOT_ROLES = ('pm', 'worker', 'reviewer')
+
+
+def model_matches(observed, agreed):
+    """Exactly one provider-reported model for the role, and it is the agreed id (exact or that id plus a suffix)."""
+    return (bool(agreed) and len(observed or []) == 1 and isinstance(observed[0], str)
+            and (observed[0] == agreed or observed[0].startswith(agreed + '-')))
+
+
+def role_check(arm, observed, required):
+    """Every required role observed with its agreed model, and no observed role outside the agreed set or off-model.
+    A required role that was not observed is reported as False, never as verified."""
+    check = {role: model_matches(observed.get(role), AGREED.get((arm, role))) for role in observed}
+    for role in required:
+        check.setdefault(role, False)
+    return check
 
 
 def smoke_evidence(runs, run_ids):
     """Derive flags from paid smoke runs made by launch.py (manifest + finalized turns)."""
     flags = {k: False for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
                                 'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
-    detail, actual, arms = {}, {}, set()
+    detail, actual, arms, tools = {}, {}, set(), {}
     ok_turns, all_ok_complete, cache_seen, token_ok, roles_ok, selftests_ok, hooks_ok = 0, True, False, True, True, True, False
     for run_id in run_ids:
         run = Path(runs) / run_id
         manifest = json.loads((run / 'manifest.json').read_text())
-        arms.add(manifest['arm'])
+        arm = manifest['arm']
+        arms.add(arm)
         st = manifest.get('selftest') or {}
         selftests_ok = selftests_ok and st.get('passed') is True
-        if manifest['arm'] == 3:
+        tools.setdefault(arm, set()).update(t for t in manifest.get('observed_tools') or [] if t)
+        if arm == 3:
             hooks_ok = hooks_ok or (st.get('passed') is True and st.get('gate_l1_write_exit') == '2'
                                     and st.get('gate_docs_write_exit') == '0' and st.get('git_guard_push') == 'ask'
                                     and st.get('harness_hash_match') == '1' and st.get('reviewer_on_path') == '1')
@@ -100,16 +121,19 @@ def smoke_evidence(runs, run_ids):
         cache_seen = cache_seen or any(all(isinstance(((r.get('usage_cross_check') or {}).get('reported') or {}).get(k), int)
                                            for k in launch.USAGE_KEYS) for r in good)
         observed = manifest.get('actual_role_models') or {}
-        main_role = 'pm' if manifest['arm'] == 3 else 'implementer'
-        expected = {main_role: manifest['requested_model'], 'worker': manifest.get('requested_worker_model'),
-                    'reviewer': manifest.get('requested_reviewer_model')}
-        role_check = {role: model_matches(observed.get(role), expected[role]) for role in observed}
-        roles_ok = roles_ok and role_check.get(main_role) is True and all(role_check.values())
-        if role_check.get(main_role):
-            actual[str(manifest['arm'])] = observed[main_role][0]
-        detail[run_id] = dict(arm=manifest['arm'], manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good),
-                              observed_role_models=observed, role_model_check=role_check)
-    flags['isolation_verified'] = bool(run_ids) and selftests_ok and 3 in arms and bool(arms & {1, 2})
+        checks = role_check(arm, observed, SMOKE_ROLES.get(arm, ()))
+        roles_ok = roles_ok and bool(checks) and all(checks.values())
+        main_role = SMOKE_ROLES.get(arm, ('',))[0]
+        if checks.get(main_role):
+            actual[str(arm)] = observed[main_role][0]
+        detail[run_id] = dict(arm=arm, manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good),
+                              observed_role_models=observed, role_model_check=checks,
+                              observed_tools=sorted(tools.get(arm, ())))
+    # same tools in every arm; arm 3 differs only by the subagent surface
+    base = [tools[a] for a in (1, 2) if a in tools]
+    same_tools = bool(base) and 3 in tools and all(b == base[0] for b in base) and \
+        tools[3] - set(launch.SUBAGENT_TOOLS) == base[0] and set(launch.SUBAGENT_TOOLS) <= tools[3]
+    flags['isolation_verified'] = bool(run_ids) and selftests_ok and same_tools
     flags['hook_enforcement_verified'] = hooks_ok
     flags['oauth_token_source_verified'] = bool(run_ids) and token_ok
     flags['cache_observation_verified'] = cache_seen
@@ -158,6 +182,10 @@ def main():
     if missing:
         p.error('images not present locally (pull/build first): ' + ', '.join(missing))
     flags, actual, detail = smoke_evidence(a.runs, a.smoke_run)
+    smoked = {detail[r]['arm'] for r in detail}
+    if smoked != {1, 2, 3} or set(actual) != {'1', '2', '3'}:
+        p.error('smoke runs of all three arms with their agreed models are required (arms smoked: %s, verified actual '
+                'models: %s)' % (sorted(smoked), sorted(actual)))
     attest_flags, attest_evidence = attested(a.attest) if a.attest else ({}, {})
     frozen = inventory()
     now = datetime.now(timezone.utc).isoformat()

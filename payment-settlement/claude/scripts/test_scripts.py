@@ -60,6 +60,7 @@ class FreezeTest(unittest.TestCase):
         requested = 'claude-fable-5-2' if arm == 3 else 'claude-opus-5-5'
         write(runs / run_id / 'manifest.json', dict(
             arm=arm, requested_model=requested, requested_worker_model='claude-opus-5-5' if arm == 3 else None,
+            observed_tools=list(freeze_readiness.launch.ALLOWED_TOOLS_ARM3 if arm == 3 else freeze_readiness.launch.ALLOWED_TOOLS_ARM12),
             requested_reviewer_model='claude-fable-5-2' if arm == 3 else None, actual_role_models=roles,
             selftest=selftest or dict(passed=True, gate_l1_write_exit='2', gate_docs_write_exit='0', git_guard_push='ask',
                                       harness_hash_match='1', reviewer_on_path='1')))
@@ -71,11 +72,24 @@ class FreezeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runs = Path(tmp)
             self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
+            self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
             self.smoke(runs, 's3', 3, {'pm': ['claude-fable-5-2-20261101'], 'reviewer': ['claude-fable-5-2']})
-            flags, actual, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's3'])
+            flags, actual, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])
             self.assertTrue(all(flags.values()), flags)
-            self.assertEqual(actual, {'1': 'claude-opus-5-5', '3': 'claude-fable-5-2-20261101'})
+            self.assertEqual(actual, {'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2-20261101'})
             self.assertEqual(detail['s3']['role_model_check'], {'pm': True, 'reviewer': True})
+            # required main role missing → not verified; a requested-and-served model other than the agreed one → not verified
+            self.smoke(runs, 'n3', 3, {'reviewer': ['claude-fable-5-2']})
+            self.assertEqual(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'])[2]['n3']['role_model_check'],
+                             {'reviewer': True, 'pm': False})
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'n3'])[0]['role_models_verified'])
+            self.smoke(runs, 'x1', 1, {'implementer': ['claude-opus-5-5x']})
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['x1', 's3'])[0]['role_models_verified'])
+            # arm 3 tools must be exactly arms 1/2 tools plus the subagent tool
+            manifest3 = json.loads((runs / 's3/manifest.json').read_text())
+            manifest3['observed_tools'] += ['Skill']
+            write(runs / 's3/manifest.json', manifest3)
+            self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['isolation_verified'])
             # wrong worker model, missing arm 3, incomplete usage, credentials file present: each flips its flag
             self.smoke(runs, 'w3', 3, {'pm': ['claude-fable-5-2'], 'worker': ['claude-sonnet-5']})
             self.assertFalse(freeze_readiness.smoke_evidence(runs, ['s1', 'w3'])[0]['role_models_verified'])
@@ -106,6 +120,9 @@ class FreezeTest(unittest.TestCase):
 
     def test_model_match(self):
         self.assertTrue(freeze_readiness.model_matches(['claude-opus-5-5'], 'claude-opus-5-5'))
+        self.assertTrue(freeze_readiness.model_matches(['claude-opus-5-5-20261101'], 'claude-opus-5-5'))
+        self.assertFalse(freeze_readiness.model_matches(['claude-opus-5-50'], 'claude-opus-5-5'))
+        self.assertEqual(freeze_readiness.AGREED[(3, 'reviewer')], 'claude-fable-5-2')
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5-5', 'claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['x'], None))
