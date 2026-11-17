@@ -50,8 +50,10 @@ def inside(folder, rel):
 
 
 def read_verdict(folder, run_id):
-    """Validate the verdict table's shape and hash its evidence files. A malformed table is refused; a listed evidence
-    file that does not exist is recorded as missing (hash None) and makes all_acceptance_passed false."""
+    """Validate the verdict table's shape and support and hash its evidence files. Refused: a malformed table, and a
+    table in which a PASS/FAIL/PARTIAL criterion has no existing evidence file or a NOT_RUN criterion has no note
+    (whatever status would result). A listed evidence file that does not exist beside an existing one is recorded as
+    missing (hash None) and makes all_acceptance_passed false."""
     path = folder / VERDICT
     data = json.loads(path.read_text())
     if not isinstance(data, dict) or data.get('run_id') != run_id:
@@ -72,18 +74,26 @@ def read_verdict(folder, run_id):
         if not isinstance(files, list):
             raise ValueError('%s %s: evidence must be a list of paths relative to the record folder' % (path, cid))
         results[cid] = item['result']
+        existing = 0
         for rel in files:
             file = inside(folder, rel)
             evidence.setdefault(rel, sha(file) if file.is_file() else None)
-        if not files:
-            unsupported.append(cid)
+            existing += evidence[rel] is not None
+        note = item.get('note')
+        if item['result'] == 'NOT_RUN':
+            if not isinstance(note, str) or not note.strip():
+                unsupported.append('%s (NOT_RUN without a note)' % cid)
+        elif not existing:
+            unsupported.append('%s (%s without an existing evidence file)' % (cid, item['result']))
+    if unsupported:
+        raise ValueError('%s: every criterion needs support (PASS/FAIL/PARTIAL: at least one existing evidence file; '
+                         'NOT_RUN: a note) — unsupported: %s' % (path, ', '.join(unsupported)))
     passed = all(results[c] == 'PASS' for c in CRITERIA)
     missing = sorted(rel for rel, digest in evidence.items() if digest is None)
     counts = {r: sum(1 for v in results.values() if v == r) for r in RESULTS}
     return {'file': VERDICT, 'sha256': sha(path), 'judged_by': data['judged_by'], 'judged_at': data.get('judged_at'),
             'results': results, 'counts': counts, 'passed': passed, 'evidence': evidence, 'evidence_missing': missing,
-            'criteria_without_evidence': unsupported,
-            'evidence_complete': not missing and not unsupported}
+            'evidence_complete': not missing}
 
 
 def cap_annotation(censored):
@@ -134,8 +144,7 @@ def evidence_fields(run, manifest, verdict):
     }
     derivation = {
         'all_acceptance_passed': {'source': VERDICT, 'all_pass': bool(verdict) and verdict['passed'],
-                                  'evidence_missing': verdict['evidence_missing'] if verdict else None,
-                                  'criteria_without_evidence': verdict['criteria_without_evidence'] if verdict else None},
+                                  'evidence_missing': verdict['evidence_missing'] if verdict else None},
         'usage_complete': {'source': '.runs/<run> ledger computed at finish', 'incomplete_calls': ledger['incomplete_calls'],
                            'conflicts': len(ledger['conflicts'])},
         'all_role_models_verified': {'source': 'manifest actual_role_models + request events (freeze_readiness.run_role_check)',

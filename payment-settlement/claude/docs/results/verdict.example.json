@@ -1,5 +1,5 @@
 {
-  "_example": "EXAMPLE ONLY - not a result. Shape of <record folder>/verdict.json read by scripts/finish_run.py (runbook: 판정표)",
+  "_example": "EXAMPLE ONLY - not a result. Shape of <record folder>/verdict.json read by scripts/finish_run.py (runbook: 판정표). Every criterion needs support: PASS/FAIL/PARTIAL at least one existing evidence file, NOT_RUN a note",
   "run_id": "claude-arm1-core01",
   "judged_by": "main supervising session (예: 세션 id 또는 이름)",
   "judged_at": "2026-11-18T00:00:00+00:00",
@@ -157,10 +157,8 @@
     },
     "C20": {
       "result": "NOT_RUN",
-      "evidence": [
-        "load-check.json"
-      ],
-      "note": "예: 부하 측정을 실행하지 못함(통과 아님)"
+      "evidence": [],
+      "note": "필수(NOT_RUN은 사유가 있어야 한다). 예: 부하 측정을 실행하지 못함(통과 아님) — 근거 파일이 있으면 evidence에 적는다"
     }
   }
 }

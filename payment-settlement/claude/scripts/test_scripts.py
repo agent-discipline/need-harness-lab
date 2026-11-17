@@ -724,7 +724,8 @@ def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results
     if not pilot:
         write(folder / 'run.json', {'run_id': run_id, 'status': record_status, 'isolation_verified': True})
     results = results or {}
-    criteria = {c: {'result': results.get(c, 'PASS'), 'evidence': ['acceptance-http.json']} for c in finish_run.CRITERIA}
+    criteria = {c: {'result': results.get(c, 'PASS'), 'evidence': ['acceptance-http.json'], 'note': 'observed'}
+                for c in finish_run.CRITERIA}
     write(folder / 'verdict.json', {'run_id': run_id, 'judged_by': 'main session', 'judged_at': launch.utc(),
                                     'criteria': criteria})
     write(folder / 'acceptance-http.json', {'cases': {}})
@@ -769,8 +770,10 @@ class FinishRunTest(unittest.TestCase):
         for field, kw in cases.items():
             with self.subTest(field), tempfile.TemporaryDirectory() as tmp:
                 root, _, folder = finish_fixture(tmp, **kw)
-                if field == 'all_acceptance_passed':
-                    (folder / 'acceptance-http.json').unlink()                   # listed evidence does not exist
+                if field == 'all_acceptance_passed':                             # one listed evidence file does not exist
+                    verdict = json.loads((folder / 'verdict.json').read_text())
+                    verdict['criteria']['C05']['evidence'].append('never-written.json')
+                    write(folder / 'verdict.json', verdict)
                 _, status, _, fields = self.finish(root)
                 self.assertEqual(status, 'PASSED')                               # passed; commit_run then blocks
                 self.assertIs(fields[field], False)
@@ -778,7 +781,7 @@ class FinishRunTest(unittest.TestCase):
                 record = self.record(folder)
                 self.assertIs(record[field], False)                              # a hand-written true is overwritten
                 if field == 'all_acceptance_passed':
-                    self.assertEqual(record['verdict']['evidence_missing'], ['acceptance-http.json'])
+                    self.assertEqual(record['verdict']['evidence_missing'], ['never-written.json'])
         for kw in (dict(selftest=False), dict(readiness=False)):                 # isolation: self-test, frozen surface
             with tempfile.TemporaryDirectory() as tmp:
                 root, _, _ = finish_fixture(tmp, **kw)
@@ -817,12 +820,36 @@ class FinishRunTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:                              # control: proxy on the agreed model
             root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-opus-5-5')
             self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], True)
-        with tempfile.TemporaryDirectory() as tmp:                              # criterion judged without evidence
+
+    def test_a_table_with_an_unsupported_criterion_cannot_be_finished(self):
+        def no_evidence(c, result):
+            return c, lambda v: v['criteria'][c].update(result=result, evidence=[])
+        cases = {'PASS without evidence': no_evidence('C03', 'PASS'),
+                 'FAIL without evidence': no_evidence('C04', 'FAIL'),
+                 'PARTIAL whose only evidence is absent': ('C05', lambda v: v['criteria']['C05'].update(
+                     result='PARTIAL', evidence=['never-written.json'])),
+                 'NOT_RUN without a note': ('C20', lambda v: v['criteria'].update(
+                     C20={'result': 'NOT_RUN', 'evidence': ['acceptance-http.json']})),
+                 'NOT_RUN with a blank note': ('C20', lambda v: v['criteria']['C20'].update(result='NOT_RUN', note='  '))}
+        for name, (criterion, edit) in cases.items():
+            for infra in (False, True):                                        # whatever status would result
+                with self.subTest(name, infra=infra), tempfile.TemporaryDirectory() as tmp:
+                    root, _, folder = finish_fixture(tmp)
+                    (folder / 'docker.log').write_text('x')
+                    verdict = json.loads((folder / 'verdict.json').read_text())
+                    edit(verdict)
+                    write(folder / 'verdict.json', verdict)
+                    kw = dict(infra_reason='docker died', infra_evidence=['docker.log']) if infra else {}
+                    with self.assertRaises(ValueError) as ctx:
+                        self.finish(root, **kw)
+                    self.assertIn(criterion, str(ctx.exception))                # the message names the criterion
+                    self.assertEqual(self.record(folder)['status'], 'RUNNING')
+        with tempfile.TemporaryDirectory() as tmp:                              # NOT_RUN with a note needs no file
             root, _, folder = finish_fixture(tmp)
             verdict = json.loads((folder / 'verdict.json').read_text())
-            verdict['criteria']['C03']['evidence'] = []
+            verdict['criteria']['C20'] = {'result': 'NOT_RUN', 'evidence': [], 'note': 'load check could not run'}
             write(folder / 'verdict.json', verdict)
-            self.assertIs(self.finish(root)[3]['all_acceptance_passed'], False)
+            self.assertEqual(self.finish(root)[1], 'FAILED')
 
     def test_evidence_fields_use_the_freeze_checks(self):
         with tempfile.TemporaryDirectory() as tmp:

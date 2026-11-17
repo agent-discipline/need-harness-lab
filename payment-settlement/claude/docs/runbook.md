@@ -92,13 +92,14 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
   "criteria": {
     "C01": {"result": "PASS", "evidence": ["acceptance-http.json", "acceptance-audit.json"], "note": "판정 근거 요지"},
     "...": "C01~C20 정확히 20개",
-    "C20": {"result": "NOT_RUN", "evidence": ["load-check.json"], "note": "..."}
+    "C20": {"result": "NOT_RUN", "evidence": [], "note": "실행하지 못한 사유(필수)"}
   }
 }
 ```
 
 - `result`는 `PASS`·`FAIL`·`PARTIAL`·`NOT_RUN` 중 하나. 20개가 모두 `PASS`일 때만 통과다(`PARTIAL`·`NOT_RUN`은 통과가 아니다 — `evaluation/README.md` 결과 해석).
-- `evidence`는 기록 폴더 기준 상대 경로 목록(폴더 밖·절대 경로는 거부). 종료 기록은 파일마다 존재 여부와 sha256을 `run.json`의 `verdict.evidence`에 남기고, 없는 파일은 `evidence_missing`, 근거가 빈 기준은 `criteria_without_evidence`에 남는다.
+- **모든 기준은 근거가 있어야 한다**(명세 §10.2): `PASS`·`FAIL`·`PARTIAL`은 실제로 있는 근거 파일 1개 이상, `NOT_RUN`은 비어 있지 않은 사유(`note`). 하나라도 채우지 못한 판정표로는 종료 기록을 할 수 없다 — 결과가 통과든 아니든, `--invalid-infra`와 함께여도 거부되고 메시지가 해당 기준을 나열한다. 판정표를 고친 뒤 다시 실행한다.
+- `evidence`는 기록 폴더 기준 상대 경로 목록(폴더 밖·절대 경로는 거부). 종료 기록은 파일마다 존재 여부와 sha256을 `run.json`의 `verdict.evidence`에 남긴다. 근거가 있는 기준에 적힌 다른 파일이 없으면 `evidence_missing`에 남고 `all_acceptance_passed`는 false다.
 - 기계가 확인하는 것은 형식·근거 파일의 존재와 해시·`judged_by`까지다. 판정 내용이 맞는지는 확인하지 못한다.
 
 ### 종료 기록 `finish_run.py`
@@ -125,6 +126,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 | 하나라도 `PASS`가 아님 | 없음 | `FAILED` | `cap_reached=false` |
 | (인자 `--invalid-infra`) | 무관 | `INVALID_INFRA` | `invalid_infra`(사유·근거 해시), `all_acceptance_passed=false`, 상한 기록이 있으면 같은 `cap_*` 표시 |
 | `verdict.json` 없음(그리고 `--invalid-infra` 없음) | 무관 | **거부** | — |
+| 근거가 빠진 기준이 있는 `verdict.json`(위 판정표 규칙) | 무관 | **거부**(`--invalid-infra`여도) | — |
 
 `cap`은 `censored.json`의 `first`를 옮긴 블록(상태·시점·호출 종류·그때 사용량·한도·초과량)이고 `cap_status`·`cap_when`·`cap_call`·`cap_overshoot`는 그 요약이다. `call` 칸이 없는 옛 상한 기록은 `cap_call=null`로 옮긴다. `censored.json`은 고치지 않으므로 상한에 닿은 run은 통과 여부와 관계없이 더 이상 유료 호출을 받지 않는다. 상한 기록의 `status`가 `CENSORED_BUDGET`·`CENSORED_TIME`·`CENSORED_TURNS`가 아니면 통과하지 못한 run의 종료 기록은 거부된다(기록을 확인해 메인에 보고).
 
@@ -132,7 +134,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 
 | 칸 | 원천 |
 |---|---|
-| `all_acceptance_passed` | 판정표 20개 모두 `PASS` + 모든 기준에 근거 파일이 있고 전부 존재 |
+| `all_acceptance_passed` | 판정표 20개 모두 `PASS` + 적힌 근거 파일이 전부 존재(기준마다 존재하는 근거 1개 이상은 판정표 규칙이라 못 채우면 종료 기록 자체가 거부된다) |
 | `usage_complete` | 실행 폴더(`.runs/<id>`)에서 종료 기록 시점에 계산한 run 장부의 `usage_complete` |
 | `all_role_models_verified` | manifest의 역할별 관측 모델 + 요청 이벤트(대리 사용자 포함)를 합의 모델과 대조 — 동결과 같은 함수 `freeze_readiness.run_role_check`. 있어야 할 역할(1·2번 `implementer`, 3번 `pm`·`worker`·`reviewer`·`user-proxy` — `freeze_readiness.FINISH_ROLES`)이 관측되지 않으면 false. 3번은 사전 인터뷰가 의무이므로 대리 사용자 호출이 한 번도 관측되지 않은 run은 false다(동결의 파일럿 검사는 `PILOT_ROLES` = `pm`·`worker`·`reviewer` 그대로). explorer의 Sonnet 예외는 요청 단위 |
 | `isolation_verified` | 그 run의 init self-test와 3번의 호출 전 self-test가 모두 통과(턴 기록의 `hook_selftest_before_call` + 턴 전에 실패해 `selftest-failures-before-call/`에 남은 기록이 하나도 없음) + 그 run의 도구 목록이 동결 파일(manifest가 가리키는 `readiness.json`의 `evidence.smoke_runs`)의 그 조건 도구 목록과 같음 — `freeze_readiness.run_isolation_check`. 세 조건 간 비교는 동결 때 한 번 |
