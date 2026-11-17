@@ -37,7 +37,9 @@ python3 $L turn --run-id claude-arm3-core01 --resume --kind answer --prompt .run
 python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공유 adapter → usage-summary.json
 ```
 
-턴 제한 시간(2026-11-18 결정): **턴마다 따로 정한 제한은 없고 run 상한 8시간만 있다.** `launch.py turn`과 `start_cycle.py`의 `--timeout-seconds` 기본값은 28,800초이고, 실행기가 매 턴 남은 run 시간으로 줄인다(`invocation.json`의 `effective_timeout_seconds`). 값을 주지 않는다.
+백그라운드 작업 대기(파일럿 02 실측): `claude -p`는 마지막 응답 뒤 백그라운드 작업(서브에이전트·백그라운드 Bash)이 10분 넘게 남아 있으면 그것을 죽이고 끝낸다(stderr `Background tasks still running 10m after the last turn (…); stopping them`) — 3번 PM이 워커를 백그라운드로 발주하고 턴을 끝냈다가 워커가 죽은 채 턴이 `ok`로 보였다. 실행기는 **세 조건 모두** 턴 컨테이너에 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`(상한 없이 기다림)을 넣는다(`invocation.json`의 `create`에 남는다, 3번은 `lab-arm3-start`가 PM에 그대로 넘긴다). 턴 결과의 `background_tasks_killed`는 그래도 죽은 백그라운드 작업(stream의 `task_updated` status `killed`, 위 stderr 문구)을 나열한다 — 관측 칸이고 턴 status는 바꾸지 않는다. 비어 있지 않거나, PM이 "워커를 기다리는 중"이라며 작업이 끝나지 않은 채 턴을 끝낸 경우(이제는 CLI가 기다리므로 생기지 않아야 한다)가 보이면 **진행자는 다음 호출을 하지 말고 멈춰 메인에 보고한다.**
+
+턴 제한 시간(2026-11-18 결정): **턴마다 따로 정한 제한은 없고 run 상한 8시간만 있다.** `launch.py turn`과 `start_cycle.py`의 `--timeout-seconds` 기본값은 28,800초이고, 실행기가 매 턴 남은 run 시간(올림)으로 줄인다(`invocation.json`의 `effective_timeout_seconds`). 그 시간에 닿으면 실행기가 컨테이너를 멈추고(`docker stop`), 턴 결과에 `timed_out`·`stopped_at_run_time_cap`을 남기며, run을 `censored.json`(`CENSORED_TIME`, `after call`, `turn`)으로 상한 도달 기록한다 — 백그라운드 작업을 무한히 기다리는 턴도 8시간에서 끝난다. 값을 주지 않는다.
 
 비용(파일럿 01 실측): `--resume` 턴의 `total_cost_usd`·`modelUsage`는 세션 누적값이다. 장부(`ledger.json`)의 `cost_usd`는 고정 세션의 마지막 누적값(턴마다 직전 턴 대비 증가분 — `cost_by_call`) + 리뷰어 호출 + 대리 사용자 호출이고, 관측하지 못한 값이 있으면 `null`이다(`cost_semantics`). 고정 세션의 누적값은 그 턴의 result 이벤트가 모두 고정 세션의 것일 때만 관측값이다(다른 세션 id가 섞이면 `pinned_session_unobserved`). 관측하지 못한 턴 뒤의 증가분은 다음 턴의 비용으로 돌리지 않고 `unassigned_interval`(미배분 구간)로 적는다. 한 턴에 `result` 이벤트가 여럿이면(백그라운드 워커가 끝난 뒤 세션이 다시 이어짐) 네 카운터를 모두 더해 `usage_cross_check.reported`로 대조한다(`result_events`). `result.usage`는 서브에이전트 요청을 포함하지 않으므로 기대 일치는 `main_delta=0`이고, 상한 게이트는 요청 단위 장부만 쓴다.
 
