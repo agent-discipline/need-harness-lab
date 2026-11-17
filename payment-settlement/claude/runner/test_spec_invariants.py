@@ -1,12 +1,13 @@
 """Spec-derived invariant tests for runner/launch.py (no docker, no model call, no network).
 
-Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 0, 2 and 5
+Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 0, 2, 5 and 10
 (with docs/answer-policy.md and claude/docs/runbook.md for the interface names).
 Each test names the spec sentence it checks. Expected values come from the spec, not from the implementation.
 """
 import atexit
 import contextlib
 from datetime import datetime, timedelta, timezone
+import hashlib
 import importlib.util
 import io
 import json
@@ -62,13 +63,17 @@ def make_root(tmp):
     return root
 
 
-def init_run(root, run_id, arm, harness='default', seed=None):
+def init_run(root, run_id, arm, harness='default', seed=None, image='img', tools=None, core=1, **options):
+    """launch.py init through launch.initialize. tools: the CLI tool surface the (no-cost) init self-test reports.
+    options: further init options (readiness=..., pilot=True)."""
     if harness == 'default':
         harness = root / 'harness-source' if arm == 3 else None
-    args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=arm, core=1, image='img', harness=harness, network=None)
+    args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=arm, core=core, image=image, harness=harness, network=None,
+                           **options)
+    report = dict(SELFTEST_OK, cli_tools=','.join(tools)) if tools else SELFTEST_OK
     seeder = seed or patch.object(launch, 'seed_harness', return_value='listing')
     with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
-         patch.object(launch, 'selftest', return_value=SELFTEST_OK), seeder, contextlib.redirect_stdout(io.StringIO()):
+         patch.object(launch, 'selftest', return_value=report), seeder, contextlib.redirect_stdout(io.StringIO()):
         launch.initialize(args)
     return json.loads((root / '.runs' / run_id / 'manifest.json').read_text())
 
@@ -652,11 +657,18 @@ class SelftestArm3Surface(SelftestToolSurface):
     test_web_tool_check_is_arm_independent = None
 
 
-def write_turn(dest, i, started, status, events, kind, counts_as):
-    """One turn record as the runner leaves it: invocation.json carries turn_kind (+counts_as)."""
+def sha256_text(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def write_turn(dest, i, started, status, events, kind, counts_as, prompt=None):
+    """One turn record as the runner leaves it: prompt.txt and invocation.json with turn_kind (+counts_as) and the
+    sha256 of the prompt sent (spec 10.5: recovery 턴은 이어 가는 턴과 같은 프롬프트(해시 일치)만 보낸다)."""
     d = dest / 'turns' / ('%04d' % i)
     d.mkdir(parents=True)
-    invocation = {'started_at': started.isoformat()}
+    prompt = 'prompt of turn %04d' % i if prompt is None else prompt
+    (d / 'prompt.txt').write_text(prompt)
+    invocation = {'started_at': started.isoformat(), 'prompt_sha256': sha256_text(prompt)}
     if kind is not None:
         invocation.update(turn_kind=kind, counts_as=counts_as)
     (d / 'invocation.json').write_text(json.dumps(invocation))
@@ -669,14 +681,15 @@ def write_turn(dest, i, started, status, events, kind, counts_as):
 def write_turns(dest, turns):
     """turns: [(started_at, status, [event]) or (started_at, status, [event], kind)].
     Default kind: the first turn is 'initial', every later turn is an evaluator 'feedback' turn.
-    A 'recovery' turn counts as the kind of the turn it continues (the previous one)."""
-    previous = None
+    A 'recovery' turn counts as the kind of the turn it continues (the previous one) and re-sends its prompt."""
+    previous, previous_prompt = None, None
     for i, turn in enumerate(turns, 1):
         started, status, events = turn[:3]
         kind = turn[3] if len(turn) > 3 else ('initial' if i == 1 else 'feedback')
         counts_as = previous if kind == 'recovery' else kind
-        write_turn(dest, i, started, status, events, kind, counts_as)
-        previous = counts_as
+        prompt = previous_prompt if kind == 'recovery' else None
+        d = write_turn(dest, i, started, status, events, kind, counts_as, prompt=prompt)
+        previous, previous_prompt = counts_as, (d / 'prompt.txt').read_text()
 
 
 def load_script(name):
@@ -702,7 +715,8 @@ def proxy_readiness(directory):
     return path
 
 
-def proxy_call(runs, run_id, outcome='ok', *, timeout_seconds=None, record=None, usage=U1, request_id='req-proxy'):
+def proxy_call(runs, run_id, outcome='ok', *, timeout_seconds=None, record=None, usage=U1, request_id='req-proxy',
+               served_model=OPUS):
     """One user-proxy consultation through scripts/consult_contract.py (the public interface) with a fake docker.
     outcome: 'ok' | 'exit-nonzero' | 'empty-response' | 'credential-leak' | 'timeout'. record: list of (cmd, timeout).
     Returns (exit code, console). The consult folder it leaves is exactly what a real call leaves."""
@@ -729,7 +743,7 @@ def proxy_call(runs, run_id, outcome='ok', *, timeout_seconds=None, record=None,
             target = Path(cmd[-1]) / '-tmp'
             target.mkdir(parents=True, exist_ok=True)
             line = {'type': 'assistant', 'requestId': request_id, 'sessionId': state['session'],
-                    'message': {'model': OPUS, 'usage': usage}}
+                    'message': {'model': served_model, 'usage': usage}}
             (target / (state['session'] + '.jsonl')).write_text(json.dumps(line) + '\n')
             return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
         return SimpleNamespace(returncode=0, stdout=b'', stderr=b'')
@@ -757,7 +771,8 @@ def completed_consult_template():
         atexit.register(shutil.rmtree, tmp, True)
         runs = Path(tmp) / 'runs'
         (runs / 'tpl' / 'turns').mkdir(parents=True)
-        (runs / 'tpl' / 'manifest.json').write_text(json.dumps({'run_id': 'tpl', 'arm': 3, 'core': 1,
+        # the manifest pins the run's image (spec 10.5: 대리 사용자 호출은 그 run의 manifest에 고정된 이미지로만)
+        (runs / 'tpl' / 'manifest.json').write_text(json.dumps({'run_id': 'tpl', 'arm': 3, 'core': 1, 'image': 'img',
                                                                 'session_id': '11111111-2222-4333-8444-555555555555'}))
         code, console = proxy_call(runs, 'tpl')
         folders = sorted((runs / 'tpl' / 'consults').iterdir()) if (runs / 'tpl' / 'consults').exists() else []
@@ -916,12 +931,21 @@ class RunCaps(unittest.TestCase):
         self.assertLessEqual(starts[0], 120)
 
 
-def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None):
+def last_prompt(root, run_id):
+    """The prompt file of the run's latest turn record (what a conductor re-sends to continue that turn)."""
+    turns = sorted((Path(root) / '.runs' / run_id / 'turns').iterdir())
+    return (turns[-1] / 'prompt.txt').read_text()
+
+
+def attempt_turn(root, run_id, *, resume, kind, session=None, selftest=None, prompt_text=None):
     """Call launch.turn with a docker stub that only records; returns (error, paid calls).
     A paid call is any `docker create`/`docker start` (the model call happens inside the started container).
-    session: what the config volume says about the session transcript (default: exists iff resume)."""
+    session: what the config volume says about the session transcript (default: exists iff resume).
+    prompt_text: default 'next prompt'; a recovery re-sends the prompt of the turn it continues (spec 10.5)."""
+    if prompt_text is None:
+        prompt_text = last_prompt(root, run_id) if kind == 'recovery' else 'next prompt'
     prompt = Path(root).parent / 'attempt.txt'
-    prompt.write_text('next prompt')
+    prompt.write_text(prompt_text)
     calls = []
 
     def fake_run(cmd, **kw):
@@ -1463,90 +1487,185 @@ class PilotEvidenceNeedsTheFrozenContractAndImage(unittest.TestCase):
             self.assertFalse(self.passed(root, 'early', FROZEN_CONTRACT, FROZEN_IMAGE))
 
 
+REAL_EVALUATION_LEDGER = HERE.parent / 'docs' / 'results' / 'evaluation-cost.jsonl'
+
+
+def tree_state(directory):
+    """Every file under `directory` with its bytes (to show a step wrote nothing there)."""
+    return {str(p.relative_to(directory)): p.read_bytes() for p in sorted(Path(directory).rglob('*')) if p.is_file()}
+
+
 class EvaluationCostIsSeparate(unittest.TestCase):
-    """Spec 2: 진행자·판정 어댑터의 토큰은 역할별로 분리 기록한다 / §0: 판정 어댑터 비용은 "평가 비용"으로 분리 기록 /
-    spec 2: 관측하지 못한 사용량은 0으로 채우지 않는다. Evaluation cost is outside the arm's cost and the run's 20M cap."""
+    """Spec 10.4 (사용자 결정 2026-11-17): 진행자 비용은 실험 전체 단위의 평가 비용 장부에 기록하고 조건별 비용과 run 상한에
+    넣지 않는다. 장부: claude/docs/results/evaluation-cost.jsonl, 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 칸: 역할, 세션
+    식별자, 모델, 토큰(네 카운터 또는 합계), 숫자의 출처, 맡은 run id 목록, 시각. 덧붙이기만 한다. run 장부의 evaluation_cost
+    블록과 run 단위 기록은 없앤다. 누락 점검: 모든 run id가 어느 한 줄의 run 목록에 들어 있어야 하고, 빠진 run은 드러난다.
+    Spec 2: 관측하지 못한 사용량은 0으로 채우지 않는다. Spec 10.5 (U6): 비용 인자는 0 이상의 유한수만 받는다.
+    Every call points --ledger at a temporary file; the tracked ledger is checked untouched after the class."""
 
     @classmethod
     def setUpClass(cls):
         cls.recorder = load_script('record_evaluation_cost')
+        cls.real_before = REAL_EVALUATION_LEDGER.read_bytes() if REAL_EVALUATION_LEDGER.exists() else None
+
+    @classmethod
+    def tearDownClass(cls):
+        after = REAL_EVALUATION_LEDGER.read_bytes() if REAL_EVALUATION_LEDGER.exists() else None
+        if after != cls.real_before:
+            raise AssertionError('the tracked evaluation-cost ledger was written by a test')
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        root, self.dest = new_run(self.tmp.name, 'ev', 1, [])
-        write_turn(self.dest, 1, datetime.now(timezone.utc), 'ok', [('run-req', 'implementer', tokens(5_000_000, 5_000_000))],
-                   'initial', 'initial')
-        self.runs = root / '.runs'
+        self.root, self.dest = new_run(self.tmp.name, 'ev', 1, [])
+        big = tokens(5_000_000, 5_000_000)
+        result, _, error, _ = drive_turn(self.root, 'ev', reported=big, projects={'-workspace/s.jsonl': [assistant('run-req', OPUS, big)]})
+        self.assertIsNone(error)
+        self.ledger = Path(self.tmp.name) / 'results' / 'evaluation-cost.jsonl'
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def record(self, role, *counters, total=None, cost=None):
-        argv = ['record_evaluation_cost.py', '--runs', str(self.runs), '--run-id', 'ev', '--role', role, '--model', OPUS,
-                '--source', 'completion notice usage']
-        if counters:
-            for flag, value in zip(('--input-tokens', '--cache-creation-input-tokens', '--cache-read-input-tokens',
-                                    '--output-tokens'), counters):
-                argv += [flag, str(value)]
+    def record(self, role, *counters, total=None, cost=None, session='conductor-session-1', run_ids=('ev',), adapter=False,
+               model=OPUS, source='agent completion notice usage'):
+        argv = ['record_evaluation_cost.py', '--ledger', str(self.ledger), '--role', role, '--session', session,
+                '--model', model, '--source', source]
+        for flag, value in zip(('--input-tokens', '--cache-creation-input-tokens', '--cache-read-input-tokens',
+                                '--output-tokens'), counters):
+            argv += [flag, str(value)]
         if total is not None:
             argv += ['--total-tokens', str(total)]
         if cost is not None:
             argv += ['--cost-usd', str(cost)]
+        for run_id in run_ids:
+            argv += ['--run-id', run_id]
+        if adapter:
+            argv.append('--includes-judging-adapter')
         out = io.StringIO()
         with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             try:
                 code = self.recorder.main()
             except SystemExit as exc:
                 code = exc.code
-        self.assertIn(code, (0, None), out.getvalue())
+            except Exception as exc:                 # a refusal raised instead of exiting is still a refusal
+                code, _ = 1, out.write(repr(exc))
+        return code or 0, out.getvalue()
 
-    def test_conductor_and_judging_adapter_are_recorded_per_role_outside_arm_cost_and_cap(self):
+    def lines(self):
+        return [json.loads(l) for l in self.ledger.read_text().splitlines()] if self.ledger.exists() else []
+
+    def ledger_bytes(self):
+        return self.ledger.read_bytes() if self.ledger.exists() else None
+
+    def test_default_ledger_is_the_experiment_level_file(self):
+        # 장부: claude/docs/results/evaluation-cost.jsonl (experiment level, not under a run)
+        self.assertEqual(Path(self.recorder.default_ledger()).resolve(), REAL_EVALUATION_LEDGER.resolve())
+
+    def test_one_line_carries_role_session_model_tokens_source_runs_and_time(self):
+        code, out = self.record('conductor', 10_000_000, 5_000_000, 5_000_000, 1_000_000, cost=7.5,
+                                run_ids=('claude-arm1-core01', 'claude-arm2-core01'))
+        self.assertEqual(code, 0, out)
+        [line] = self.lines()
+        self.assertEqual(line['role'], 'conductor')
+        self.assertEqual(line['session'], 'conductor-session-1')
+        self.assertEqual(line['model'], OPUS)
+        self.assertEqual(line['usage'], {'input_tokens': 10_000_000, 'cache_creation_input_tokens': 5_000_000,
+                                         'cache_read_input_tokens': 5_000_000, 'output_tokens': 1_000_000})
+        self.assertEqual(line['total_tokens'], 21_000_000)
+        self.assertIn('agent completion notice usage', json.dumps(line, ensure_ascii=False))     # 숫자의 출처
+        self.assertEqual(sorted(line['run_ids']), ['claude-arm1-core01', 'claude-arm2-core01'])   # 맡은 run id 목록
+        self.assertTrue(line.get('recorded_at'))                                                  # 시각
+
+    def test_evaluation_cost_never_enters_a_run_ledger_or_the_run_cap(self):
+        before_files = tree_state(self.dest)
         before = launch.run_ledger(self.dest)
-        self.record('conductor', 10_000_000, 5_000_000, 5_000_000, 1_000_000, cost=7.5)      # 21M: more than the run cap alone
-        self.record('judging-adapter', total=777)
-        ledger = launch.run_ledger(self.dest)
-        evaluation = ledger['evaluation_cost']['roles']
-        self.assertEqual(evaluation['conductor']['total_tokens'], 21_000_000)
-        self.assertEqual(evaluation['conductor']['usage'], {'input_tokens': 10_000_000, 'cache_creation_input_tokens': 5_000_000,
-                                                            'cache_read_input_tokens': 5_000_000, 'output_tokens': 1_000_000})
-        self.assertEqual(evaluation['judging-adapter']['total_tokens'], 777)
-        # the arm's own accounting is untouched
-        self.assertEqual(ledger['total_tokens'], 10_000_000)
-        self.assertEqual(ledger['total_tokens'], before['total_tokens'])
-        self.assertEqual(set(ledger['roles']), {'implementer'})
-        self.assertEqual(ledger['cost_usd'], before['cost_usd'])
-        # and outside the 20M cap: 10M run + 21M evaluation still lets the next call through
+        code, out = self.record('conductor', 10_000_000, 5_000_000, 5_000_000, 1_000_000)   # 21M: more than the run cap alone
+        self.assertEqual(code, 0, out)
+        code, out = self.record('judging-adapter', total=777, session='adapter-author-1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(tree_state(self.dest), before_files, 'recording evaluation cost wrote into the run folder')
+        after = launch.run_ledger(self.dest)
+        self.assertNotIn('evaluation_cost', after)                 # run 장부의 evaluation_cost 블록은 없앤다
+        self.assertEqual(after['total_tokens'], before['total_tokens'])
+        self.assertEqual(after['total_tokens'], 10_000_000)
+        self.assertEqual(set(after['roles']), {'implementer'})
         self.assertEqual(launch.limit_state(self.dest)['used']['token_limit'], 10_000_000)
-        launch.limit_gate(self.dest, next_is_feedback=True)
+        launch.limit_gate(self.dest, next_is_feedback=True)          # 10M run + 21M evaluation: the next call still passes
         self.assertFalse((self.dest / 'censored.json').exists())
-        # the run's ledger file carries the block
         launch.write_ledger(self.dest)
         written = json.loads((self.dest / 'ledger.json').read_text())
-        self.assertEqual(written['evaluation_cost']['roles']['conductor']['total_tokens'], 21_000_000)
+        self.assertNotIn('evaluation_cost', written)
+        self.assertFalse({'conductor', 'judging-adapter'} & set(written['roles']))
 
-    def test_missing_record_is_shown_as_missing_never_as_zero(self):
-        evaluation = launch.run_ledger(self.dest)['evaluation_cost']['roles']
-        for role in ('conductor', 'judging-adapter'):
+    def test_ledger_is_append_only(self):
+        self.assertEqual(self.record('conductor', total=100)[0], 0)
+        first = self.ledger_bytes()
+        self.assertEqual(self.record('conductor', total=50, session='conductor-session-2')[0], 0)
+        self.assertTrue(self.ledger_bytes().startswith(first), 'an earlier line was rewritten')
+        self.assertEqual([l['total_tokens'] for l in self.lines()], [100, 50])
+
+    def test_the_same_session_is_not_recorded_twice(self):
+        # runbook 평가 비용: 같은 역할·세션은 두 번 기록되지 않는다 (one line = one session — no double count)
+        self.assertEqual(self.record('conductor', total=100)[0], 0)
+        first = self.ledger_bytes()
+        code, _ = self.record('conductor', total=100)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.ledger_bytes(), first)
+
+    def test_an_unreadable_ledger_is_not_appended_to(self):
+        # runbook 평가 비용: 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.ledger.write_text('{"role": "conductor", "broken\n')
+        first = self.ledger_bytes()
+        code, _ = self.record('conductor', total=100)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.ledger_bytes(), first)
+
+    def test_a_total_only_source_leaves_the_split_unobserved_not_zero(self):
+        code, out = self.record('judging-adapter', total=500, session='adapter-author-1')
+        self.assertEqual(code, 0, out)
+        [line] = self.lines()
+        self.assertEqual(line['total_tokens'], 500)
+        self.assertEqual(numbers_in(line.get('usage')), [], 'unobserved split recorded as numbers: %r' % line.get('usage'))
+
+    def test_conductor_that_wrote_the_adapter_is_marked_on_its_one_line(self):
+        # 진행자가 어댑터를 직접 썼으면 진행자 한 줄에 포함되고 ... 줄에 그 사실을 적는다
+        code, out = self.record('conductor', total=100, adapter=True)
+        self.assertEqual(code, 0, out)
+        [line] = self.lines()
+        self.assertIs(line['includes_judging_adapter'], True)
+
+    def test_only_conductor_and_adapter_lines_exist(self):
+        # 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건
+        for role in ('implementer', 'user-proxy', 'pm'):
             with self.subTest(role):
-                entry = evaluation[role]
-                self.assertIn('not recorded', json.dumps(entry))
-                self.assertEqual(numbers_in(entry), [], 'a missing %s record shows numbers: %s' % (role, entry))
-        # a total-only record leaves the split unobserved, not zero-filled
-        self.record('judging-adapter', total=500)
-        entry = launch.run_ledger(self.dest)['evaluation_cost']['roles']['judging-adapter']
-        self.assertEqual(entry['total_tokens'], 500)
-        self.assertNotEqual(entry.get('usage'), {k: 0 for k in KEYS})
-        self.assertIn('not recorded', json.dumps(launch.run_ledger(self.dest)['evaluation_cost']['roles']['conductor']))
+                code, _ = self.record(role, total=1)
+                self.assertNotEqual(code, 0)
+                self.assertIsNone(self.ledger_bytes())
 
-    def test_records_accumulate_and_are_never_overwritten(self):
-        self.record('conductor', total=100)
-        first = sorted((self.dest / 'evaluation').rglob('record.json'))
-        content = first[0].read_bytes()
-        self.record('conductor', total=50)
-        records = sorted((self.dest / 'evaluation').rglob('record.json'))
-        self.assertEqual(len(records), 2)
-        self.assertEqual(records[0].read_bytes(), content)
-        self.assertEqual(launch.run_ledger(self.dest)['evaluation_cost']['roles']['conductor']['total_tokens'], 150)
+    def test_cost_arguments_are_non_negative_finite_numbers(self):
+        # spec 10.5 (U6): 비용 인자는 0 이상의 유한수만 받는다
+        bad = {'cost -1': dict(cost=-1), 'cost nan': dict(cost='nan'), 'cost inf': dict(cost='inf'),
+               'cost -inf': dict(cost='-inf'), 'total -1': dict(total=-1)}
+        for name, kw in bad.items():
+            with self.subTest(name):
+                kw.setdefault('total', 10)
+                code, _ = self.record('conductor', session='s-' + name, **kw)
+                self.assertNotEqual(code, 0, name)
+                self.assertIsNone(self.ledger_bytes(), name)
+        with self.subTest('negative counter'):
+            code, _ = self.record('conductor', 1, 1, -1, 1, session='s-neg')
+            self.assertNotEqual(code, 0)
+            self.assertIsNone(self.ledger_bytes())
+        code, out = self.record('conductor', total=0, cost=0, session='s-zero')      # control: zero is allowed
+        self.assertEqual(code, 0, out)
+
+    def test_every_run_id_is_listed_and_an_unrecorded_run_shows_up(self):
+        # 누락 점검: 모든 run id가 어느 한 줄의 run 목록에 들어 있어야 하고, 빠진 run은 "평가 비용 미기록"으로 드러난다
+        expected = {'claude-pilot-01', 'claude-arm1-core01', 'claude-arm2-core01', 'claude-arm3-core01'}
+        self.assertEqual(self.record('conductor', total=100, run_ids=('claude-pilot-01', 'claude-arm1-core01'))[0], 0)
+        self.assertEqual(self.record('judging-adapter', total=7, session='adapter-1', run_ids=('claude-arm2-core01',))[0], 0)
+        covered = {run_id for line in self.lines() for run_id in line['run_ids']}
+        self.assertEqual(expected - covered, {'claude-arm3-core01'})
 
 
 class NoCallOutlastsTheEightHourCap(unittest.TestCase):
@@ -1601,15 +1720,88 @@ class NoCallOutlastsTheEightHourCap(unittest.TestCase):
         self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TIME')
 
 
-class CapOvershootInTheFinalCall(unittest.TestCase):
-    """§0 추가 결정(2026-11-17) 상한 초과 완료 run의 판정 → "완료 + 초과 표시": 수용 기준을 통과한 run이 그 마지막 턴에서
-    토큰·시간 상한을 넘겼으면 완료로 판정하고 초과분을 함께 기록한다. §2의 "먼저 닿으면 CENSORED_*로 끝낸다"는 다음 호출을
-    막는 규칙으로 읽는다. Spec 2: 실패 run을 결과에서 지우지 않는다."""
+CRITERIA = tuple('C%02d' % n for n in range(1, 21))
+FINISHER = load_script('finish_run')
+CAPTURE = load_script('capture_turn')
+RUNNER_TOOLS = ('Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch')
 
-    @classmethod
-    def setUpClass(cls):
-        cls.finisher = load_script('finish_run')
 
+def record_folder(root, run_id, arm, core=1, pilot=False):
+    """Where the spec puts a run's records: docs/experiments/<arm>/core<N>/, a pilot under docs/pilots/<run id>/ (10.3)."""
+    return root / 'docs' / 'pilots' / run_id if pilot else root / 'docs' / 'experiments' / str(arm) / ('core%d' % core)
+
+
+def write_record(root, run_id, arm, core=1, status='RUNNING', **fields):
+    """The run.json a cycle start leaves for a main-experiment run (status RUNNING after its first turn)."""
+    folder = record_folder(root, run_id, arm, core)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'run.json').write_text(json.dumps(dict({'run_id': run_id, 'arm': arm, 'core': core, 'status': status}, **fields)))
+    return folder
+
+
+def write_verdict(folder, run_id, results=None, judged_by='main supervising session', evidence=('acceptance-audit.json',),
+                  drop=(), create_evidence=True, **extra):
+    """The main session's verdict table (spec 10.2): C01..C20 each a result and evidence paths in the record folder.
+    results: {criterion: result} overrides on top of all PASS."""
+    folder.mkdir(parents=True, exist_ok=True)
+    if create_evidence:
+        for rel in evidence:
+            (folder / rel).write_text(json.dumps({'judged': rel}))
+    results = dict({c: 'PASS' for c in CRITERIA}, **(results or {}))
+    criteria = {c: {'result': results[c], 'evidence': list(evidence), 'note': 'observed'} for c in CRITERIA if c not in drop}
+    table = dict({'run_id': run_id, 'judged_by': judged_by, 'judged_at': '2026-11-18T00:00:00+00:00', 'criteria': criteria}, **extra)
+    if judged_by is None:
+        del table['judged_by']
+    (folder / 'verdict.json').write_text(json.dumps(table))
+    return folder
+
+
+def finish(root, run_id, *options):
+    """scripts/finish_run.py main (the public CLI) with the record tree rooted at `root`. Returns (exit code, console)."""
+    argv = ['finish_run.py', '--run-id', run_id, '--runs', str(root / '.runs')] + list(options)
+    out = io.StringIO()
+    with patch.object(FINISHER, 'ROOT', root), patch.object(sys, 'argv', argv), \
+         contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        try:
+            code = FINISHER.main()
+        except SystemExit as exc:
+            code = exc.code
+        except Exception as exc:                     # a refusal raised instead of exiting is still a refusal
+            code, _ = 1, out.write(repr(exc))
+    return code or 0, out.getvalue()
+
+
+def read_record(folder):
+    return json.loads((folder / 'run.json').read_text())
+
+
+def first_turn(root, run_id, arm, usage=U1, reported='same'):
+    """The run's first turn through launch.turn with the fake docker (what a real call writes)."""
+    model = FABLE if arm == 3 else OPUS
+    result, _, error, _ = drive_turn(root, run_id, reported=usage if reported == 'same' else reported,
+                                     projects={'-workspace/s.jsonl': [assistant('first-' + run_id, model, usage)]})
+    assert error is None, error
+    return result
+
+
+def arm3_turn(root, run_id, *, reviewer=True, worker=True):
+    """An arm 3 turn whose PM (Fable), worker (Opus) and second reviewer (Fable) requests are all observed."""
+    sid = 'aaaaaaaa-0000-4000-8000-%012d' % (abs(hash(run_id)) % 10 ** 12)
+    parent = [assistant('pm-' + run_id, FABLE, U1)]
+    projects = {'-workspace/s.jsonl': parent}
+    if worker:
+        parent.append(assistant('w-' + run_id, OPUS, U2, sidechain=True))
+        projects['-workspace/s/subagents/agent-a1.jsonl'] = [assistant('w-' + run_id, OPUS, U2, sidechain=True)]
+    kw = {}
+    if reviewer:
+        kw = dict(reviewer_log='T1-1 started session=%s model=%s\nT1-1 exit=0\n' % (sid, FABLE),
+                  reviewer_projects={'-mirror/%s.jsonl' % sid: [assistant('rv-' + run_id, FABLE, U2, session=sid)]})
+    result, _, error, _ = drive_turn(root, run_id, reported=U1, projects=projects, **kw)
+    assert error is None, error
+    return result
+
+
+class FinishFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
@@ -1618,45 +1810,42 @@ class CapOvershootInTheFinalCall(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_record(self, root, arm):
-        return root / 'docs' / 'experiments' / str(arm) / 'core1' / 'run.json'
+    def started_run(self, run_id='claude-arm1-core01', arm=1, core=1, **record_fields):
+        """A main-experiment run with one real (fake-docker) turn and its RUNNING record. Returns (root, record folder)."""
+        root = make_root(self.base / run_id)
+        init_run(root, run_id, arm, core=core)
+        first_turn(root, run_id, arm)
+        return root, write_record(root, run_id, arm, core, **record_fields)
+
+
+class CapOvershootInTheFinalCall(FinishFixture):
+    """Spec 10.2: "완료 + 초과 표시"는 상한을 넘긴 마지막 호출이 턴일 때만이다. 대리 사용자 호출에서 넘긴 경우는 해당하지 않는다
+    (… 통과 판정이 올 수 없다 — 오면 거부). 상한 기록(censored.json)에 어느 종류의 호출에서 넘었는지를 남긴다. 그 칸이 없는
+    상한 기록은 "완료 + 초과"로 인정하지 않는다. §0 추가 결정: 수용 기준을 통과한 run이 그 마지막 턴에서 토큰·시간 상한을 넘겼으면
+    완료로 판정하고 초과분을 함께 기록한다. "먼저 닿으면 CENSORED_*"는 다음 호출을 막는 규칙. Main session decision (a): a run
+    blocked BEFORE a call whose verdict is all PASS is refused (a pass cannot follow a refused call)."""
 
     def setup_run(self, run_id, arm, prior_tokens, started=None):
         root = make_root(self.base / run_id)
         init_run(root, run_id, arm)
         dest = root / '.runs' / run_id
-        role = 'pm' if arm == 3 else 'implementer'
-        write_turn(dest, 1, started or self.now, 'ok', [('prior', role, prior_tokens)], 'initial', 'initial')
-        record = self.run_record(root, arm)
-        record.parent.mkdir(parents=True)
-        record.write_text(json.dumps({'run_id': run_id, 'arm': arm, 'core': 1, 'status': 'RUNNING'}))
-        return root, dest
+        first_turn(root, run_id, arm, usage=prior_tokens)
+        if started is not None:
+            age_first_turn(dest, started)
+        return root, dest, write_record(root, run_id, arm)
 
     def final_call(self, root, run_id, arm, usage, side_effect=None):
         model = FABLE if arm == 3 else OPUS
-        result, _, error, _ = drive_turn(root, run_id, resume=True, kind='feedback', reported=usage, side_effect=side_effect,
-                                         projects={'-workspace/s.jsonl': [assistant('last', model, usage)]})
-        return result, error
-
-    def finish(self, root, run_id, verdict):
-        argv = ['finish_run.py', '--run-id', run_id, '--verdict', verdict, '--runs', str(root / '.runs')]
-        out = io.StringIO()
-        with patch.object(self.finisher, 'ROOT', root), patch.object(sys, 'argv', argv), \
-             contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            try:
-                code = self.finisher.main()
-            except SystemExit as exc:
-                code = exc.code
-            except Exception as exc:                 # a refusal raised instead of exiting is still a refusal
-                code, _ = 1, out.write(str(exc))
-        return code or 0, out.getvalue()
+        drive_turn(root, run_id, resume=True, kind='feedback', reported=usage, side_effect=side_effect,
+                   projects={'-workspace/s.jsonl': [assistant('last', model, usage)]})
 
     def token_overshoot(self, run_id, arm=3):
-        # 19,999,980 before the final call; the final call adds 1,000 -> 980 over the 20,000,000 cap
-        root, dest = self.setup_run(run_id, arm, tokens(9_999_990, 9_999_990))
-        result, error = self.final_call(root, run_id, arm, tokens(500, 500))
+        # 19,999,980 before the final call; the final turn adds 1,000 -> 980 over the 20,000,000 cap
+        root, dest, folder = self.setup_run(run_id, arm, tokens(9_999_990, 9_999_990))
+        self.assertFalse((dest / 'censored.json').exists())
+        self.final_call(root, run_id, arm, tokens(500, 500))
         self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap during the call left no record')
-        return root, dest
+        return root, dest, folder
 
     def assert_no_further_paid_call(self, root, run_id, arm):
         error, paid = attempt_turn(root, run_id, resume=True, kind='feedback')
@@ -1668,78 +1857,672 @@ class CapOvershootInTheFinalCall(unittest.TestCase):
             self.assertNotEqual(code, 0)
             self.assertEqual(paid_calls(record), [])
 
-    def test_passed_run_that_crossed_the_token_cap_in_its_final_call_is_completed_with_the_overshoot(self):
-        root, dest = self.token_overshoot('tok')
+    def assert_refused_and_untouched(self, root, run_id, folder, censored_bytes, dest):
+        before = (folder / 'run.json').read_bytes()
+        code, out = finish(root, run_id)
+        self.assertNotEqual(code, 0, out)
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+        self.assertNotEqual(read_record(folder)['status'], 'PASSED')
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored_bytes)
+
+    def test_passed_run_that_crossed_the_token_cap_in_its_final_turn_is_completed_with_the_overshoot(self):
+        root, dest, folder = self.token_overshoot('tok')
         censored = (dest / 'censored.json').read_bytes()
-        code, out = self.finish(root, 'tok', 'PASSED')
+        write_verdict(folder, 'tok')
+        code, out = finish(root, 'tok')
         self.assertEqual(code, 0, out)
-        run = json.loads(self.run_record(root, 3).read_text())
+        run = read_record(folder)
         self.assertEqual(run['status'], 'PASSED')
         self.assertIs(run['cap_reached'], True)
         self.assertTrue(run.get('cap_overshoot'), 'overshoot not recorded with the completed run')
         self.assertIn(980, numbers_in(run['cap_overshoot']), 'token overshoot (20,000,980 - 20,000,000) not recorded')
-        # the cap still stops every further paid call, and the overshoot record stays as it was
         self.assert_no_further_paid_call(root, 'tok', 3)
-        self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+        self.assertEqual((dest / 'censored.json').read_bytes(), censored)        # the cap record is never modified
 
-    def test_passed_run_that_crossed_the_time_cap_in_its_final_call_is_completed_with_the_overshoot(self):
+    def test_passed_run_that_crossed_the_time_cap_in_its_final_turn_is_completed_with_the_overshoot(self):
         start = self.now - timedelta(hours=8) + timedelta(seconds=60)
-        root, dest = self.setup_run('tim', 1, tokens(1, 1), started=start)
+        root, dest, folder = self.setup_run('tim', 1, tokens(1, 1), started=start)
         self.final_call(root, 'tim', 1, U2, side_effect=lambda d: age_first_turn(d, start - timedelta(seconds=90)))
         self.assertTrue((dest / 'censored.json').exists())
         censored = (dest / 'censored.json').read_bytes()
-        code, out = self.finish(root, 'tim', 'PASSED')
+        write_verdict(folder, 'tim')
+        code, out = finish(root, 'tim')
         self.assertEqual(code, 0, out)
-        run = json.loads(self.run_record(root, 1).read_text())
+        run = read_record(folder)
         self.assertEqual(run['status'], 'PASSED')
         self.assertIs(run['cap_reached'], True)
-        self.assertTrue(run.get('cap_overshoot'))
-        self.assertTrue([n for n in numbers_in(run['cap_overshoot']) if n > 0])
+        self.assertTrue([n for n in numbers_in(run.get('cap_overshoot')) if n > 0])
         self.assert_no_further_paid_call(root, 'tim', 1)
         self.assertEqual((dest / 'censored.json').read_bytes(), censored)
 
-    def test_run_that_did_not_pass_stays_censored(self):
-        root, dest = self.token_overshoot('fail')
+    def test_pass_after_the_cap_was_crossed_in_a_user_proxy_call_is_refused(self):
+        # 대리 사용자 호출에서 넘긴 경우는 해당하지 않는다 … 오면 거부
+        root, dest, folder = self.setup_run('prx', 3, tokens(9_999_990, 9_999_990))
+        code, console = proxy_call(root / '.runs', 'prx', usage=tokens(500, 500))
+        self.assertTrue((dest / 'censored.json').exists(), 'crossing the cap in a proxy call left no record: %s' % console)
         censored = (dest / 'censored.json').read_bytes()
-        code, out = self.finish(root, 'fail', 'FAILED')
+        self.assertIn('user-proxy', censored.decode(), 'the cap record does not say the cap was crossed in a proxy call')
+        write_verdict(folder, 'prx')
+        self.assert_refused_and_untouched(root, 'prx', folder, censored, dest)
+        # the same run judged not passed is kept as censored
+        write_verdict(folder, 'prx', results={'C04': 'FAIL'})
+        code, out = finish(root, 'prx')
         self.assertEqual(code, 0, out)
-        run = json.loads(self.run_record(root, 3).read_text())
-        self.assertTrue(run['status'].startswith('CENSORED_'), run['status'])
-        self.assertEqual(run['status'], json.loads(censored)['status'])
-        self.assertIs(run['cap_reached'], True)
+        self.assertEqual(read_record(folder)['status'], json.loads(censored)['status'])
         self.assertEqual((dest / 'censored.json').read_bytes(), censored)
-        self.assert_no_further_paid_call(root, 'fail', 3)
 
-    def test_run_stopped_before_a_call_or_by_the_feedback_cap_is_not_completed(self):
-        # only a final call that crossed the token or time cap counts as "완료 + 초과"
-        root, dest = self.setup_run('before', 1, tokens(10_000_000, 10_000_000))
-        attempt_turn(root, 'before', resume=True, kind='feedback')
-        self.assertTrue((dest / 'censored.json').exists())
+    def test_cap_record_without_the_call_kind_is_not_completed_with_overshoot(self):
+        # 그 칸이 없는 상한 기록은 "완료 + 초과"로 인정하지 않는다
+        root, dest, folder = self.token_overshoot('nocall')
+
+        def strip(value):
+            if isinstance(value, dict):
+                return {k: strip(v) for k, v in value.items() if k != 'call'}
+            if isinstance(value, list):
+                return [strip(v) for v in value]
+            return value
+        record = json.loads((dest / 'censored.json').read_text())
+        self.assertIn('"call"', json.dumps(record), 'control: the runner records the call kind')
+        (dest / 'censored.json').write_text(json.dumps(strip(record)))           # a cap record written without that field
+        censored = (dest / 'censored.json').read_bytes()
+        write_verdict(folder, 'nocall')
+        self.assert_refused_and_untouched(root, 'nocall', folder, censored, dest)
+
+    def test_capped_run_that_did_not_pass_stays_censored(self):
+        for result in ('FAIL', 'PARTIAL', 'NOT_RUN'):
+            with self.subTest(result):
+                root, dest, folder = self.token_overshoot('fail-' + result)
+                censored = (dest / 'censored.json').read_bytes()
+                write_verdict(folder, 'fail-' + result, results={'C11': result})
+                code, out = finish(root, 'fail-' + result)
+                self.assertEqual(code, 0, out)
+                run = read_record(folder)
+                self.assertEqual(run['status'], json.loads(censored)['status'])
+                self.assertTrue(run['status'].startswith('CENSORED_'))
+                self.assertIs(run['cap_reached'], True)
+                self.assertIs(run['all_acceptance_passed'], False)
+                self.assertEqual((dest / 'censored.json').read_bytes(), censored)
+                self.assert_no_further_paid_call(root, 'fail-' + result, 3)
+
+    def test_run_blocked_before_a_call_or_by_the_feedback_cap_cannot_pass(self):
+        # only a final turn that crossed the token or time cap counts as "완료 + 초과"; decision (a)
+        # the eight hours pass between calls: the next call is refused before it is made
+        root, dest, folder = self.setup_run('before', 1, tokens(1, 1), started=self.now - timedelta(hours=8, seconds=1))
+        self.assertFalse((dest / 'censored.json').exists())
+        error, paid = attempt_turn(root, 'before', resume=True, kind='feedback')
+        self.assertEqual(paid, [])
+        self.assertEqual(json.loads((dest / 'censored.json').read_text())['status'], 'CENSORED_TIME')
         root2, dest2 = new_run(self.base, 'turns', 1, ['initial', *['feedback'] * 30])
-        record2 = self.run_record(root2, 1)
-        record2.parent.mkdir(parents=True)
-        record2.write_text(json.dumps({'run_id': 'turns', 'arm': 1, 'core': 1, 'status': 'RUNNING'}))
+        folder2 = write_record(root2, 'turns', 1)
         attempt_turn(root2, 'turns', resume=True, kind='feedback')
         self.assertEqual(json.loads((dest2 / 'censored.json').read_text())['status'], 'CENSORED_TURNS')
-        for r, d, run_id in ((root, dest, 'before'), (root2, dest2, 'turns')):
+        for r, d, f, run_id in ((root, dest, folder, 'before'), (root2, dest2, folder2, 'turns')):
             with self.subTest(run_id):
                 censored = (d / 'censored.json').read_bytes()
-                code, out = self.finish(r, run_id, 'PASSED')
-                self.assertNotEqual(code, 0, out)
-                self.assertNotEqual(json.loads(self.run_record(r, 1).read_text())['status'], 'PASSED')
-                self.assertEqual((d / 'censored.json').read_bytes(), censored)
-                code, out = self.finish(r, run_id, 'FAILED')
+                write_verdict(f, run_id)
+                self.assert_refused_and_untouched(r, run_id, f, censored, d)
+                write_verdict(f, run_id, results={'C02': 'FAIL'})
+                code, out = finish(r, run_id)
                 self.assertEqual(code, 0, out)
-                self.assertEqual(json.loads(self.run_record(r, 1).read_text())['status'], json.loads(censored)['status'])
+                self.assertEqual(read_record(f)['status'], json.loads(censored)['status'])
+                self.assertEqual((d / 'censored.json').read_bytes(), censored)
 
     def test_uncapped_passed_run_is_completed_without_a_cap_mark(self):
-        # control for the table: no cap record, PASSED stays PASSED with cap_reached false
-        root, dest = self.setup_run('clean', 1, tokens(1, 1))
-        code, out = self.finish(root, 'clean', 'PASSED')
+        root, folder = self.started_run('clean', 1)
+        write_verdict(folder, 'clean')
+        code, out = finish(root, 'clean')
         self.assertEqual(code, 0, out)
-        run = json.loads(self.run_record(root, 1).read_text())
+        run = read_record(folder)
         self.assertEqual(run['status'], 'PASSED')
         self.assertIs(run['cap_reached'], False)
+
+
+class VerdictTableDecidesTheOutcome(FinishFixture):
+    """Spec 10.2: 종료 상태 PASSED·FAILED는 인자로 받지 않는다. 판정표에서 도출한다. 판정표(verdict.json)는 C01~C20 각각에
+    PASS·FAIL·PARTIAL·NOT_RUN 중 하나와 근거 산출물 경로를 적는다. 종료 기록은 근거 파일이 실제로 있는지 확인하고 해시를 함께
+    남긴다. 20개가 모두 PASS일 때만 통과다(PARTIAL·NOT_RUN은 통과가 아니다). 종료 기록이 기계로 확인하는 것은 근거 파일의 존재와
+    해시, 판정표의 작성자 표시(judged_by)까지다."""
+
+    def assert_not_passed(self, root, run_id, folder, name):
+        before = (folder / 'run.json').read_bytes()
+        code, out = finish(root, run_id)
+        run = read_record(folder)
+        if code != 0:
+            self.assertEqual((folder / 'run.json').read_bytes(), before, name)
+        self.assertNotEqual(run['status'], 'PASSED', '%s: %s' % (name, out))
+        self.assertIsNot(run.get('all_acceptance_passed'), True, name)
+
+    def test_passed_and_failed_cannot_be_given_as_arguments(self):
+        root, folder = self.started_run()
+        write_verdict(folder, 'claude-arm1-core01', results={'C01': 'FAIL'})
+        before = (folder / 'run.json').read_bytes()
+        for option in (['--verdict', 'PASSED'], ['--status', 'PASSED'], ['--passed'], ['--verdict', 'FAILED']):
+            with self.subTest(option):
+                code, _ = finish(root, 'claude-arm1-core01', *option)
+                self.assertNotEqual(code, 0)
+                self.assertEqual((folder / 'run.json').read_bytes(), before)
+        usage = subprocess.run([sys.executable, str(HERE.parent / 'scripts' / 'finish_run.py'), '--help'],
+                               capture_output=True, text=True).stdout
+        for option in ('--verdict', '--status', '--passed', '--failed'):
+            self.assertNotIn(option + ' ', usage)
+
+    def test_all_twenty_pass_with_existing_evidence_is_passed_and_hashed(self):
+        root, folder = self.started_run()
+        write_verdict(folder, 'claude-arm1-core01', evidence=('acceptance-http.json', 'acceptance-audit.json'))
+        code, out = finish(root, 'claude-arm1-core01')
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIs(run['all_acceptance_passed'], True)
+        text = json.dumps(run)
+        for rel in ('acceptance-http.json', 'acceptance-audit.json'):
+            self.assertIn(hashlib.sha256((folder / rel).read_bytes()).hexdigest(), text, 'hash of %s not recorded' % rel)
+        self.assertIn('main supervising session', text)                         # who judged
+
+    def test_any_criterion_not_pass_is_not_a_pass(self):
+        for result in ('FAIL', 'PARTIAL', 'NOT_RUN'):
+            for criterion in ('C01', 'C13', 'C20'):
+                with self.subTest(result=result, criterion=criterion):
+                    run_id = 'claude-arm2-core01'
+                    self.base = Path(self.tmp.name) / (result + criterion)
+                    root, folder = self.started_run(run_id, 2)
+                    write_verdict(folder, run_id, results={criterion: result})
+                    code, out = finish(root, run_id)
+                    self.assertEqual(code, 0, out)
+                    run = read_record(folder)
+                    self.assertEqual(run['status'], 'FAILED')
+                    self.assertIs(run['all_acceptance_passed'], False)
+
+    def test_malformed_tables_never_pass(self):
+        cases = {
+            'missing criterion': dict(drop=('C07',)),
+            'unknown result': dict(results={'C09': 'OK'}),
+            'lower-case pass': dict(results={'C09': 'pass'}),
+            'null result': dict(results={'C09': None}),
+            'example table': dict(_example='EXAMPLE ONLY'),
+        }
+        for name, kw in cases.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / name.replace(' ', '-')
+                root, folder = self.started_run()
+                write_verdict(folder, 'claude-arm1-core01', **kw)
+                self.assert_not_passed(root, 'claude-arm1-core01', folder, name)
+
+    def test_missing_or_absent_evidence_makes_all_acceptance_passed_false(self):
+        # all_acceptance_passed 원천: 판정표 20개 모두 PASS이고 근거 파일이 모두 존재
+        cases = {'evidence file missing': dict(evidence=('acceptance-audit.json', 'never-written.json'), create_evidence=False),
+                 'no evidence listed': dict(evidence=()),
+                 'evidence outside the record folder': dict(evidence=('../../../../outside.json',), create_evidence=False),
+                 'absolute evidence path': dict(evidence=('/etc/hostname',), create_evidence=False)}
+        for name, kw in cases.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / name.replace(' ', '-')
+                root, folder = self.started_run()
+                if name == 'evidence file missing':
+                    (folder / 'acceptance-audit.json').write_text('{}')
+                if name == 'evidence outside the record folder':
+                    (folder / '../../../../outside.json').resolve().write_text('{}')
+                write_verdict(folder, 'claude-arm1-core01', **kw)
+                before = (folder / 'run.json').read_bytes()
+                code, out = finish(root, 'claude-arm1-core01')
+                if code != 0:
+                    self.assertEqual((folder / 'run.json').read_bytes(), before)
+                    continue
+                self.assertIs(read_record(folder)['all_acceptance_passed'], False, '%s: %s' % (name, out))
+
+    def test_verdict_without_a_judge_is_refused(self):
+        # runbook 판정표: judged_by 필수, 비어 있으면 거부 (spec 10.2: 기계로 확인하는 것은 … judged_by까지)
+        for name, judge in {'empty': '', 'blank': '   ', 'absent': None}.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / ('judge-' + name)
+                root, folder = self.started_run()
+                write_verdict(folder, 'claude-arm1-core01', judged_by=judge)
+                before = (folder / 'run.json').read_bytes()
+                code, _ = finish(root, 'claude-arm1-core01')
+                self.assertNotEqual(code, 0)
+                self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+    def test_no_verdict_table_is_refused(self):
+        root, folder = self.started_run()
+        before = (folder / 'run.json').read_bytes()
+        code, _ = finish(root, 'claude-arm1-core01')
+        self.assertNotEqual(code, 0)
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+    def test_finish_does_not_need_an_evaluation_cost_record(self):
+        # spec 10.4: 종료 기록은 평가 비용을 요구하지 않는다
+        root, folder = self.started_run()
+        write_verdict(folder, 'claude-arm1-core01')
+        self.assertFalse(list(root.rglob('evaluation-cost.jsonl')))
+        code, out = finish(root, 'claude-arm1-core01')
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('evaluation_cost', read_record(folder))
+
+
+_FROZEN_WORLD = {}
+
+
+def frozen_world():
+    """A record tree frozen by scripts/freeze_readiness.py from three (fake-docker) smoke runs whose self-test reported
+    RUNNER_TOOLS (arm 3: + Task). Made once; tests copy it. Returns the template root."""
+    if 'root' not in _FROZEN_WORLD:
+        freeze = load_script('freeze_readiness')
+        tmp = tempfile.mkdtemp(prefix='frozen-world-')
+        atexit.register(shutil.rmtree, tmp, True)
+        root = make_root(tmp)
+        (root / 'docs/results').mkdir(parents=True)
+        for arm in (1, 2, 3):
+            run_id = 'smoke%d' % arm
+            init_run(root, run_id, arm, tools=RUNNER_TOOLS + (('Task',) if arm == 3 else ()))
+            (arm3_turn(root, run_id) if arm == 3 else first_turn(root, run_id, arm))
+        argv = ['freeze_readiness.py', '--runs', str(root / '.runs'), '--output', str(root / 'docs/results/readiness.json'),
+                '--smoke-run', 'smoke1', '--smoke-run', 'smoke2', '--smoke-run', 'smoke3']
+        out = io.StringIO()
+        with patch.object(sys, 'argv', argv), \
+             patch.object(freeze, 'images', return_value=({'payment-claude-runner:2.1.326': FROZEN_IMAGE}, [])), \
+             patch.object(freeze, 'clean_baseline', return_value=('f' * 40, [])), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = freeze.main()
+            except SystemExit as exc:
+                code = exc.code
+        if code not in (0, None) or not (root / 'docs/results/readiness.json').exists():
+            raise AssertionError('freeze for the fixture failed: %r %s' % (code, out.getvalue()))
+        _FROZEN_WORLD['root'] = root
+    return _FROZEN_WORLD['root']
+
+
+class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
+    """Spec 10.2: commit_run.py가 PASSED에 요구하는 네 칸은 종료 기록이 아래 원천에서만 쓴다. 원천이 없거나 거짓이면 그 칸은
+    false이고, 손으로 true를 쓰는 경로는 없다.
+    all_acceptance_passed ← 판정표 / usage_complete ← 실행 폴더에서 그 자리에서 계산한 run 장부 / all_role_models_verified ←
+    manifest와 요청 이벤트, 그 조건에 있어야 할 역할이 관측되지 않으면 false / isolation_verified ← 그 run의 self-test 통과 +
+    그 run의 도구 목록이 동결 파일에 기록된 그 조건의 도구 목록과 같음."""
+
+    HAND_WRITTEN = dict(all_acceptance_passed=True, usage_complete=True, all_role_models_verified=True, isolation_verified=True)
+
+    def frozen_run(self, run_id, arm, tools):
+        root = self.base / 'world'
+        shutil.copytree(frozen_world(), root, symlinks=True)
+        init_run(root, run_id, arm, image=None, tools=tools, readiness=root / 'docs/results/readiness.json')
+        return root
+
+    def fields(self, root, run_id, folder):
+        write_verdict(folder, run_id)
+        code, out = finish(root, run_id)
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        self.assertEqual(run['status'], 'PASSED')
+        return run
+
+    def test_control_all_four_true_from_their_sources(self):
+        root = self.frozen_run('claude-arm1-core01', 1, RUNNER_TOOLS)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        run = self.fields(root, 'claude-arm1-core01', folder)
+        for field in self.HAND_WRITTEN:
+            self.assertIs(run[field], True, field)
+
+    def test_values_written_into_run_json_beforehand_do_not_survive(self):
+        # no freeze in the manifest, the turn's usage unobserved, the implementer served another model
+        root = make_root(self.base / 'pre')
+        init_run(root, 'claude-arm1-core01', 1)
+        drive_turn(root, 'claude-arm1-core01', reported=None,
+                   projects={'-workspace/s.jsonl': [assistant('x', FABLE, U1)]})
+        folder = write_record(root, 'claude-arm1-core01', 1, **self.HAND_WRITTEN)
+        write_verdict(folder, 'claude-arm1-core01', results={'C03': 'FAIL'})
+        code, out = finish(root, 'claude-arm1-core01')
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        for field in self.HAND_WRITTEN:
+            self.assertIs(run[field], False, field)
+
+    def test_usage_complete_is_computed_from_the_run_folder_at_finish(self):
+        root = make_root(self.base / 'usage')
+        init_run(root, 'claude-arm1-core01', 1)
+        drive_turn(root, 'claude-arm1-core01', reported=U1, projects={'-workspace/s.jsonl': [
+            assistant('ok', OPUS, U1), assistant('no-usage', OPUS, None)]})
+        dest = root / '.runs/claude-arm1-core01'
+        ledger = json.loads((dest / 'ledger.json').read_text()) if (dest / 'ledger.json').exists() else {}
+        ledger['usage_complete'] = True                                     # a stale or edited ledger file says complete
+        (dest / 'ledger.json').write_text(json.dumps(ledger))
+        folder = write_record(root, 'claude-arm1-core01', 1, usage_complete=True)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['usage_complete'], False)
+
+    def test_role_models_must_be_the_agreed_models(self):
+        root = make_root(self.base / 'roles1')
+        init_run(root, 'claude-arm1-core01', 1)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['all_role_models_verified'], True)   # control
+        root = make_root(self.base / 'roles2')
+        init_run(root, 'claude-arm1-core01', 1)
+        drive_turn(root, 'claude-arm1-core01', reported=U1, projects={'-workspace/s.jsonl': [assistant('f', FABLE, U1)]})
+        folder = write_record(root, 'claude-arm1-core01', 1, all_role_models_verified=True)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['all_role_models_verified'], False)
+
+    def arm3(self, name, *, reviewer=True, worker=True, proxy=True, proxy_model=OPUS):
+        root = make_root(self.base / name)
+        init_run(root, 'claude-arm3-core01', 3)
+        arm3_turn(root, 'claude-arm3-core01', reviewer=reviewer, worker=worker)
+        if proxy:
+            code, console = proxy_call(root / '.runs', 'claude-arm3-core01', served_model=proxy_model)
+            self.assertEqual(code, 0, console)
+        folder = write_record(root, 'claude-arm3-core01', 3, all_role_models_verified=True)
+        return self.fields(root, 'claude-arm3-core01', folder)['all_role_models_verified']
+
+    def test_arm3_with_every_required_role_on_its_agreed_model_is_verified(self):
+        # control: PM Fable, worker Opus, second reviewer Fable, user proxy Opus
+        self.assertIs(self.arm3('all'), True)
+
+    def test_arm3_without_a_required_role_is_not_verified(self):
+        # 그 조건에 있어야 할 역할이 관측되지 않으면 false
+        self.assertIs(self.arm3('no-reviewer', reviewer=False), False)
+        self.assertIs(self.arm3('no-worker', worker=False), False)
+
+    def test_arm3_without_the_user_proxy_is_not_verified(self):
+        # decision (b): the user proxy is a required arm-3 role — the arm-3 interview is mandatory
+        # (docs/experiment-plan.md "3만 의무 사전 인터뷰"; spec 2: 대리 사용자는 Opus 5.5다)
+        self.assertIs(self.arm3('no-proxy', proxy=False), False)
+
+    def test_arm3_user_proxy_served_by_another_model_is_not_verified(self):
+        # spec 2: 대리 사용자는 Opus 5.5다 — checked on the proxy's request events
+        self.assertIs(self.arm3('proxy-fable', proxy_model=FABLE), False)
+
+    def test_isolation_needs_the_frozen_tool_list_of_that_arm(self):
+        root = self.frozen_run('claude-arm1-core01', 1, RUNNER_TOOLS + ('Skill',))       # surface drifted from the freeze
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1, isolation_verified=True)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['isolation_verified'], False)
+
+    def test_isolation_without_a_freeze_is_false(self):
+        root = make_root(self.base / 'nofreeze')
+        init_run(root, 'claude-arm1-core01', 1, tools=RUNNER_TOOLS)
+        first_turn(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1, isolation_verified=True)
+        self.assertIs(self.fields(root, 'claude-arm1-core01', folder)['isolation_verified'], False)
+
+
+class OneFinishPerRun(FinishFixture):
+    """Spec 10.2: 종료 기록은 run당 한 번이다. 이미 종료 상태가 있는 기록에 다시 실행하면 거부한다. 정정이 필요하면
+    --supersede --reason으로만 하고, 이전 run.json을 지우지 않고 옆에 보존한다. 종료 기록의 대상은 턴이 한 번 이상 나간 run이다.
+    NOT_STARTED·SETUP_FAILED는 종료 기록이 거부한다."""
+
+    def test_second_finish_is_refused(self):
+        root, folder = self.started_run()
+        write_verdict(folder, 'claude-arm1-core01', results={'C01': 'FAIL'})
+        self.assertEqual(finish(root, 'claude-arm1-core01')[0], 0)
+        first = (folder / 'run.json').read_bytes()
+        write_verdict(folder, 'claude-arm1-core01')
+        code, _ = finish(root, 'claude-arm1-core01')
+        self.assertNotEqual(code, 0)
+        self.assertEqual((folder / 'run.json').read_bytes(), first)
+
+    def test_supersede_needs_a_reason_and_keeps_the_previous_record(self):
+        root, folder = self.started_run()
+        write_verdict(folder, 'claude-arm1-core01', results={'C01': 'FAIL'})
+        self.assertEqual(finish(root, 'claude-arm1-core01')[0], 0)
+        first = (folder / 'run.json').read_bytes()
+        write_verdict(folder, 'claude-arm1-core01')                        # corrected judgement
+        for options in (['--supersede'], ['--supersede', '--reason', ''], ['--reason', 'regraded']):
+            with self.subTest(options):
+                code, _ = finish(root, 'claude-arm1-core01', *options)
+                self.assertNotEqual(code, 0)
+                self.assertEqual((folder / 'run.json').read_bytes(), first)
+        code, out = finish(root, 'claude-arm1-core01', '--supersede', '--reason', 'C01 regraded after re-reading the audit')
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        self.assertEqual(run['status'], 'PASSED')
+        self.assertIn('C01 regraded after re-reading the audit', json.dumps(run, ensure_ascii=False))
+        kept = [p for p in folder.iterdir() if p.name != 'run.json' and p.is_file() and p.read_bytes() == first]
+        self.assertTrue(kept, 'the superseded run.json was not kept beside the new one')
+
+    def test_not_started_and_setup_failed_records_are_refused(self):
+        for status in ('NOT_STARTED', 'SETUP_FAILED'):
+            with self.subTest(status):
+                self.base = Path(self.tmp.name) / status
+                root, folder = self.started_run(status=status)
+                write_verdict(folder, 'claude-arm1-core01')
+                before = (folder / 'run.json').read_bytes()
+                code, _ = finish(root, 'claude-arm1-core01')
+                self.assertNotEqual(code, 0)
+                self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+    def test_run_without_any_turn_is_refused(self):
+        root = make_root(self.base / 'noturn')
+        init_run(root, 'claude-arm1-core01', 1)
+        folder = write_record(root, 'claude-arm1-core01', 1)
+        write_verdict(folder, 'claude-arm1-core01')
+        before = (folder / 'run.json').read_bytes()
+        code, _ = finish(root, 'claude-arm1-core01')
+        self.assertNotEqual(code, 0)
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+
+class InvalidInfraNeedsReasonAndEvidence(FinishFixture):
+    """Spec 10.2: INVALID_INFRA만 인자로 받는다(사유 필수). 사유와 근거 파일을 함께 기록한다."""
+
+    def test_invalid_infra_without_reason_or_evidence_is_refused(self):
+        cases = {'no evidence': ['--invalid-infra', 'docker daemon died'],
+                 'empty reason': ['--invalid-infra', '', '--evidence', 'docker.log'],
+                 'evidence file absent': ['--invalid-infra', 'docker daemon died', '--evidence', 'nowhere.log'],
+                 'evidence outside the record folder': ['--invalid-infra', 'docker daemon died', '--evidence', '../../../outside.log']}
+        for name, options in cases.items():
+            with self.subTest(name):
+                self.base = Path(self.tmp.name) / name.replace(' ', '-')
+                root, folder = self.started_run()
+                (folder / 'docker.log').write_text('daemon died')
+                (folder / '../../../outside.log').resolve().write_text('x')
+                before = (folder / 'run.json').read_bytes()
+                code, _ = finish(root, 'claude-arm1-core01', *options)
+                self.assertNotEqual(code, 0, name)
+                self.assertEqual((folder / 'run.json').read_bytes(), before, name)
+
+    def test_invalid_infra_with_reason_and_evidence_is_recorded(self):
+        root, folder = self.started_run(**EvidenceFieldsComeOnlyFromTheirSources.HAND_WRITTEN)
+        (folder / 'docker.log').write_text('daemon died')
+        code, out = finish(root, 'claude-arm1-core01', '--invalid-infra', 'docker daemon died', '--evidence', 'docker.log')
+        self.assertEqual(code, 0, out)
+        run = read_record(folder)
+        self.assertEqual(run['status'], 'INVALID_INFRA')
+        self.assertIs(run['all_acceptance_passed'], False)
+        text = json.dumps(run)
+        self.assertIn('docker daemon died', text)
+        self.assertIn(hashlib.sha256(b'daemon died').hexdigest(), text)
+
+
+class PilotRecordsAreSeparate(FinishFixture):
+    """Spec 10.3: 파일럿은 본 실험과 run id·기록 위치가 다르다: run id claude-pilot-NN, 기록 claude/docs/pilots/<run id>/.
+    init --pilot이 manifest에 표시한다. 기록 도구(capture_turn·finish_run)는 manifest의 표시로 위치를 정하고, 기록 폴더의 run id와
+    실행 run id가 다르면 거부한다."""
+
+    def pilot_root(self, run_id='claude-pilot-01', arm=3):
+        root = make_root(self.base / run_id)
+        (root.parent / 'recording').symlink_to(HERE.parents[1] / 'recording')      # the shared recorder capture_turn uses
+        manifest = init_run(root, run_id, arm, pilot=True)
+        self.assertIs(manifest['pilot'], True)
+        (arm3_turn(root, run_id) if arm == 3 else first_turn(root, run_id, arm))
+        return root
+
+    def capture(self, root, run_id):
+        analysis = root.parent / 'analysis.md'
+        analysis.write_text('turn analysis')
+        with patch.object(CAPTURE, 'ROOT', root), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                CAPTURE.capture(run_id, 1, analysis, 'RUNNING', runs=root / '.runs')
+                return None
+            except BaseException as exc:
+                return exc
+
+    def test_pilot_ids_and_the_pilot_flag_go_together(self):
+        root = make_root(self.base / 'ids')
+        for run_id, options in (('claude-arm1-core01', dict(pilot=True)), ('claude-pilot-02', {}),
+                                ('claude-pilot-03', dict(pilot=False))):
+            with self.subTest(run_id=run_id, **options):
+                with self.assertRaises(Exception):
+                    init_run(root, run_id, 1, **options)
+                self.assertFalse((root / '.runs' / run_id / 'manifest.json').exists())
+
+    def test_pilot_is_recorded_under_the_pilot_location_only(self):
+        root = self.pilot_root()
+        self.assertIsNone(self.capture(root, 'claude-pilot-01'))
+        folder = record_folder(root, 'claude-pilot-01', 3, pilot=True)
+        self.assertTrue((folder / 'run.json').exists())
+        write_verdict(folder, 'claude-pilot-01', results={'C20': 'NOT_RUN'})
+        code, out = finish(root, 'claude-pilot-01')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(read_record(folder)['run_id'], 'claude-pilot-01')
+        self.assertEqual(read_record(folder)['status'], 'FAILED')
+        experiments = root / 'docs' / 'experiments'
+        self.assertEqual([p for p in experiments.rglob('*') if p.is_file()] if experiments.exists() else [], [])
+
+    def test_record_folder_of_another_run_is_refused(self):
+        root = self.pilot_root()
+        folder = record_folder(root, 'claude-pilot-01', 3, pilot=True)
+        folder.mkdir(parents=True)
+        (folder / 'run.json').write_text(json.dumps({'run_id': 'claude-pilot-09', 'status': 'RUNNING'}))
+        before = (folder / 'run.json').read_bytes()
+        self.assertIsNotNone(self.capture(root, 'claude-pilot-01'))
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+        write_verdict(folder, 'claude-pilot-01')
+        code, _ = finish(root, 'claude-pilot-01')
+        self.assertNotEqual(code, 0)
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+    def test_main_record_folder_of_another_run_is_refused(self):
+        root, folder = self.started_run()
+        (folder / 'run.json').write_text(json.dumps({'run_id': 'claude-arm1-core02', 'arm': 1, 'core': 1, 'status': 'RUNNING'}))
+        before = (folder / 'run.json').read_bytes()
+        write_verdict(folder, 'claude-arm1-core01')
+        code, _ = finish(root, 'claude-arm1-core01')
+        self.assertNotEqual(code, 0)
+        self.assertEqual((folder / 'run.json').read_bytes(), before)
+
+
+class InitRefusesANamedReadinessThatDoesNotExist(unittest.TestCase):
+    """Spec 10.5 (U1): 동결 파일 경로를 명시했는데 파일이 없으면 init은 거부한다. 동결 전 실행은 기본 위치에 동결 파일이 없을 때만
+    된다."""
+
+    def test_named_missing_readiness_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            with self.assertRaises(Exception):
+                init_run(root, 'claude-arm1-core01', 1, image=None, readiness=Path(tmp) / 'results' / 'readiness.json')
+            self.assertFalse((root / '.runs' / 'claude-arm1-core01' / 'manifest.json').exists())
+
+    def test_default_readiness_present_means_the_run_is_frozen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_root(tmp)
+            default = root / 'docs' / 'results'
+            default.mkdir(parents=True)
+            write_readiness(default).rename(default / 'readiness.json')
+            m = init_run(root, 'claude-arm1-core01', 1, image=None)
+            self.assertEqual(m['image'], FROZEN_IMAGE)
+            self.assertIs(m['image_frozen'], True)
+            with self.assertRaises(Exception):
+                init_run(root, 'claude-arm2-core01', 2, image='img')            # no pre-freeze run once the freeze exists
+
+    def test_pre_freeze_run_only_without_the_default_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            m = init_run(make_root(tmp), 'claude-arm1-core01', 1)
+            self.assertIs(m['image_frozen'], False)
+            self.assertIsNone(m['readiness'])
+
+
+class RecoveryResendsTheSamePrompt(unittest.TestCase):
+    """Spec 10.5 (U9): recovery 턴은 이어 가는 턴과 같은 프롬프트(해시 일치)만 보낸다 — refused before any paid call."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_recovery_with_another_prompt_makes_no_paid_call(self):
+        for arm in (1, 3):
+            with self.subTest(arm=arm):
+                run_id = 'rp%d' % arm
+                root, dest = new_run(self.base, run_id, arm, ['initial', ('feedback', 'failed')])
+                error, paid = attempt_turn(root, run_id, resume=True, kind='recovery',
+                                           prompt_text=last_prompt(root, run_id) + ' (and one more thing)')
+                self.assertIsNotNone(error)
+                self.assertEqual(paid, [])
+                _, paid = attempt_turn(root, run_id, resume=True, kind='recovery')     # control: the same prompt
+                self.assertTrue(paid)
+
+    def test_recovery_of_a_turn_whose_prompt_hash_is_not_recorded_makes_no_paid_call(self):
+        # runbook 상한 표: 다르거나 해시가 없으면 호출 전 거부
+        root, dest = new_run(self.base, 'nohash', 1, ['initial', ('feedback', 'failed')])
+        inv_path = sorted((dest / 'turns').iterdir())[-1] / 'invocation.json'
+        inv = json.loads(inv_path.read_text())
+        del inv['prompt_sha256']
+        inv_path.write_text(json.dumps(inv))
+        error, paid = attempt_turn(root, 'nohash', resume=True, kind='recovery')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+
+    def test_recovery_after_a_real_failed_turn_needs_its_prompt(self):
+        # the failed turn is a real (fake-docker) turn: its own record carries the hash the recovery is checked against
+        root, dest = new_run(self.base, 'real', 1, [])
+        first_turn(root, 'real', 1)
+        def container_died(dest):
+            raise RuntimeError('container died during the call')
+        result, turn_dir, error, _ = drive_turn(root, 'real', resume=True, kind='feedback', reported=U2, side_effect=container_died,
+                                                projects={'-workspace/s.jsonl': [assistant('r2', OPUS, U2)]})
+        self.assertNotEqual(result['status'], 'ok', 'control: the fake call left a failed turn')
+        sent = (turn_dir / 'prompt.txt').read_text()
+        error, paid = attempt_turn(root, 'real', resume=True, kind='recovery', prompt_text=sent + ' changed')
+        self.assertIsNotNone(error)
+        self.assertEqual(paid, [])
+        _, paid = attempt_turn(root, 'real', resume=True, kind='recovery', prompt_text=sent)
+        self.assertTrue(paid)
+
+
+class ProxyRunsOnlyOnThePinnedImage(unittest.TestCase):
+    """Spec 10.5 (U10): 대리 사용자 호출은 그 run의 manifest에 고정된 이미지와 같은 이미지로만 실행한다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def images_used(self, record, candidates):
+        return {c for cmd, _ in record if cmd[:2] in (['docker', 'create'], ['docker', 'run']) for c in candidates if c in cmd}
+
+    def test_proxy_uses_the_image_pinned_in_the_manifest(self):
+        root, dest = new_run(self.base, 'pin', 3, ['initial'])
+        pinned = json.loads((dest / 'manifest.json').read_text())['image']
+        record = []
+        code, console = proxy_call(root / '.runs', 'pin', record=record)
+        self.assertEqual(code, 0, console)
+        # proxy_call's readiness names another runner digest ('sha256:frozen'); only the run's pinned image is run
+        self.assertEqual(self.images_used(record, {pinned, 'sha256:frozen', 'payment-claude-runner:2.1.326'}), {pinned})
+        invocation = json.loads((sorted((dest / 'consults').iterdir())[-1] / 'invocation.json').read_text())
+        self.assertEqual(invocation.get('image'), pinned)
+
+    def test_frozen_run_proxy_uses_the_frozen_digest(self):
+        root = make_root(self.base / 'frozen')
+        readiness = write_readiness(self.base)
+        init_frozen(root, 'fz', 3, readiness)
+        write_turns(root / '.runs/fz', [(datetime.now(timezone.utc), 'ok', [('t', 'pm', tokens(1, 1))], 'initial')])
+        record = []
+        code, console = proxy_call(root / '.runs', 'fz', record=record)
+        self.assertEqual(code, 0, console)
+        used = self.images_used(record, {FROZEN_IMAGE, 'sha256:frozen', 'img', 'payment-claude-runner:2.1.326'})
+        self.assertEqual(used, {FROZEN_IMAGE})
+
+    def test_manifest_without_a_pinned_image_gets_no_proxy_call(self):
+        root, dest = new_run(self.base, 'nopin', 3, ['initial'])
+        manifest = json.loads((dest / 'manifest.json').read_text())
+        del manifest['image']
+        (dest / 'manifest.json').write_text(json.dumps(manifest))
+        record = []
+        code, _ = proxy_call(root / '.runs', 'nopin', record=record)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(paid_calls(record), [])
 
 
 if __name__ == '__main__':

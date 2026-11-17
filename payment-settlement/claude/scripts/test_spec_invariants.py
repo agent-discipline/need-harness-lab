@@ -1,6 +1,6 @@
 """Spec-derived invariant tests for the Claude-arm scripts (no docker, no model call, no git writes).
 
-Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 1, 2 and 5.
+Source of every expectation: docs/plans/2026-11-17/claude-only-run/requirement-spec.md, sections 1, 2, 5 and 10.
 Each test names the spec sentence it checks. Expected values come from the spec, not from the implementation.
 """
 import contextlib
@@ -33,6 +33,7 @@ FABLE = 'claude-fable-5-2'
 PROTOCOL = 'payment-settlement-v3-claude'
 SPEC_LIMITS = {'token_limit': 20_000_000, 'time_limit_seconds': 8 * 3600, 'feedback_limit': 30}
 TOKEN = 'sk-ant-oat01-SPECINVARIANT-scripts-0123456789'
+PINNED_IMAGE = 'sha256:' + '7' * 64            # differs from the readiness runner digest in ready() on purpose
 U1 = {'input_tokens': 10, 'cache_creation_input_tokens': 20, 'cache_read_input_tokens': 30, 'output_tokens': 40}
 FLAGS = ('isolation_verified', 'usage_collector_verified', 'harness_adapter_verified', 'acceptance_suite_verified',
          'pilot_passed', 'oauth_token_source_verified', 'role_models_verified', 'cache_observation_verified',
@@ -307,8 +308,10 @@ class UserProxyAccounting(unittest.TestCase):
         runs = Path(tmp) / 'runs'
         run = runs / 'claude-arm3-core01'
         (run / 'turns').mkdir(parents=True)
+        # the run's pinned image (spec 10.5: 대리 사용자 호출은 그 run의 manifest에 고정된 이미지와 같은 이미지로만 실행한다)
         write(run / 'manifest.json', dict(run_id='claude-arm3-core01', arm=arm, session_id='11111111-2222-4333-8444-555555555555',
-                                          requested_model=FABLE, requested_worker_model=OPUS, requested_reviewer_model=FABLE))
+                                          requested_model=FABLE, requested_worker_model=OPUS, requested_reviewer_model=FABLE,
+                                          image=PINNED_IMAGE))
         if censored:
             write(run / 'censored.json', {'status': 'CENSORED_BUDGET'})
         for i, kind in enumerate(turns, 1):
@@ -364,6 +367,9 @@ class UserProxyAccounting(unittest.TestCase):
             self.assertEqual({e['role'] for e in events}, {'user-proxy'})
             self.assertNotIn('--mount', state['create'])                 # never writes into a run's state
             self.assertNotIn('--resume', state['create'])                # its own fresh session
+            # spec 10.5 (U10): only the run's pinned image runs the proxy, not the readiness digest
+            self.assertIn(PINNED_IMAGE, state['create'])
+            self.assertNotIn('sha256:1', state['create'])
 
     def test_credential_leaked_by_the_user_proxy_is_scrubbed_and_fails_the_call(self):
         # spec 2: 자격증명 값은 저장소·로그·기록 어디에도 남기지 않는다
@@ -386,6 +392,26 @@ class UserProxyAccounting(unittest.TestCase):
             self.assertIs(usage['usage_complete'], False)
             self.assertNotEqual(usage['usage'], {k: 0 for k in launch.USAGE_KEYS},
                                 'unobserved proxy usage recorded as zeros')
+
+
+class UserProxyImageIsPinned(UserProxyAccounting):
+    """Spec 10.5 (U10): 대리 사용자 호출은 그 run의 manifest에 고정된 이미지와 같은 이미지로만 실행한다."""
+    test_user_proxy_usage_is_recorded_under_its_own_role_and_session = None
+    test_credential_leaked_by_the_user_proxy_is_scrubbed_and_fails_the_call = None
+    test_unobserved_user_proxy_usage_is_not_zero_filled = None
+
+    def test_manifest_without_a_pinned_image_gets_no_proxy_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original = write
+
+            def unpinned(path, value):
+                if path.name == 'manifest.json':
+                    value = {k: v for k, v in value.items() if k != 'image'}
+                original(path, value)
+            with patch.object(sys.modules[__name__], 'write', side_effect=unpinned):
+                code, _, state, _ = self.run_proxy(tmp)
+            self.assertNotEqual(code, 0)
+            self.assertFalse([c for c in state['calls'] if c[:2] in (['docker', 'create'], ['docker', 'start'])])
 
 
 class StageGatesAndProxyModel(unittest.TestCase):
