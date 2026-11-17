@@ -14,6 +14,8 @@ docker build -t payment-claude-runner:2.1.326 payment-settlement/claude/runner
 
 ## 시행 (한 번에 하나, schedule.json 순서)
 
+역할(요구사항 명세 §0, 2026-11-18 결정): **실험 진행자는 Fable 5.2(`claude-fable-5-2`) 에이전트**다 — run 실행, 판정기·어댑터 실행, 산출물과 관측 메모 저장, 도중 피드백 전달(`prompts/feedback.md` 형식), 기록·커밋까지 맡고 구현에 개입하지 않는다. 메인 세션은 실험을 통제한다(진행자 브리핑, 승인, 최종 판정표 `verdict.json` 작성, 결과 회수·보고). 진행자는 실험 대상이 아니라 운영 쪽이며, 그 사용량은 평가 비용 장부에 모델 `claude-fable-5-2`로 기록한다(아래 "평가 비용 기록").
+
 ```bash
 L=payment-settlement/claude/runner/launch.py
 # 1·2번
@@ -144,6 +146,10 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 
 통과했는데 네 칸 중 하나라도 false면 상태는 `PASSED`로 쓰이고 `commit_run.py`가 커밋을 막는다. 우회 경로는 없다: 진행자는 거기서 멈추고 원인을 `issues.md`에 적어 메인에 보고하며, 메인이 사용자에게 보고한다(다음 사이클은 시작하지 않는다). 장부가 미완전(`usage_complete=false`)이면 토큰 합은 하한값이다.
 
+### 커밋 뒤 정정
+
+`commit_run.py`로 커밋한 run을 고쳐야 하면(판정표 재판정, 빠진 근거, 종료 기록 오류): ① 기록 폴더에서 고칠 것(`verdict.json`·근거 파일·`issues.md`에 정정 사유)을 고친다 → ② `finish_run.py --run-id <id> --supersede --reason "<정정 사유>"` — 이전 `run.json`은 `run.superseded-<시각>.json`으로 남고 새 기록의 `supersedes`가 그것을 가리킨다(이전 커밋도 그대로 남는다) → ③ `commit_run.py --arm N --core M`을 다시 실행한다. 같은 run의 두 번째 `experiment: <run_id> <상태>` 커밋이 생기는 것이 정상이다(이전 시행 커밋 확인은 제목 접두로 하므로 그대로 통과한다). 커밋을 고치거나(`--amend`·rebase) 지우지 않는다. 정정한 run이 이미 끝난 사이클에 속하면 메인에 보고하고, 결과 표는 가장 최근 커밋의 `run.json`을 쓴다. 파일럿 정정은 같은 ①②에 일반 docs 커밋이다.
+
 파일럿은 `commit_run.py` 대상이 아니다(본 실험 30건 전용). 파일럿 기록(`docs/pilots/<run id>/`)은 일반 docs 커밋으로 남긴다. 파일럿의 판정표·종료 기록은 보고 ②의 자료이고, 동결의 `pilot_passed`는 지금처럼 실행 폴더(`.runs`)에서 도출한다(`freeze_readiness.py --pilot-run`).
 
 ⑥ `discard`는 3번 리뷰어 volume의 `raw/<session>.json`이 전부 run 디렉터리(`turns/*/reviewer-raw/`)로 회수됐는지 먼저 확인하고, 아니면 아무 volume도 지우지 않고 실패한다. 제거 실패도 non-zero로 끝나며 `discard-<시각>.json`의 `complete`가 false로 남는다. 다음 사이클의 `start_cycle.py`는 앞 사이클 세 run의 terminal 상태·`experiment: <run_id>` 커밋·미커밋 변경 없음·`complete=true` discard 기록을 증거로 확인한다(`cycles.json`의 상태 문자열은 게이트가 아니다).
@@ -152,7 +158,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 
 ## 평가 비용 기록 (진행자·판정 어댑터)
 
-진행자(실험 진행 에이전트)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 2,000만 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
+진행자(실험 진행 에이전트, Fable 5.2 `claude-fable-5-2`)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 2,000만 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
 
 기록 주체는 **메인**이다(진행자 에이전트 완료 알림의 usage). 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 같은 세션이 어댑터를 여러 번 작성했으면 건마다 `judging-adapter` 한 줄을 쓰고 `--item`에 건을 구분하는 표시(예: 대상 run id·어댑터 이름)를 적는다. 진행자(`conductor`) 줄은 세션당 한 줄이고 `--item`을 받지 않는다. 덧붙이기만 하며(같은 역할·세션·`item`은 두 번 기록되지 않는다, 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다), 맡은 run id를 전부 적는다.
 
