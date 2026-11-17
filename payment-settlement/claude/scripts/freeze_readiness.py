@@ -144,7 +144,8 @@ def main():
     p.add_argument('--smoke-run', action='append', default=[], help='launch.py run id of a paid smoke (repeat; arms 1|2 and 3)')
     p.add_argument('--runs', type=Path, default=ROOT / '.runs')
     p.add_argument('--attest', type=Path, help='JSON attestation for ' + ', '.join(ATTESTABLE))
-    p.add_argument('--user-proxy-model', help='user proxy model once decided (consult_contract.py must then use it)')
+    p.add_argument('--user-proxy-model', required=True,
+                   help='user proxy model chosen by the user (no default); consult_contract.py refuses any other model')
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp)')
     a = p.parse_args()

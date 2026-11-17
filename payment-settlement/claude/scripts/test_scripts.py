@@ -31,7 +31,8 @@ def ready(**extra):
                 reasoning_effort='high', cache_policy='observed-cache', billed_cost=None, baseline_sha='abc',
                 contract_sha256='def', image_digests={'runner': 'sha256:1'}, token_limit=20000000,
                 time_limit_seconds=28800, feedback_limit=30,
-                actual_models={'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'}, **READY_FLAGS)
+                actual_models={'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'},
+                user_proxy_model='decided-model', **READY_FLAGS)
     data.update(extra)
     return data
 
@@ -47,8 +48,10 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(preflight.blockers(base), [])
         self.assertIn('protocol must be payment-settlement-v3-claude', preflight.blockers(dict(base, protocol='payment-settlement-v1')))
         self.assertIn('token_limit must be 20000000', preflight.blockers(dict(base, token_limit=2000000)))
-        arm3 = dict(base, arm=3, requested_worker_model='claude-opus-5-5')
+        arm3 = dict(base, arm=3, requested_worker_model='claude-opus-5-5', user_proxy_model='decided-model')
         self.assertEqual(preflight.blockers(arm3), [])
+        self.assertIn('arm 3 requires the frozen user_proxy_model', preflight.blockers(dict(arm3, user_proxy_model=None)))
+        self.assertEqual(preflight.blockers(dict(base, user_proxy_model=None)), [])     # arms 1/2 never consult a proxy
         self.assertTrue(preflight.blockers(dict(arm3, hook_enforcement_verified='yes')))
 
 
@@ -106,6 +109,15 @@ class FreezeTest(unittest.TestCase):
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5-5', 'claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['claude-opus-5'], 'claude-opus-5-5'))
         self.assertFalse(freeze_readiness.model_matches(['x'], None))
+
+
+class FreezeArgumentsTest(unittest.TestCase):
+    def test_freeze_requires_the_user_proxy_model(self):
+        err = io.StringIO()
+        with patch.object(sys, 'argv', ['freeze_readiness.py', '--output', '/nonexistent/r.json']), \
+             contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            freeze_readiness.main()
+        self.assertIn('--user-proxy-model', err.getvalue())
 
 
 class StartCycleTest(unittest.TestCase):

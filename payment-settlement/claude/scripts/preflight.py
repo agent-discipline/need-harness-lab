@@ -35,6 +35,9 @@ def blockers(manifest):
         failures.append("arm 3 requires verified native hook enforcement inside the container")
     if manifest.get("arm") == 3 and not manifest.get("requested_worker_model"):
         failures.append("arm 3 requires an explicit worker model")
+    # arm 3 consults a user proxy; its model must be frozen like every other input (no default anywhere)
+    if manifest.get("arm") == 3 and not manifest.get("user_proxy_model"):
+        failures.append("arm 3 requires the frozen user_proxy_model")
     policy = manifest.get("cache_policy")
     if policy not in ("strict-zero-cache", "observed-cache"):
         failures.append("cache policy must be explicit")
