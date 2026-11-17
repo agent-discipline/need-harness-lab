@@ -180,6 +180,49 @@ class FreezeTest(unittest.TestCase):
             self.smoke(runs, 'odd1', 1, {'implementer': ['claude-opus-5-5']}, reviewer=self.REVIEWER_OK)
             self.assertFalse(freeze_readiness.smoke_evidence(runs, ['odd1', 's2', 'hook3'])[0]['usage_collector_verified'])
 
+    def inspect(self, runs, run_id, image, turn='0001'):
+        write(runs / run_id / 'turns' / turn / 'container-inspect.json', [{'Image': image}])
+
+    def test_smoke_evidence_counts_only_runs_on_the_runner_image_being_frozen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            for run_id, arm, roles in (('s1', 1, {'implementer': ['claude-opus-5-5']}), ('s2', 2, {'implementer': ['claude-opus-5-5']}),
+                                       ('s3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']})):
+                self.smoke(runs, run_id, arm, roles)
+                self.inspect(runs, run_id, 'sha256:new')
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], 'sha256:new')
+            self.assertTrue(all(flags.values()), flags)
+            self.assertTrue(detail['s3']['image_matches_runner'])
+            self.inspect(runs, 's2', 'sha256:old')                       # one smoke ran on the image before the rebuild
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], 'sha256:new')
+            self.assertFalse(any(flags.values()), flags)
+            self.assertEqual((detail['s2']['image_matches_runner'], detail['s2']['image_ids']), (False, ['sha256:old']))
+            (runs / 's2/turns/0001/container-inspect.json').unlink()       # unknown image: never a match
+            self.assertFalse(any(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'], 'sha256:new')[0].values()))
+
+    def test_a_smoke_run_counts_as_a_whole_and_tools_are_checked_per_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            self.smoke(runs, 's1', 1, {'implementer': ['claude-opus-5-5']})
+            self.smoke(runs, 's2', 2, {'implementer': ['claude-opus-5-5']})
+            self.smoke(runs, 's3', 3, {'pm': ['claude-fable-5-2'], 'reviewer': ['claude-fable-5-2']})
+            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['usage_collector_verified'])
+            write(runs / 's1/turns/0002/result.json', dict(status='failed', usage_complete=False))   # a failed turn in the run
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])
+            self.assertFalse(flags['usage_collector_verified'])
+            self.assertFalse(detail['s1']['all_turns_ok_and_complete'])
+            shutil.rmtree(runs / 's1/turns/0002')
+            # two arm 1 smokes whose union is the allow-list but each lacks a tool: not isolation evidence
+            for run_id, drop in (('a', 'WebSearch'), ('b', 'WebFetch')):
+                self.smoke(runs, run_id, 1, {'implementer': ['claude-opus-5-5']})
+                m = json.loads((runs / run_id / 'manifest.json').read_text())
+                m['observed_tools'] = [t for t in m['observed_tools'] if t != drop]
+                write(runs / run_id / 'manifest.json', m)
+            flags, _, detail = freeze_readiness.smoke_evidence(runs, ['a', 'b', 's2', 's3'])
+            self.assertFalse(flags['isolation_verified'])
+            self.assertFalse(detail['a']['tools_equal_arm_allow_list'])
+            self.assertTrue(freeze_readiness.smoke_evidence(runs, ['s1', 's2', 's3'])[0]['isolation_verified'])
+
     def test_attestation_is_limited_and_hashed(self):
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / 'evidence.json'
@@ -404,6 +447,49 @@ class FreezeReplaceTest(unittest.TestCase):
                 self.assertIn('measured run has started', err)
                 self.assertNotIn('supersedes', json.loads(out.read_text()))
                 self.assertEqual(list(Path(tmp).glob('*.superseded-*.json')), [])
+
+    def test_supersede_is_refused_for_shared_inputs_and_looks_at_the_fixed_run_folder_and_all_branches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.experiment_root(tmp)
+            self.assertEqual(self.supersede(tmp, {'docs/acceptance.md': 'v1', 'claude/runner/launch.py': 'v1'}, root)[0], 0)
+            first = json.loads((Path(tmp) / 'readiness.json').read_text())
+            for name in ('docs/acceptance.md', 'evaluation/acceptance.py'):           # the contract / evaluator changed
+                code, err, out = self.supersede(tmp, {'docs/acceptance.md': 'v1', 'claude/runner/launch.py': 'v1', name: 'v2'},
+                                                root, '--supersede-before-runs', '--reason', 'x')
+                self.assertNotEqual(code, 0)
+                self.assertIn('protocol version change', err)
+                self.assertEqual(json.loads(out.read_text()), first)
+            # a measured run directory in the fixed folder is seen even when --runs points elsewhere
+            (root / '.runs/claude-arm2-core01').mkdir(parents=True)
+            out = Path(tmp) / 'readiness.json'
+            argv = ['freeze_readiness.py', '--output', str(out), '--runs', str(Path(tmp) / 'empty'), '--supersede-before-runs',
+                    '--reason', 'x']
+            with patch.object(sys, 'argv', argv), patch.object(freeze_readiness, 'ROOT', root), \
+                 contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                freeze_readiness.main()
+            self.assertIn('claude-arm2-core01: run directory exists', err.getvalue())
+            shutil.rmtree(root / '.runs')
+            # a run commit on another local branch counts
+            git = ['git', '-C', str(root), '-c', 'user.email=a@b', '-c', 'user.name=a']
+            subprocess.run(git + ['checkout', '-q', '-b', 'other'], check=True)
+            subprocess.run(git + ['commit', '-q', '--allow-empty', '-m', 'experiment: claude-arm1-core01 FAILED'], check=True)
+            subprocess.run(git + ['checkout', '-q', '-'], check=True)
+            self.assertIn('commit: experiment: claude-arm1-core01 FAILED', freeze_readiness.experiment_started(root))
+
+    def test_freeze_files_are_replaced_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.experiment_root(tmp)
+            self.assertEqual(self.supersede(tmp, {'claude/runner/launch.py': 'v1'}, root)[0], 0)
+            out = Path(tmp) / 'readiness.json'
+            before = (out.read_text(), (Path(tmp) / 'frozen-inputs.json').read_text())
+            real_replace = Path.replace
+            def failing(self, target):
+                raise OSError('disk full')
+            with patch.object(Path, 'replace', failing), self.assertRaises(OSError):
+                self.supersede(tmp, {'claude/runner/launch.py': 'v2'}, root, '--supersede-before-runs', '--reason', 'x')
+            self.assertEqual((out.read_text(), (Path(tmp) / 'frozen-inputs.json').read_text()), before)   # old freeze back in place
+            self.assertEqual(list(Path(tmp).glob('*superseded*')) + list(Path(tmp).glob('.*.tmp-*')), [])
+            self.assertIs(Path.replace, real_replace)
 
     def test_replace_blockers(self):
         found = dict(self.FOUND)

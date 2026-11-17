@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -166,12 +167,17 @@ def run_isolation_check(run, manifest, readiness):
     return all(checks.values()), checks
 
 
-def smoke_evidence(runs, run_ids):
-    """Derive flags from paid smoke runs made by launch.py (manifest + finalized turns)."""
+def smoke_evidence(runs, run_ids, runner_image=None):
+    """Derive flags from paid smoke runs made by launch.py (manifest + finalized turns). Every adopted run counts as a
+    whole: a run with any turn that did not end ok with complete usage cannot verify the collector (no picking of the
+    good turns), and each run's observed tool surface must equal its own arm's allow-list (no union over runs).
+    runner_image (the runner image id being frozen; main always passes it): every turn of every adopted run must have
+    run on exactly that image, otherwise every smoke-derived flag is false and the runs are named in the detail."""
     flags = {k: False for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
                                 'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
-    detail, actual, arms, tools = {}, {}, set(), {}
+    detail, actual, arms = {}, {}, set()
     ok_turns, all_ok_complete, cache_seen, token_ok, roles_ok, selftests_ok, hooks_ok = 0, True, False, True, True, True, False
+    tools_ok, images_ok = True, True
     reviewer_turns = []                                 # arm 3 smoke turns in which the second reviewer was really called
     for run_id in run_ids:
         run = Path(runs) / run_id
@@ -180,7 +186,9 @@ def smoke_evidence(runs, run_ids):
         arms.add(arm)
         st = manifest.get('selftest') or {}
         selftests_ok = selftests_ok and st.get('passed') is True
-        tools.setdefault(arm, set()).update(t for t in manifest.get('observed_tools') or [] if t)
+        observed_tools = {t for t in manifest.get('observed_tools') or [] if t}
+        expected_tools = set(launch.allowed_tools({'arm': arm}))
+        tools_ok = tools_ok and observed_tools == expected_tools
         if arm == 3:
             hooks_ok = hooks_ok or (st.get('passed') is True and st.get('gate_l1_write_exit') == '2'
                                     and st.get('gate_docs_write_exit') == '0' and st.get('git_guard_push') == 'ask'
@@ -188,12 +196,13 @@ def smoke_evidence(runs, run_ids):
         results = [json.loads(p.read_text()) for p in sorted((run / 'turns').glob('*/result.json'))]
         good = [r for r in results if r.get('status') == 'ok' and r.get('session_id_confirmed') is True]
         ok_turns += len(good)
+        run_complete = bool(results) and len(good) == len(results) and all(r.get('usage_complete') is True for r in results)
         token_ok = token_ok and bool(good) and all((r.get('config_volume') or {}).get('credentials_file_in_volume') is False for r in good)
-        all_ok_complete = all_ok_complete and bool(good) and all(r.get('usage_complete') is True for r in good)
+        all_ok_complete = all_ok_complete and run_complete
         cache_seen = cache_seen or any(all(isinstance(((r.get('usage_cross_check') or {}).get('reported') or {}).get(k), int)
                                            for k in launch.USAGE_KEYS) for r in good)
         proven = ['%s/%s' % (run_id, p.parent.name) for p in sorted((run / 'turns').glob('*/result.json'))
-                  if arm == 3 and reviewer_smoke_turn(json.loads(p.read_text()))]
+                  if arm == 3 and run_complete and reviewer_smoke_turn(json.loads(p.read_text()))]
         reviewer_turns += proven
         observed = manifest.get('actual_role_models') or {}
         checks = role_check(arm, observed, SMOKE_ROLES.get(arm, ()), run)
@@ -201,15 +210,15 @@ def smoke_evidence(runs, run_ids):
         main_role = SMOKE_ROLES.get(arm, ('',))[0]
         if checks.get(main_role):
             actual[str(arm)] = observed[main_role][0]
-        detail[run_id] = dict(arm=arm, manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good),
+        image_ids = turn_image_ids(run)
+        image_match = None if runner_image is None else (bool(image_ids) and set(image_ids) == {runner_image})
+        images_ok = images_ok and image_match is not False
+        detail[run_id] = dict(arm=arm, manifest_sha256=sha(run / 'manifest.json'), ok_turns=len(good), turns=len(results),
+                              all_turns_ok_and_complete=run_complete,
                               observed_role_models=observed, role_model_check=checks,
-                              observed_tools=sorted(tools.get(arm, ())), image_ids=turn_image_ids(run),
-                              reviewer_smoke_turns=proven)
-    # same tools in every arm; arm 3 differs only by the subagent surface
-    base = [tools[a] for a in (1, 2) if a in tools]
-    same_tools = bool(base) and 3 in tools and all(b == base[0] for b in base) and \
-        tools[3] - set(launch.SUBAGENT_TOOLS) == base[0] and set(launch.SUBAGENT_TOOLS) <= tools[3]
-    flags['isolation_verified'] = bool(run_ids) and selftests_ok and same_tools
+                              observed_tools=sorted(observed_tools), tools_equal_arm_allow_list=observed_tools == expected_tools,
+                              image_ids=image_ids, image_matches_runner=image_match, reviewer_smoke_turns=proven)
+    flags['isolation_verified'] = bool(run_ids) and selftests_ok and tools_ok and bool(arms & {1, 2}) and 3 in arms
     flags['hook_enforcement_verified'] = hooks_ok
     flags['oauth_token_source_verified'] = bool(run_ids) and token_ok
     flags['cache_observation_verified'] = cache_seen
@@ -217,6 +226,8 @@ def smoke_evidence(runs, run_ids):
     # reviewer and collection of its usage under the reviewer role), not with the PM's usage alone
     flags['usage_collector_verified'] = bool(run_ids) and all_ok_complete and bool(reviewer_turns)
     flags['role_models_verified'] = bool(run_ids) and roles_ok and 3 in arms and bool(arms & {1, 2})
+    if not images_ok:                                   # evidence from another image proves nothing about this one
+        flags = {k: False for k in flags}
     return flags, actual, detail
 
 
@@ -230,13 +241,14 @@ def reviewer_smoke_turn(result):
 
 
 def turn_image_ids(run):
-    """Image ids the run's turns actually ran on (container-inspect.json of each turn; None where unreadable)."""
+    """Image ids the run's turns actually ran on (container-inspect.json of every turn that has a result; None where it
+    is missing or unreadable, so an unknown image never matches)."""
     ids = set()
-    for path in sorted(Path(run).glob('turns/*/container-inspect.json')):
+    for result in sorted(Path(run).glob('turns/*/result.json')):
         try:
-            data = json.loads(path.read_text())
+            data = json.loads((result.parent / 'container-inspect.json').read_text())
             ids.add(data[0].get('Image') if isinstance(data, list) and data else None)
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, KeyError):
             ids.add(None)
     return sorted(ids, key=str)
 
@@ -289,14 +301,15 @@ def replace_blockers(previous, frozen, digest, found, listing=None):
     return failures
 
 
-def experiment_started(root=None, runs=None):
+def experiment_started(root=None):
     """Evidence that a measured run (claude-armA-coreNN) has started, read from what start_cycle.py itself uses: each
     run's record (docs/experiments/<arm>/core<N>/run.json status), its run directory (.runs/<run id>), the cycle table
-    (docs/results/cycles.json status) and run commits ('experiment: <run id> ...'). Empty list = nothing has started.
-    A record that cannot be read counts as started (unknown is never "not started")."""
+    (docs/results/cycles.json status) and run commits ('experiment: <run id> ...') on every local branch. The run
+    directories are always the measured runs' own folder <root>/.runs (never a path given on the command line). Empty
+    list = nothing has started. A record that cannot be read counts as started (unknown is never "not started")."""
     import start_cycle                                  # run ids of a cycle (start_cycle.run_plan): one naming source
     root = Path(root or ROOT)
-    runs = Path(runs or root / '.runs')
+    runs = root / '.runs'
     found = []
     for cycle in range(1, 11):
         for arm in (1, 2, 3):
@@ -316,7 +329,7 @@ def experiment_started(root=None, runs=None):
         found += ['cycle %s: status %s' % (c.get('cycle'), c.get('status')) for c in cycles if c.get('status') != 'NOT_STARTED']
     except (OSError, ValueError, AttributeError) as exc:
         found.append('cycles.json unreadable (%s)' % exc)
-    done = subprocess.run(['git', '-C', str(root), 'log', '--format=%s'], capture_output=True, text=True)
+    done = subprocess.run(['git', '-C', str(root), 'log', '--branches', '--format=%s'], capture_output=True, text=True)
     if done.returncode:
         found.append('git log unreadable: ' + done.stderr.strip()[-200:])
     else:
@@ -324,31 +337,73 @@ def experiment_started(root=None, runs=None):
     return found
 
 
-def supersede_record(output, reason, now, frozen):
-    """Archive the readiness being superseded and its frozen-inputs.json next to them (renamed, never deleted) and
-    describe the supersession for the new readiness."""
+# The supersede path is for changes of this arm's own runner, scripts, image and records only: a changed shared input
+# (contract documents, evaluator, fixtures, measurement, recording) is a protocol change (spec 2).
+SUPERSEDE_ALLOWED_PREFIX = 'claude/'
+
+
+def supersede_plan(output, reason, now, frozen):
+    """Everything the supersession needs, checked before any file is touched: the archive names are free, the frozen
+    inputs listing of the freeze being replaced is readable, and only inputs under SUPERSEDE_ALLOWED_PREFIX changed.
+    Raises ValueError naming the refusal. Returns (record for the new readiness, [(path, archive path)])."""
     previous = json.loads(output.read_text())
     listing = output.with_name('frozen-inputs.json')
     try:
         old = json.loads(listing.read_text())
-    except (OSError, ValueError):
-        old = None
+    except (OSError, ValueError) as exc:
+        raise ValueError('the frozen inputs of the freeze being replaced (%s) cannot be read (%s); the changed inputs '
+                         'cannot be established' % (listing, exc))
+    if not isinstance(old, dict):
+        raise ValueError('%s is not a frozen inputs listing' % listing)
+    changed = sorted(k for k in old.keys() | frozen.keys() if old.get(k) != frozen.get(k))
+    shared = [k for k in changed if not k.startswith(SUPERSEDE_ALLOWED_PREFIX)]
+    if shared:
+        raise ValueError('shared inputs changed since the freeze (%s): the contract, evaluator and shared fixtures do not '
+                         'change after a freeze — that is a protocol version change, not a supersession' % ', '.join(shared[:20]))
     stamp = now.replace(':', '-')
-    archived = {}
+    moves, archived = [], {}
     for path, name in ((output, 'readiness.superseded-%s.json' % stamp), (listing, 'frozen-inputs.superseded-%s.json' % stamp)):
-        if path.exists():
-            digest = sha(path)
-            target = path.with_name(name)
-            if target.exists():
-                raise ValueError('archive %s already exists' % target)
-            path.rename(target)
-            archived[path.name] = {'archived_as': name, 'sha256': digest}
-    return {'reason': reason, 'at': now, 'previous_contract_sha256': previous.get('contract_sha256'),
-            'previous_image_digests': previous.get('image_digests'), 'previous_frozen_at': previous.get('frozen_at'),
-            'archived': archived, 'pilot_passed_reset': True,
-            'changed_inputs': sorted(k for k in old.keys() | frozen.keys() if old.get(k) != frozen.get(k))
-            if isinstance(old, dict) else None,
-            'rule': 'replaced before any measured run started (freeze_readiness.experiment_started was empty)'}
+        target = path.with_name(name)
+        if target.exists():
+            raise ValueError('archive %s already exists' % target)
+        moves.append((path, target))
+        archived[path.name] = {'archived_as': name, 'sha256': sha(path)}
+    record = {'reason': reason, 'at': now, 'previous_contract_sha256': previous.get('contract_sha256'),
+              'previous_image_digests': previous.get('image_digests'), 'previous_frozen_at': previous.get('frozen_at'),
+              'archived': archived, 'pilot_passed_reset': True, 'changed_inputs': changed,
+              'rule': 'replaced before any measured run started (freeze_readiness.experiment_started was empty); only '
+                      'inputs under %s changed' % SUPERSEDE_ALLOWED_PREFIX}
+    return record, moves
+
+
+def write_freeze(output, readiness, frozen, moves):
+    """Write the new readiness.json and frozen-inputs.json atomically: both are written under temporary names first,
+    then the files being replaced are archived (moves), then the new files take their place. If anything fails after an
+    archive rename, the archived files are put back, so the default location never ends up without a freeze."""
+    listing = output.with_name('frozen-inputs.json')
+    staged = []
+    try:
+        for path, text in ((output, json.dumps(readiness, indent=2, ensure_ascii=False) + '\n'),
+                           (listing, json.dumps(frozen, indent=2) + '\n')):
+            tmp = path.with_name('.%s.tmp-%d' % (path.name, os.getpid()))
+            tmp.write_text(text)
+            staged.append((tmp, path))
+        done = []
+        try:
+            for path, target in moves:
+                path.rename(target)
+                done.append((path, target))
+            for tmp, path in staged:
+                tmp.replace(path)
+        except OSError:
+            for path, target in reversed(done):
+                if not path.exists():
+                    target.rename(path)
+            raise
+    finally:
+        for tmp, _ in staged:
+            if tmp.exists():
+                tmp.unlink()
 
 
 def attested(path):
@@ -397,7 +452,7 @@ def main():
             p.error('--supersede-before-runs resets pilot_passed; the pilot is run again under the new freeze (no --pilot-run)')
         if not a.output.exists():
             p.error('nothing to supersede: %s does not exist' % a.output)
-        started = experiment_started(runs=a.runs)
+        started = experiment_started()
         if started:
             p.error('a measured run has started (%s): the freeze can no longer be superseded; a change requires a protocol '
                     'version change and a re-run of every arm' % '; '.join(started[:10]))
@@ -411,14 +466,18 @@ def main():
     found, missing = images()
     if missing:
         p.error('images not present locally (pull/build first): ' + ', '.join(missing))
-    flags, actual, detail = smoke_evidence(a.runs, a.smoke_run)
+    runner = found['payment-claude-runner:' + launch.CLI_VERSION]
+    flags, actual, detail = smoke_evidence(a.runs, a.smoke_run, runner)
+    mismatched = {r: d.get('image_ids') for r, d in detail.items() if d.get('image_matches_runner') is False}
+    if mismatched:
+        print('smoke runs not on the runner image being frozen (%s); every smoke-derived flag is false: %s'
+              % (runner, json.dumps(mismatched)), file=sys.stderr)
     smoked = {detail[r]['arm'] for r in detail}
     if smoked != {1, 2, 3} or set(actual) != {'1', '2', '3'}:
         p.error('smoke runs of all three arms with their agreed models are required (arms smoked: %s, verified actual '
                 'models: %s)' % (sorted(smoked), sorted(actual)))
     frozen = inventory()
     digest = hashlib.sha256(json.dumps(frozen, sort_keys=True).encode()).hexdigest()
-    runner = found['payment-claude-runner:' + launch.CLI_VERSION]
     if a.output.exists() and a.replace:
         changed = replace_blockers(json.loads(a.output.read_text()), frozen, digest, found,
                                    a.output.with_name('frozen-inputs.json'))
@@ -438,12 +497,15 @@ def main():
         **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE}, pilot_passed=pilot_passed,
         evidence=dict(smoke_runs=detail, attested=attest_evidence, pilot=pilot_detail), frozen_at=now,
         note='flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed')
+    moves = []
     if a.supersede_before_runs:
-        readiness['supersedes'] = supersede_record(a.output, a.reason.strip(), now, frozen)
+        try:
+            readiness['supersedes'], moves = supersede_plan(a.output, a.reason.strip(), now, frozen)
+        except ValueError as exc:
+            p.error(str(exc))
     elif a.output.exists():
-        a.output.rename(a.output.with_name('readiness.superseded-%s.json' % now.replace(':', '-')))
-    a.output.write_text(json.dumps(readiness, indent=2, ensure_ascii=False) + '\n')
-    a.output.with_name('frozen-inputs.json').write_text(json.dumps(frozen, indent=2) + '\n')
+        moves = [(a.output, a.output.with_name('readiness.superseded-%s.json' % now.replace(':', '-')))]
+    write_freeze(a.output, readiness, frozen, moves)
     print(a.output)
     return 0
 
