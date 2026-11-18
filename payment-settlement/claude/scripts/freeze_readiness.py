@@ -24,7 +24,7 @@ import launch
 import prepare
 
 PROTOCOL = 'payment-settlement-v3-claude'
-LIMITS = dict(token_limit=20000000, time_limit_seconds=28800, feedback_limit=30)
+LIMITS = dict(token_limit=150000000, time_limit_seconds=28800, feedback_limit=30)
 # Inputs whose bytes define the protocol (contract, evaluator, fixtures, prompts, harness, runner, compose).
 FROZEN = ('docs', 'evaluation', 'infra', 'measurement', 'recording', 'claude/prompts', 'claude/harness-source',
           'claude/runner', 'claude/scripts', 'claude/template', 'claude/compose.yaml')

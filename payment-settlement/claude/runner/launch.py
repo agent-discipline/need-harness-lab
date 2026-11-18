@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import uuid
 
@@ -71,7 +72,10 @@ def allowed_tools(manifest):
 # input + cache read + cache creation + output. Feedback = evaluator feedback deliveries only (decision 2026-11-17):
 # successful turns declared 'feedback' (or a recovery of one). Arm 3 answer turns (the user proxy's answers delivered to
 # the PM) are counted separately and never capped. Whichever cap is reached first ends the run as CENSORED_* (censored.json).
-LIMITS = {'token_limit': 20000000, 'time_limit_seconds': 28800, 'feedback_limit': 30}
+# token_limit: safety cap against runaway use (decision 2026-11-18 after pilot 03, approval 2): tokens are compared
+# between arms as an outcome, the cap only stops a run that runs away. Enforced between calls (ledger) and during a
+# turn (estimate from the turn's stream: TurnBudgetMonitor).
+LIMITS = {'token_limit': 150000000, 'time_limit_seconds': 28800, 'feedback_limit': 30}
 # Every turn records its kind in invocation.json (turn_kind). The first turn is 'initial'; a --resume turn must declare
 # one of TURN_KINDS: 'feedback' (evaluator judging result, prompts/feedback.md), 'answer' (arm 3: proxy answers to the
 # PM's questions, consults/), 'recovery' (continues the directly preceding turn that did not end ok; it counts as the
@@ -1410,6 +1414,108 @@ def call_timeout(requested, state):
     (rounded up, so a call stopped at that point has reached the cap)."""
     return max(1, min(requested, math.ceil(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
 
+BUDGET_CHECK_SECONDS = 30                             # how often a running turn's token estimate is recomputed
+BUDGET_ESTIMATE_FAILURES = 3                          # consecutive failed estimates that stop the turn (never unlimited)
+ESTIMATE_METHOD = ('confirmed run ledger before the turn (request-level, all roles) + the turn\'s stream-json so far '
+                   '(assistant messages of the PM and its subagents, deduplicated by message id, the four counters) + '
+                   'arm 3: results of reviewer calls finished this turn (reviewer volume raw/<session>.json usage). Not '
+                   'seen: requests whose messages are not (yet) in the stream, reviewer calls still running. A lower '
+                   'bound; the confirmed numbers come from the ledger after the turn.')
+
+class StreamEstimate:
+    """Incremental token count of a turn's stream-json while it is being written: every assistant message (the PM's
+    and its subagents') once, by message id, with its four usage counters. Lines not yet complete are left for the
+    next read."""
+    def __init__(self, path):
+        self.path, self.offset, self.messages = Path(path), 0, {}
+
+    def update(self):
+        try:
+            with self.path.open('rb') as stream:
+                stream.seek(self.offset)
+                data = stream.read()
+        except FileNotFoundError:
+            return self.total()
+        end = data.rfind(b'\n') + 1
+        for line in data[:end].splitlines():
+            try:
+                event = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if isinstance(event, dict) and event.get('type') == 'assistant':
+                message = event.get('message') if isinstance(event.get('message'), dict) else {}
+                usage = message.get('usage') if isinstance(message.get('usage'), dict) else {}
+                key = message.get('id') or ('line', self.offset, len(self.messages))
+                self.messages[key] = sum(usage.get(k) for k in USAGE_KEYS if isinstance(usage.get(k), int))
+        self.offset += end
+        return self.total()
+
+    def total(self):
+        return sum(self.messages.values())
+
+def reviewer_estimate(raw_dir, known_sessions):
+    """Tokens of reviewer calls finished but not yet in the ledger: raw/<session>.json usage of sessions not
+    recovered by an earlier turn."""
+    total, sessions = 0, 0
+    for path in sorted(Path(raw_dir).glob('*.json')):
+        if path.stem in known_sessions:
+            continue
+        try:
+            usage = json.loads(path.read_text()).get('usage') or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        total += sum(usage.get(k) for k in USAGE_KEYS if isinstance(usage.get(k), int))
+        sessions += 1
+    return total, sessions
+
+class TurnBudgetMonitor(threading.Thread):
+    """Runs beside a turn: every BUDGET_CHECK_SECONDS it estimates the run's tokens so far (ESTIMATE_METHOD) and stops
+    the container once the estimate reaches the token cap — or after BUDGET_ESTIMATE_FAILURES consecutive estimates
+    that could not be made (the cap never silently stops applying). The decision and its basis are kept in .stop."""
+    def __init__(self, name, output, dest, base, arm3, limit=None, interval=None):
+        super().__init__(daemon=True)
+        self.name_, self.output, self.dest, self.base, self.arm3 = name, Path(output), Path(dest), base, arm3
+        self.limit = LIMITS['token_limit'] if limit is None else limit
+        self.interval = BUDGET_CHECK_SECONDS if interval is None else interval
+        self.stream = StreamEstimate(self.output / 'stdout.jsonl')
+        self.known = {p.stem for p in self.dest.glob('turns/*/reviewer-raw/*.json')}
+        self.done, self.stop, self.last, self.failures = threading.Event(), None, None, 0
+
+    def estimate(self):
+        stream = self.stream.update()
+        reviewer, sessions = 0, 0
+        if self.arm3:
+            probe = Path(tempfile.mkdtemp(prefix='.budget-reviewer-raw-', dir=self.output))
+            try:
+                copied = subprocess.run(['docker', 'cp', self.name_ + ':' + REVIEWER_DST + '/raw/.', str(probe)],
+                                        capture_output=True, check=False)
+                if copied.returncode == 0:
+                    reviewer, sessions = reviewer_estimate(probe, self.known)
+            finally:
+                shutil.rmtree(probe, ignore_errors=True)
+        return {'tokens': self.base + stream + reviewer, 'confirmed_before_turn': self.base, 'turn_stream': stream,
+                'stream_messages': len(self.stream.messages), 'reviewer_finished_calls': reviewer,
+                'reviewer_sessions': sessions, 'limit': self.limit, 'at': utc(), 'method': ESTIMATE_METHOD}
+
+    def run(self):
+        while not self.done.wait(self.interval):
+            try:
+                self.last = self.estimate()
+                self.failures = 0
+            except Exception as exc:                    # an estimate that cannot be made is counted, never ignored
+                self.failures += 1
+                self.last = {'error': str(exc)[:300], 'consecutive_failures': self.failures, 'at': utc()}
+                if self.failures < BUDGET_ESTIMATE_FAILURES:
+                    continue
+                self.stop = dict(self.last, reason='token estimate unavailable %d times in a row' % self.failures,
+                                 limit=self.limit, method=ESTIMATE_METHOD)
+            else:
+                if self.last['tokens'] < self.limit:
+                    continue
+                self.stop = dict(self.last, reason='estimated run tokens reached the token cap during the turn')
+            subprocess.run(['docker', 'stop', '--time', '5', self.name_], capture_output=True, check=False)
+            return
+
 def stops_at_run_cap(requested, state):
     """Whether the call's timeout is the run's remaining time (not a smaller requested limit)."""
     return call_timeout(requested, state) < requested
@@ -1528,14 +1634,16 @@ def turn(args):
         'effective_timeout_seconds': timeout, 'limits_before_call': limits})
     result = None
     failure = None
-    cap_stop = False
+    cap_stop, budget_stop = False, None
     try:
         created = subprocess.run(command, capture_output=True, check=False)
         (output / 'create.stdout').write_bytes(created.stdout)
         (output / 'create.stderr').write_bytes(created.stderr)
         if created.returncode:
             raise RuntimeError('docker create failed; see preserved stderr')
+        monitor = TurnBudgetMonitor(name, output, dest, limits['used']['token_limit'], manifest.get('arm') == 3)
         with (output / 'stdout.jsonl').open('xb') as stdout, (output / 'stderr.txt').open('xb') as stderr:
+            monitor.start()
             try:
                 proc = subprocess.run(['docker', 'start', '--attach', '--interactive', name], input=prompt,
                                       stdout=stdout, stderr=stderr, check=False, timeout=timeout)
@@ -1543,6 +1651,10 @@ def turn(args):
                 subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
                 proc = SimpleNamespace(returncode=124)
                 cap_stop = stops_at_run_cap(args.timeout_seconds, limits)
+            finally:
+                monitor.done.set()
+                monitor.join(timeout=BUDGET_CHECK_SECONDS + 60)
+                budget_stop = monitor.stop
         inspected = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False)
         (output / 'container-inspect.json').write_bytes(redact_inspect(inspected.stdout))
         copied = subprocess.run(['docker', 'cp', name + ':' + CONFIG_DST + '/projects', str(output / 'projects')],
@@ -1561,7 +1673,8 @@ def turn(args):
                 stream.write(json.dumps(event, ensure_ascii=False) + '\n')
         result.update({'finished_at': utc(), 'role_files': write_role_files(output, events),
                        'config_volume': volume_listing(manifest),
-                       'stopped_at_run_time_cap': cap_stop, 'timed_out': proc.returncode == 124})
+                       'stopped_at_run_time_cap': cap_stop, 'timed_out': proc.returncode == 124,
+                       'stopped_at_token_cap_estimate': budget_stop, 'token_estimate_last': monitor.last})
         result['cli_status'] = 'ok' if proc.returncode == 0 else 'failed'
         result['status'] = 'collected'                 # finalized in the finally block after the secret scan
         write_json(output / 'result.json', result)
@@ -1600,12 +1713,17 @@ def turn(args):
         try:
             finalize_result(output, result, final, error, hits)
             write_ledger(dest)
-            record_overshoot(dest, 'turn')
-            if cap_stop and not (dest / 'censored.json').exists():
-                # stopped at the run's 8-hour cap: the run has reached it even if collection was quicker than a second
+            if (budget_stop or cap_stop) and not (dest / 'censored.json').exists():
+                # the turn was stopped by the runner during the call (token estimate or the 8-hour cap): the run is
+                # capped whatever the confirmed numbers say; the record names the stop and, for tokens, its estimate
                 state = limit_state(dest)
-                state['reached'] = ['CENSORED_TIME']
+                state['reached'] = ['CENSORED_BUDGET'] if budget_stop else ['CENSORED_TIME']
+                state['stopped_during_call'] = {'cap': 'token_limit' if budget_stop else 'time_limit_seconds',
+                                                'basis': budget_stop if budget_stop else 'remaining run time elapsed',
+                                                'confirmed_usage': 'from the ledger after the turn (used above)'}
                 censor(dest, state, 'after call', 'turn')
+            else:
+                record_overshoot(dest, 'turn')
         finally:
             if (hits or scan_error) and in_flight is None:
                 raise RuntimeError('credential leaked into preserved files or the scan failed; see result.json / SECRET-LEAK.txt')

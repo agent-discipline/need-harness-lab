@@ -9,6 +9,7 @@ from datetime import timedelta
 import io
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -1161,7 +1162,7 @@ class RunLimitTest(unittest.TestCase):
     def test_token_cap_counts_every_role_and_censors_before_the_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dest = self.make_run(root, tokens_per_turn=15_000_000)
+            dest = self.make_run(root, tokens_per_turn=launch.LIMITS['token_limit'] - 5_000_000)
             consult = dest / 'consults/0001'                         # a user-proxy call pushes the run over the cap
             consult.mkdir(parents=True)
             (consult / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'px', 'model': 'x', 'role': 'user-proxy', 'turn': 'p',
@@ -1175,7 +1176,7 @@ class RunLimitTest(unittest.TestCase):
             run.assert_not_called()
             record = json.loads((dest / 'censored.json').read_text())
             self.assertEqual(record['status'], 'CENSORED_BUDGET')
-            self.assertEqual(record['first']['used']['token_limit'], 20_000_000)
+            self.assertEqual(record['first']['used']['token_limit'], launch.LIMITS['token_limit'])
             self.assertEqual(sorted(p.name for p in (dest / 'turns').iterdir()), ['0001'])   # artifacts kept, no new turn
             error, _ = self.call(root)
             self.assertIn('no further paid call', str(error))
@@ -1220,6 +1221,111 @@ class RunLimitTest(unittest.TestCase):
             self.assertEqual((result['stopped_at_run_time_cap'], result['timed_out'], result['status']), (True, True, 'failed'))
             censored = json.loads((dest / 'censored.json').read_text())
             self.assertEqual((censored['status'], censored['first']['when'], censored['first']['call']), ('CENSORED_TIME', 'after call', 'turn'))
+
+    @staticmethod
+    def assistant(mid, tokens, parent=None):
+        return json.dumps({'type': 'assistant', 'parent_tool_use_id': parent, 'message': {'id': mid, 'usage': {
+            'input_tokens': tokens, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}}}) + '\n'
+
+    def test_stream_estimate_counts_each_message_once_and_waits_for_whole_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'stdout.jsonl'
+            est = launch.StreamEstimate(path)
+            self.assertEqual(est.update(), 0)                                   # no file yet
+            path.write_text(self.assistant('m1', 10) + self.assistant('m1', 10) + self.assistant('s1', 5, parent='toolu_1'))
+            self.assertEqual(est.update(), 15)                                  # repeated lines of one message, subagent too
+            with path.open('a') as stream:
+                stream.write(self.assistant('m2', 7)[:-20])                      # a line still being written
+            self.assertEqual(est.update(), 15)
+            with path.open('a') as stream:
+                stream.write(self.assistant('m2', 7)[-20:])
+            self.assertEqual(est.update(), 22)
+
+    def test_reviewer_estimate_counts_only_calls_not_yet_in_the_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            for sid, n in (('old', 100), ('new', 7)):
+                (raw / (sid + '.json')).write_text(json.dumps({'usage': {k: n for k in launch.USAGE_KEYS}}))
+            self.assertEqual(launch.reviewer_estimate(raw, {'old'}), (28, 1))
+
+    def run_monitor(self, lines, limit, failing=False, arm3=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'out'
+            out.mkdir()
+            (out / 'stdout.jsonl').write_text(''.join(lines))
+            stops = []
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'stop']:
+                    stops.append(cmd)
+                return SimpleNamespace(returncode=1, stdout=b'', stderr=b'')
+            monitor = launch.TurnBudgetMonitor('c', out, Path(tmp), base=100, arm3=arm3, limit=limit, interval=0.02)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run):
+                if failing:
+                    with patch.object(launch.StreamEstimate, 'update', side_effect=OSError('unreadable')):
+                        monitor.start()
+                        monitor.join(5)
+                else:
+                    monitor.start()
+                    time.sleep(0.3)
+                    monitor.done.set()
+                    monitor.join(5)
+            return monitor, stops
+
+    def test_turn_budget_monitor_stops_at_the_cap_and_only_then(self):
+        monitor, stops = self.run_monitor([self.assistant('m1', 900)], limit=1000)
+        self.assertEqual(len(stops), 1)                                         # 100 confirmed + 900 in the stream
+        self.assertEqual((monitor.stop['tokens'], monitor.stop['confirmed_before_turn'], monitor.stop['turn_stream']), (1000, 100, 900))
+        self.assertIn('estimated run tokens reached the token cap', monitor.stop['reason'])
+        self.assertIn('lower bound', monitor.stop['method'])
+        monitor, stops = self.run_monitor([self.assistant('m1', 899)], limit=1000)
+        self.assertEqual((stops, monitor.stop), ([], None))                     # below the cap: the turn goes on
+        self.assertEqual(monitor.last['tokens'], 999)
+        monitor, stops = self.run_monitor([], limit=10 ** 12, failing=True)     # estimates fail: stopped, never unlimited
+        self.assertEqual(len(stops), 1)
+        self.assertIn('unavailable %d times' % launch.BUDGET_ESTIMATE_FAILURES, monitor.stop['reason'])
+        monitor, stops = self.run_monitor([self.assistant('m1', 900)], limit=1000, arm3=True)   # reviewer copy failed:
+        self.assertEqual(len(stops), 1)                                         # still the stream's lower bound
+        self.assertEqual(monitor.stop['reviewer_finished_calls'], 0)
+
+    def test_a_turn_stopped_on_the_token_estimate_is_collected_and_the_run_censored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, tokens_per_turn=1000)
+            stopped = threading.Event()
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    kw['stdout'].write(self.assistant('m1', launch.LIMITS['token_limit']).encode())
+                    kw['stdout'].flush()
+                    stopped.wait(10)                                            # the call runs until the runner stops it
+                    return SimpleNamespace(returncode=143)
+                if cmd[:2] == ['docker', 'stop']:
+                    stopped.set()
+                if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.claude/projects'):
+                    target = Path(cmd[-1]) / '-workspace'
+                    target.mkdir(parents=True)
+                    (target / 's.jsonl').write_text(json.dumps({'type': 'assistant', 'requestId': 'req-x', 'sessionId': manifest()['session_id'],
+                                                                'message': {'model': 'm', 'usage': USAGE}}) + '\n')
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=28800, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), patch.object(launch, 'BUDGET_CHECK_SECONDS', 0.05), \
+                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                launch.turn(args)
+            self.assertTrue(stopped.is_set())
+            result = json.loads((dest / 'turns/0002/result.json').read_text())
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['stopped_at_token_cap_estimate']['turn_stream'], launch.LIMITS['token_limit'])
+            self.assertEqual(result['event_count'], 1)                          # collected like any other turn
+            censored = json.loads((dest / 'censored.json').read_text())
+            self.assertEqual((censored['status'], censored['first']['when'], censored['first']['call']), ('CENSORED_BUDGET', 'after call', 'turn'))
+            stop = censored['first']['stopped_during_call']
+            self.assertEqual(stop['cap'], 'token_limit')
+            self.assertEqual(stop['basis']['tokens'], 1000 + launch.LIMITS['token_limit'])   # estimate, with its method
+            self.assertIn('method', stop['basis'])
+            self.assertLess(censored['first']['used']['token_limit'], launch.LIMITS['token_limit'])   # confirmed: the ledger
+            error, _ = self.call(root, kind='recovery')
+            self.assertIn('no further paid call', str(error))
 
     def test_remaining_time_is_recomputed_after_the_arm3_selftest(self):
         for selftest_seconds, expect_call in ((90, True), (200, False)):
@@ -1311,7 +1417,7 @@ class RunLimitTest(unittest.TestCase):
     def test_overshoot_during_a_call_is_recorded(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            dest = self.make_run(root, tokens_per_turn=20_000_123)
+            dest = self.make_run(root, tokens_per_turn=launch.LIMITS['token_limit'] + 123)
             record = launch.record_overshoot(dest, 'turn')
             self.assertEqual(record['status'], 'CENSORED_BUDGET')
             self.assertEqual(record['first']['overshoot'], {'token_limit': 123})
@@ -1587,7 +1693,7 @@ class CloseoutRunnerTest(unittest.TestCase):
 
     def test_cap_record_names_the_call_kind_before_and_after(self):           # 10.2
         with tempfile.TemporaryDirectory() as tmp:
-            dest = RunLimitTest().make_run(Path(tmp), tokens_per_turn=20_000_000)
+            dest = RunLimitTest().make_run(Path(tmp), tokens_per_turn=launch.LIMITS['token_limit'])
             with self.assertRaises(RuntimeError):
                 launch.limit_gate(dest, next_is_feedback=False, call='user-proxy')
             first = json.loads((dest / 'censored.json').read_text())['first']

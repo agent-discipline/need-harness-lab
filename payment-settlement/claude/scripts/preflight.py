@@ -16,7 +16,7 @@ FLAGS = ("isolation_verified", "usage_collector_verified", "harness_adapter_veri
 AUTH = ("subscription-oauth-token",)
 # Agreed protocol v3-claude (2026-11-17): a ledger or readiness from another protocol or with other limits never passes.
 PROTOCOL = "payment-settlement-v3-claude"
-LIMITS = {"token_limit": 20000000, "time_limit_seconds": 28800, "feedback_limit": 30}
+LIMITS = {"token_limit": 150000000, "time_limit_seconds": 28800, "feedback_limit": 30}
 # Two gates in protocol order (freeze -> pilot -> cycles): starting the pilot cannot require the pilot's own result;
 # starting a measured cycle requires everything. There is no other stage and no way to waive any other flag.
 STAGE_WAIVED = {"pilot": ("pilot_passed",), "cycle": ()}
