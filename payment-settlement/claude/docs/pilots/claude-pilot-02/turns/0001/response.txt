@@ -1,0 +1,75 @@
+구현 전 인터뷰입니다. 아래 질문에 답해 주시면 그 답으로 `requirement-spec.md`를 작성해 합의를 요청하겠습니다. 아직 repo는 건드리지 않았습니다.
+
+## 확인한 사실
+
+- starter에는 `GET /health`만 있고, `Dockerfile`은 DB가 없는 빌드 단계에서 root로 `./gradlew clean test bootJar`를 실행합니다.
+- 이 컨테이너에는 Docker·psql·k6·codex가 없습니다. `db:5432`와 `bank:8081`은 접속되고 Maven Central도 열려 있습니다.
+- 환경변수에 `DB_URL`·`BANK_BASE_URL`은 있지만 `DB_USER`·`DB_PASSWORD`는 없습니다.
+- PostgreSQL 16 임베디드 바이너리(zonky 16.16.0)가 이 컨테이너에서 non-root로 기동됩니다. `/tmp`에서 확인 후 삭제했습니다.
+- `infra/README.md`는 repo에 없어 `FIXTURE.md`를 은행 계약 기준으로 봅니다.
+- 이미 지정된 것으로 보고 다시 묻지 않는 항목: 자율성 auto, 워커 Opus·high, push/PR/이슈 금지, fixture·평가기·자원 한도 불변.
+
+## A. 환경·검증
+
+1. **DB 계정**: `application.yml`의 starter 기본값(`lab` / 기본 비밀번호)을 그대로 써도 됩니까?
+2. **공유 db·bank 쓰기**: 이 컨테이너의 `db`·`bank`에 다음을 해도 됩니까? 초기화할 방법이 없어 개별 승인이 필요합니다.
+   - (a) users/agencies 스키마의 읽기 전용 조회
+   - (b) Flyway 마이그레이션 적용
+   - (c) 최종 스모크용 소량 결제·정산(잔액과 은행 journal이 바뀜)
+   - 권장: 자동 테스트는 임베디드 PG16과 테스트 내 은행 stub으로 격리하고, 공유 인스턴스는 (a)와 최종 스모크 (b)(c)에만 씁니다.
+3. **Dockerfile**: 수정 금지 fixture입니까? 임베디드 PG는 root로 못 뜨므로 Docker 빌드의 `test`에서는 DB 테스트를 돌릴 수 없습니다.
+   - 권장: Dockerfile은 그대로 두고, `test`는 DB 없는 테스트(도메인·web slice·은행 클라이언트), 별도 `integrationTest` 태스크는 동시성·타임아웃·장애·재시작 테스트로 나눕니다.
+   - 대안: 빌드 단계를 non-root로 바꿉니다.
+4. **테스트 의존성**: `io.zonky.test:embedded-postgres`를 testImplementation으로만 추가해도 됩니까?
+5. **성능 SLO**: 50RPS·spike·soak는 여기서 재현할 수 없습니다. 외부 평가기 소관으로 두고, 로컬은 축소 동시성 스모크만 하며 SLO 수치는 "미검증"으로 보고해도 됩니까?
+
+## B. 결제 API
+
+6. **응답 body**: POST의 201/200/202 body를 GET과 같은 7필드로 하고, `paymentId`는 UUID 문자열로 해도 됩니까?
+7. **실패 재전송**: 422 거절이나 409 잔액부족 뒤 같은 키·같은 payload를 다시 보내면 무엇을 반환합니까?
+   - 권장: 같은 status와 같은 `{code,message}`를 다시 반환합니다.
+   - 대안: 200에 `status:FAILED` body를 반환합니다.
+8. **잔액부족 기록**: 잔액부족을 FAILED 결제 행으로 저장해 키를 소비하고 GET으로 조회되게 합니까?
+   - 권장: 예. 400/403/404는 행을 만들지 않고 키도 소비하지 않습니다.
+9. **잔액 hold 방식**: 수락 트랜잭션에서 `users.balance_minor`를 먼저 차감하고 FAILED 확정 시 한 번 복원해도 됩니까? 이 경우 PENDING 동안 잔액이 차감된 상태로 보입니다.
+   - 대안: 성공 확정 때만 잔액을 바꾸고 hold는 별도로 관리합니다(사용자 행 잠금과 합산 필요).
+10. **은행 장애 처리**: 첫 시도의 5xx / timeout-before / timeout-after는 모두 202 PENDING으로 두고, 영속 복구 워커가 같은 은행 키로 fault 헤더 없이 재조회·재전송해 수렴시켜도 됩니까?
+    - FAILED는 은행의 확정 거절(422)에서만 냅니다.
+    - 지속 장애 중에는 시한부 FAILED 없이 PENDING을 유지합니다(상한 있는 backoff, 해제 후 30초 이내 수렴).
+11. **검증 순서와 헤더 오류**: 400 → 403(헤더≠body agencyId) → 404(없는 대행사/사용자) → 409(키 payload 불일치) → 409(잔액부족) → 은행 순서로 해도 됩니까?
+    - `X-Agency-Id` 누락·형식 오류는 401이 아니라 400으로 봅니다.
+    - `Idempotency-Key` 누락·형식 오류도 400이며, 허용 문자는 가시 ASCII 0x21–0x7E의 1..128자(공백 불가)로 봅니다.
+12. **에러 code 문자열**: 평가기가 고정 문자열을 기대합니까? 없으면 아래를 씁니다.
+    - 400 `INVALID_REQUEST`, 403 `AGENCY_FORBIDDEN`
+    - 404 `USER_NOT_FOUND` / `AGENCY_NOT_FOUND` / `PAYMENT_NOT_FOUND` / `SETTLEMENT_NOT_FOUND`
+    - 409 `IDEMPOTENCY_CONFLICT` / `INSUFFICIENT_BALANCE`
+    - 422 `BANK_DECLINED`, 503 `SERVICE_UNAVAILABLE`, 500 `INTERNAL_ERROR`
+13. **`X-Bank-Fault` 활성화**: "실험 프로필"은 무엇으로 켭니까? 평가기가 아무 설정 없이 `java -jar`로 띄운다면 기본값이 켜져 있어야 합니다.
+    - 권장: 프로퍼티 `bank.fault-injection-enabled`(env `BANK_FAULT_INJECTION_ENABLED`)의 기본값을 off로 두고, `SPRING_PROFILES_ACTIVE=experiment`일 때 on으로 합니다.
+    - 켜진 상태에서 허용 외 값은 400, 꺼진 상태에서는 헤더를 무시합니다.
+14. **은행 멱등성 키**: `payment:{agencyId}:{paymentId}` 형식으로 만들어 payments 행에 저장해도 됩니까? 클라이언트 키 원문은 은행 키에 넣지 않습니다.
+15. **`/health`의 DB 장애 응답**: 현재는 예외로 500이 납니다. 어느 쪽입니까?
+    - 권장: 정상은 200 `{"status":"UP","database":true}`, DB 불가는 503 `{"status":"DOWN","database":false}`.
+    - 대안: DB 불가여도 항상 200.
+
+## C. 정산
+
+16. **상태와 응답 코드**: 정산은 한 DB 트랜잭션으로 동기 확정하고 status는 `SUCCEEDED`, 최초 201 / 재전송 200 / 다른 payload 409로 해도 됩니까? 미래 날짜는 빈 집합(0/0) 성공으로 허용합니다.
+17. **원장 모델**: 아래 구성으로 해도 됩니까? 수수료는 수수료 계정에 남깁니다.
+    - 결제별 ledger 행: 사용자 차감 / 대행사 미정산 채무(net) / 수수료, `(payment_id, entry_type)` unique
+    - 정산 시: 미정산 채무를 정산 잔액으로 이동하고 같은 트랜잭션에서 `agencies.settlement_balance_minor += net`
+    - `settlement_items(payment_id)` unique로 결제의 중복 포함 차단
+
+## D. 절차
+
+18. **stakes**: 높음(결제·잔액·멱등성·공개 API)으로 보고, 설계 선검증 + blind 테스트 워커 + 듀얼 리뷰 루프(최대 3회)를 적용해도 됩니까?
+19. **브랜치·커밋**: 로컬 브랜치 `feat/payment-settlement-v1`에서 작업하고 코드와 docs 커밋을 분리해도 됩니까? 하네스 §6에 따라 커밋 메시지에 AI attribution은 넣지 않습니다.
+20. **리팩토링 범위**: 다음으로 한정해도 됩니까?
+    - starter `HealthApi`의 컨트롤러 내 SQL을 레이어 분리(위 15번 외 응답 계약 보존)
+    - 리뷰에서 채택된 구조 개선
+21. **산출 문서**:
+    - 작업 기록: `docs/plans/2026-11-17/payment-settlement-v1/`(spec, log), `docs/measurement-log.md`, `docs/plans/NEXT.md`
+    - 평가자용: `docs/record-level-verification.md`(테이블 의미와 대조 SQL)
+    - CS 이슈 아카이브: 대상 repo(study-note)가 이 컨테이너에 없고 push도 금지이므로 playbook의 보류 경로로 기록합니다.
+
+각 항목에 "권장" 또는 다른 답을 주시면 됩니다.

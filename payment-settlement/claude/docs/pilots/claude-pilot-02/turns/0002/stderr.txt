@@ -1,0 +1,4 @@
+[fable-review-helper] 2026-11-17T19:49:25.222686+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready
+[fable-review-helper] 2026-11-17T19:56:33.791860+00:00 snapshot 517af2ef-ecdf-4e4d-83eb-c5cebbb5f83d files=19 bytes=101523 excluded=[]
+[fable-review-helper] 2026-11-17T20:02:38.953042+00:00 call in /tmp/design-mirror.koNstX exit=0

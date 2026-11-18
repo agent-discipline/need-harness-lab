@@ -1,0 +1,3 @@
+[fable-review-helper] 2026-11-17T20:09:15.008795+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready
+Background tasks still running 10m after the last turn (subagent "T01 scaffold and test infrastructure"); stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.

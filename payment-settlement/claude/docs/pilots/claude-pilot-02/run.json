@@ -1,0 +1,63 @@
+{
+  "run_id": "claude-pilot-02",
+  "pilot": true,
+  "scope": "PILOT_EXCLUDED",
+  "counts_toward_30_runs": false,
+  "arm": 3,
+  "core": 1,
+  "status": "INVALID_INFRA",
+  "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+  "contract_sha256": "7a658125ba1835cf69c286e46543fc14e04b1c600ef6e4180f37d076a3099709",
+  "created_at": "2026-11-17T19:49:03.190415+00:00",
+  "verdict": null,
+  "invalid_infra": {
+    "reason": "실행기가 claude -p의 백그라운드 작업 대기 상한(10분)을 풀지 않아 PM이 백그라운드로 발주한 워커가 강제 종료됨 — 실행 환경 결함, 구현 초기에 중단",
+    "evidence": {
+      "bg-worker-killed/turn-0004-stderr.txt": "1f32f200943c91016987e9e4c082c21237d87a512de12de149a296152615ef6d",
+      "bg-worker-killed/turn-0004-stdout-excerpt.jsonl": "502b0eab0ce2c1d38cadc17bed71b94be113ecfc825fb5b4ce8996d031fa469b"
+    }
+  },
+  "cap_reached": false,
+  "cap": null,
+  "cap_status": null,
+  "cap_when": null,
+  "cap_call": null,
+  "cap_overshoot": null,
+  "finished_at": "2026-11-17T20:24:38.250441+00:00",
+  "evidence_derivation": {
+    "all_acceptance_passed": {
+      "source": "verdict.json",
+      "all_pass": false,
+      "evidence_missing": null
+    },
+    "usage_complete": {
+      "source": ".runs/<run> ledger computed at finish",
+      "incomplete_calls": [],
+      "conflicts": 0
+    },
+    "all_role_models_verified": {
+      "source": "manifest actual_role_models + request events (freeze_readiness.run_role_check)",
+      "checks": {
+        "pm": true,
+        "reviewer": true,
+        "worker": true,
+        "user-proxy": true
+      }
+    },
+    "isolation_verified": {
+      "source": "manifest self-tests + readiness evidence.smoke_runs tool surface (freeze_readiness.run_isolation_check)",
+      "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+      "checks": {
+        "init_selftest_passed": true,
+        "call_selftests_passed": true,
+        "no_selftest_failed_before_a_turn": true,
+        "tools_equal_frozen": true
+      }
+    }
+  },
+  "turns_not_capturable": [],
+  "all_acceptance_passed": false,
+  "usage_complete": true,
+  "all_role_models_verified": true,
+  "isolation_verified": true
+}

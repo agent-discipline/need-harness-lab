@@ -1,0 +1,5 @@
+This is a runner smoke test. Do exactly the following and nothing else.
+1. Use the Bash tool with run_in_background set to true to run this command: sleep 660; echo BG_DONE > /tmp/bg-wait.txt
+2. Immediately after starting it, reply with the single word WAITING and end your turn. Do not wait, poll, or sleep in the foreground.
+3. When you are notified that the background command has finished, read /tmp/bg-wait.txt and reply with exactly: BG_RESULT: <the file's single line>
+Do not create or edit any other file.
