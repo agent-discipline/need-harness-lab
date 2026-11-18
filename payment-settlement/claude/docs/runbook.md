@@ -53,7 +53,7 @@ python3 $L normalize --run-id claude-arm1-core01     # 역할별 파일 → 공�
 
 `launch.py turn`과 `scripts/consult_contract.py`는 유료 호출 직전에 같은 게이트(`limit_gate`)를 지난다. 집계 원천은 run의 단일 장부 `.runs/<run>/ledger.json`(turns의 pm·implementer·worker·reviewer + consults의 user-proxy, 요청 단위 중복 제거)이다.
 
-- 토큰: input + cache read + cache creation + output 합 ≥ 20,000,000 → `CENSORED_BUDGET`
+- 토큰: input + cache read + cache creation + output 합 ≥ **150,000,000**(세 조건 공통, 승인 ② 2026-11-18 — 폭주 방지용 안전 상한. 각 조건이 쓴 토큰은 자르는 값이 아니라 결과 변수로 비교한다) → `CENSORED_BUDGET`. 판단은 두 곳에서 한다: ① 호출 사이 — 위 게이트가 확정 장부로(종전과 같음) ② **턴 도중** — 실행기(`TurnBudgetMonitor`)가 30초마다 "이전 턴까지의 확정 장부 + 이 턴의 실행 중 추정"을 계산해 한도 이상이면 컨테이너를 멈춘다(8시간 상한에서 턴을 멈추는 것과 같은 경로). 실행 중 추정 = 그 턴의 stream-json(`stdout.jsonl`)에 쌓인 PM·서브에이전트 assistant 메시지의 네 카운터(메시지 id로 한 번씩) + 3번은 이번 턴에 끝난 리뷰어 호출의 원시 결과 usage. 멈추면 턴 결과에 `stopped_at_token_cap_estimate`(추정 값·구성·계산 방법), `censored.json`에 `CENSORED_BUDGET`·`after call`·`turn`과 `stopped_during_call`(`cap: token_limit`, `basis` = 추정치와 방법)이 남고, **확정 사용량은 종전대로 턴 뒤 장부**에서 나온다(`used` 칸). 멈춘 턴은 종전처럼 수집·기록되고(실패 턴 — 세션 기록 회수·usage 완전성 판정 같음) 이후 호출은 거부된다. 추정을 연달아 3번 못 하면(파일 읽기 실패 등) 상한이 조용히 풀리지 않도록 그 턴을 멈추고 사유를 남긴다. **추정의 한계**: stream에 아직 안 보이는 요청(쓰는 중인 메시지, 실행 중인 리뷰어 호출, 일부 백그라운드 서브에이전트 요청)은 빠지므로 추정은 실제보다 작다 — 파일럿 03 턴 0004 재생에서 끝 시점 추정 87,099,187 대 확정 89,297,454(−2.46%, 워커 −1.98M·PM −0.22M, 리뷰어 0). 그래서 실제로 멈추는 시점은 한도를 조금 넘긴 뒤일 수 있다.
 - 시간: 첫 턴 시작부터 벽시계 ≥ 28,800초 → `CENSORED_TIME`(턴 하나와 대리 사용자 호출 하나의 timeout도 남은 시간으로 줄인다. 3번은 훅 self-test 뒤 게이트를 다시 지나 남은 시간을 다시 계산한다 — `invocation.json`의 `effective_timeout_seconds`)
 - 피드백: 외부 피드백 = **평가자가 판정 결과를 전하는 턴만**(2026-11-17 결정, `docs/experiment-plan.md:51`). 성공(`status: ok`)한 `feedback` 턴(그 복구 포함) 수가 30이면 31번째 `feedback` 전달은 `CENSORED_TURNS`
 - 질의응답(3번만): 대리 사용자 답을 PM에게 전하는 `answer` 턴은 상한에 넣지 않고 따로 센다(`experiment-plan.md:25` "질문 횟수·답변 길이를 별도 기록"). 대리 사용자 호출(`consult_contract.py`) 자체는 세션 턴이 아니다
@@ -128,6 +128,7 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 - 대상은 턴이 한 번 이상 나간 run이다. 기록 상태가 `NOT_STARTED`·`SETUP_FAILED`이거나 턴 기록이 없으면 거부한다(아래 "사이클 준비 실패 복구").
 - run당 한 번이다. 이미 종료 상태(또는 `finished_at`)가 있으면 거부하고, 정정은 `--supersede --reason`으로만 한다. 이전 `run.json`은 `run.superseded-<시각>.json`으로 옆에 남고 새 기록의 `supersedes`가 그 파일·해시·사유를 가리킨다. 파일럿 재판정도 같은 방법이다.
 - 상한에 호출 전 차단으로 끝난 run은 새 턴 없이 그 시점까지의 기록으로 판정·종료 기록·커밋한다.
+- **결과 요약 `result_summary`**(승인 ② 2026-11-18 — 판정 규칙은 그대로, PASSED = 20개 모두 PASS): 종료 기록이 `run.json`에 덧붙인다 — ① 정확성 C01~C19 통과 수와 `FAIL`/`PARTIAL`·`NOT_RUN` 목록 ② C20 결과와 단계별 수치(판정표의 C20 근거에 있는 `load/summary.json`과 그 옆 단계별 `k6-summary.json`·`result.json`에서: p95·p99(`payment_latency`, 없으면 `http_req_duration`)·dropped·동기 확정 비율(`committed_response`)·예상 못 한 실패율·요청 수·PENDING 수렴·마지막 PENDING 수, `sustainable_rps`) — 파일에 없는 값은 null(k6가 0을 생략한 경우도 0으로 채우지 않음), 근거에 `load/summary.json`이 없거나 형식이 다르면 `available: false`와 사유 ③ 역할별 토큰과 합(캐시 읽기 분리, 장부의 `usage_complete`) ④ 첫 턴 시작~마지막 턴 끝 시간 ⑤ 상한 주석. 부하 뒤 PENDING 수렴 시간(`post-load-pending.txt`)은 요약에 옮기지 않는다(구조화된 파일이 아님 — 판정 폴더 참조).
 
 종료 상태(실제 분기 — `finish_run.terminal`·`cap_annotation`). **통과 여부는 판정표만으로 정하고, 상한 기록은 표시로 붙는다**(명세 §10.2, 2026-11-18 — 이전의 "턴 초과일 때만 완료 + 초과", "호출 전 차단 + 전부 PASS는 거부"를 대체):
 
@@ -165,9 +166,50 @@ python3 payment-settlement/claude/scripts/finish_run.py --run-id <id> --supersed
 
 `scripts/commit_run.py --arm N --core M`(Codex 판의 바이트 복사본 — Codex 쪽이 바뀌면 `verify_setup.py` 패리티가 깨지므로 그때 다시 복사한다)이 상태·문서(`summary.md`·`transcript.md`·`events.jsonl`·`usage-summary.json`·**`issues.md`** — 그 시행에서 발생한 문제와 해결)·이전 시행 커밋 여부를 확인한 뒤 해당 core와 기록만 커밋한다. 원격 push는 하지 않는다. 실험 종료 후 `launch.py discard --run-id <id>`가 run별 Docker volume의 파일 목록(내용 아님)을 `discard-<시각>.json`에 기록한 뒤 volume을 제거한다. `credentials_file_in_volume`이 `null`이면 조회 실패이므로 "없음"으로 읽지 않는다.
 
+## 판정 절차 (Claude 판, 진행자 — 파일럿 03에서 실제로 한 구성)
+
+목적은 판정기가 기계적으로 낸 값과 원자료를 기록 폴더 `judging/`에 남기는 것이다. **통과 여부는 진행자가 정하지 않는다** — 판정표 `verdict.json`은 메인이 원자료를 읽고 쓴다(위 "종료와 커밋" ②).
+
+판정 대상: run의 작업 폴더 `.runs/<id>/workspace`의 커밋된 코드(HEAD와 미커밋 변경 0을 `judging/source-head.txt`에 적는다). PM이 완료를 선언하지 않고 질문·승인 요청으로 끝난 채 상한에 닿았으면 **답하지 않고(대리 사용자 상담 없이) 그 상태로 판정한다**.
+
+**도구의 관계**
+- 공유 판정기는 수정하지 않는다: `payment-settlement/evaluation/acceptance.py`의 `Evaluator`(C01~C12·C15·C16·C18), `evaluation/pilot_faults.py`의 시나리오 논리(C13·C14·C17), `claude/scripts/load_check.py` + `evaluation/k6/workload.js`(C20).
+- **run별 어댑터**(진행자가 그 구현의 스키마에 맞춰 작성, 기록 폴더 `judging/`): `adapter.py`(`evaluation/pilot_adapter.py`와 같은 의미 — snapshot·verify_requests·전수 대조 audit), 공유 `Evaluator`에 어댑터를 물리는 구동 스크립트 `run_http.py`, 장애·시각 시나리오의 스키마 SQL만 바꾼 사본 `run_faults.py`, `pending.sql`. 구현자가 만든 검증 SQL은 쓰지 않고 모든 금융 행과 은행 journal을 직접 읽는다.
+
+**어댑터 규칙**
+1. 어댑터는 사용 전에 **negative control 자체 검증**(`test_adapter.py`, 깨뜨린 데이터를 잡아내는 음성 대조 12종 — 파일럿 03의 구성)을 통과해야 한다. 출력은 `judging/adapter-unittest.txt`.
+2. 구현이 계약과 다르게 저장하는 것을 허용하는 규칙(예: 409 잔액 부족 뒤 원장 0행·은행 기록 없음의 FAILED 행)은 어댑터의 `judging/README.md`에 **명시**한다. 메인은 판정 때 그 목록을 읽고 허용 여부를 판정에 반영한다(진행자가 허용을 판정으로 바꾸지 않는다).
+3. 어댑터·구동 스크립트·자체 검증 출력·명령 로그(`commands.log`: 명령·종료 코드·시각)는 모두 `judging/`에 보관한다.
+
+**판정 stack 세 번(각각 새 volume의 전용 Compose project, 한 번에 하나)** — run의 Compose project와 다른 이름·포트를 쓴다(예: run `payment-claude-pilot-03`이면 `-v1`·`-v2`·`-v3`, 포트 38011~/39011~/40011~):
+
+```bash
+# ARM/CORE는 start_cycle.py와 같은 방식(payment-settlement/claude 기준 .runs/<id>, workspace)
+# v1: HTTP 시나리오 + 전수 대조(C01~C12·C15·C16·C18, C19)
+ARM=.runs/<id> CORE=workspace APP_PORT=38011 DB_PORT=39011 BANK_PORT=40011 \
+  docker compose -p payment-claude-<run>-v1 -f payment-settlement/claude/compose.yaml up -d --build --wait
+python3 <기록 폴더>/judging/run_http.py      # 공유 Evaluator + 이 run의 어댑터(audit 포함), 산출물 judging/v1/
+docker compose -p payment-claude-<run>-v1 -f payment-settlement/claude/compose.yaml down -v
+# v2: 장애·시각(C13·C14·C17) — 같은 방식, 포트 …12, run_faults.py, 산출물 judging/v2/. 시각 fixture를 넣은 DB는 재사용하지 않는다(down -v)
+# v3: 부하(C20) — 같은 방식, 포트 …13, load_check.py, 산출물 judging/v3/(load/<phase>/…, post-load-pending.txt, post-load-audit.json)
+```
+
+- 부하가 걸리는 단계(앱 빌드·기동, k6)는 **다른 실험의 컨테이너가 없을 때** 시작한다(`docker ps`로 확인, 기다리는 동안 2분 간격, 40분 넘으면 메인에 보고). 시작 시·각 stack 시작 전·v3 실행 중 표본·종료 시의 확인 결과를 `commands.log`·`v3/host-samples.txt`에 남긴다. 다른 실험의 리소스는 건드리지 않는다.
+- v3가 끝나면 종료된 k6 컨테이너를 지우고(`docker rm`), 각 stack을 `down -v`, 판정용 이미지(`payment-claude-<run>-v{1,2,3}-app`·`-bank`)를 지운다.
+- 큰 로그는 압축한다(예: `v3/app.log` → `app.log.gz`). 압축한 파일 이름은 관측 메모에도 고친다.
+- 관측 메모 `judging/observations.md`: 시나리오별로 판정기가 낸 `status`와 관측(통과 여부는 쓰지 않음), 그리고 **원자료 위치 표**:
+
+| ID | 판정기가 낸 status | 원자료(기록 폴더 기준) |
+|---|---|---|
+| C01 | PASS (HTTP+DB+BANK) | `judging/v1/acceptance-http.json` cases.C01, requests[0:1] |
+| … | … | … |
+| C20 | `c20_passed: false` | `judging/v3/load/summary.json`, `judging/v3/load/<phase>/…` |
+
+판정표의 C20 근거에는 `judging/v3/load/summary.json`을 넣는다 — 종료 기록이 그 파일에서 단계별 수치를 요약한다(위 `result_summary`).
+
 ## 평가 비용 기록 (진행자·판정 어댑터)
 
-진행자(실험 진행 에이전트, Fable 5.2 `claude-fable-5-2`)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 2,000만 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
+진행자(실험 진행 에이전트, Fable 5.2 `claude-fable-5-2`)와 판정 어댑터의 토큰은 **평가 비용**이고, run이 아니라 **실험 전체 단위 장부** `docs/results/evaluation-cost.jsonl`에 기록한다(2026-11-17 사용자 결정). run의 토큰 상한·조건별 비용·run 장부(`ledger.json`)에는 들어가지 않고, 종료 기록도 평가 비용을 요구하지 않는다(진행자 사용량은 세션이 끝나야 나온다). 진행자 피드백의 토큰을 떼어 실험군에 넣을 방법은 없으므로 결과 표의 한계로 적는다(세 조건이 같은 진행자·같은 방식이라 조건 간 비교는 유지).
 
 기록 주체는 **메인**이다(진행자 에이전트 완료 알림의 usage). 한 줄 = 진행자 세션 1개 또는 어댑터 작성 1건. 어댑터 줄(`judging-adapter`)은 건마다 한 줄이고 `--item`(건을 구분하는 표시 — 예: 대상 run id·어댑터 이름)이 **필수**다(없거나 비어 있으면 거부). 같은 세션이 어댑터를 여러 번 작성했으면 건마다 다른 `--item`으로 한 줄씩 쓴다. 진행자(`conductor`) 줄은 세션당 한 줄이고 `--item`을 받지 않는다. 덧붙이기만 하며(같은 역할·세션·`item`은 두 번 기록되지 않는다, 읽을 수 없는 줄이 있으면 덧붙이지 않고 멈춘다), 맡은 run id를 전부 적는다.
 
@@ -180,6 +222,8 @@ python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role condu
 python3 payment-settlement/claude/scripts/record_evaluation_cost.py --role judging-adapter --session <식별자> --item "<건 표시: 예 claude-arm1-core01 어댑터>" --model <id> \
   --total-tokens <합> --source "<출처>" --run-id <id>
 ```
+
+한 진행자 세션이 여러 run을 맡았으면(예: 파일럿 02·03을 같은 세션이 진행) 한 줄에 `--run-id`를 모두 적는다 — 그 줄은 `per_run_split: "unallocated"`로 남고 run별로 나누지 않는다(같은 역할·세션은 두 번 기록되지 않으므로 run마다 줄을 따로 쓰지 않는다).
 
 줄의 칸: `role`·`session`·`item`(어댑터 건 표시 — 어댑터 줄은 항상 있음, 진행자 줄은 null)·`model`·`usage`(네 카운터, 합계만 있으면 null)·`total_tokens`·`tokens_source`·`run_ids`·`cost_usd`(선택, 0 이상의 유한수)·`includes_judging_adapter`·`recorded_at`. 누락 점검은 결과 정리(task 10)에서 한다: 본 실험 30건과 파일럿의 모든 run id가 어느 한 줄의 `run_ids`에 들어 있어야 하고, 빠진 run은 표에 "평가 비용 미기록"으로 드러난다.
 
