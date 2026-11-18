@@ -31,7 +31,8 @@ launch = consult_contract.launch
 OPUS = 'claude-opus-5-5'
 FABLE = 'claude-fable-5-2'
 PROTOCOL = 'payment-settlement-v3-claude'
-SPEC_LIMITS = {'token_limit': 20_000_000, 'time_limit_seconds': 8 * 3600, 'feedback_limit': 30}
+# Spec 11 승인 ② (2026-11-18): 세 조건 공통 1억 5천만 토큰(캐시 포함); 8시간·판정 피드백 30회 상한은 그대로.
+SPEC_LIMITS = {'token_limit': 150_000_000, 'time_limit_seconds': 8 * 3600, 'feedback_limit': 30}
 TOKEN = 'sk-ant-oat01-SPECINVARIANT-scripts-0123456789'
 PINNED_IMAGE = 'sha256:' + '7' * 64            # differs from the readiness runner digest in ready() on purpose
 RUNNER_IMAGE = 'sha256:' + 'a' * 64            # the runner image being frozen (= ReFreezeRefusesChangedInputs.IMAGES runner)
@@ -75,7 +76,7 @@ def ran_on(runs, run_id, image, turn='0001'):
 
 class LimitsAndProtocol(unittest.TestCase):
     def test_limits_are_the_spec_caps_and_identical_for_every_arm(self):
-        # spec 2: 상한: run당 input+output 2,000만 토큰 · 8시간 · 피드백 30회 / 세 조건의 ... 상한은 같다
+        # spec 11 승인 ②: 토큰 상한 세 조건 공통 1억 5천만(캐시 포함), 8시간·판정 피드백 30회 그대로 / spec 2: 세 조건의 ... 상한은 같다
         self.assertEqual(dict(preflight.LIMITS), SPEC_LIMITS)
         self.assertEqual(dict(freeze_readiness.LIMITS), SPEC_LIMITS)
         for arm in (1, 2, 3):
