@@ -1,0 +1,139 @@
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T17:58:09.073Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T17:58:09.077Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T17:58:12.004Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T17:58:12.028Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T17:58:12.028Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T17:58:12.105Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T17:58:12.106Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2916 ms
+2026-11-18T17:58:12.647Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T17:58:12.849Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@42aa1324
+2026-11-18T17:58:12.852Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T17:58:12.895Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T17:58:12.937Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-11-18T17:58:12.941Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 5 migrations (execution time 00:00.019s)
+2026-11-18T17:58:12.957Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" with baseline ...
+2026-11-18T17:58:13.033Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbBaseline     : Successfully baselined schema with version: 0
+2026-11-18T17:58:13.059Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 0
+2026-11-18T17:58:13.073Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - payments and ledger"
+2026-11-18T17:58:13.170Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - ledger view"
+2026-11-18T17:58:13.193Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - separate settlement"
+2026-11-18T17:58:13.259Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - idempotency per agency"
+2026-11-18T17:58:13.300Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - settlement business date"
+2026-11-18T17:58:13.361Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Successfully applied 5 migrations to schema "public", now at version v5 (execution time 00:00.195s)
+2026-11-18T17:58:14.222Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T17:58:14.310Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T17:58:14.334Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 6.104 seconds (process running for 6.786)
+2026-11-18T17:58:14.748Z  INFO 1 --- [payment-lab] [nio-8080-exec-2] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T17:58:14.749Z  INFO 1 --- [payment-lab] [nio-8080-exec-2] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T17:58:14.751Z  INFO 1 --- [payment-lab] [nio-8080-exec-2] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-11-18T17:58:22.665Z  INFO 1 --- [payment-lab] [           main] l.payment.infrastructure.config.Warmup   : Warm-up finished: 478 rounds in 8083 ms
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T17:58:27.301Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T17:58:27.306Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T17:58:30.657Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T17:58:30.682Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T17:58:30.682Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T17:58:30.768Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T17:58:30.770Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 3329 ms
+2026-11-18T17:58:31.272Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T17:58:31.480Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@2fac80a8
+2026-11-18T17:58:31.482Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T17:58:31.517Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T17:58:31.574Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 6 migrations (execution time 00:00.032s)
+2026-11-18T17:58:31.619Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 5
+2026-11-18T17:58:31.622Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-11-18T17:58:32.498Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T17:58:32.583Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T17:58:32.609Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 6.252 seconds (process running for 7.05)
+2026-11-18T17:58:33.093Z  INFO 1 --- [payment-lab] [nio-8080-exec-3] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T17:58:33.093Z  INFO 1 --- [payment-lab] [nio-8080-exec-3] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T17:58:33.095Z  INFO 1 --- [payment-lab] [nio-8080-exec-3] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-11-18T17:58:40.919Z  INFO 1 --- [payment-lab] [           main] l.payment.infrastructure.config.Warmup   : Warm-up finished: 444 rounds in 8039 ms
+2026-11-18T17:58:48.837Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@307bfcab (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:48.839Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@2fac80a8 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:48.840Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@7f1e170f (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:48.840Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@10ef32e3 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:48.840Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@5eff091c (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:48.841Z  WARN 1 --- [payment-lab] [   scheduling-1] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@5171fe09 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T17:58:49.836Z  WARN 1 --- [payment-lab] [   scheduling-1] .p.i.c.RecoveryScheduler$$SpringCGLIB$$0 : Recovery run failed
+
+org.springframework.transaction.CannotCreateTransactionException: Could not open JDBC Connection for transaction
+	at org.springframework.jdbc.datasource.DataSourceTransactionManager.doBegin(DataSourceTransactionManager.java:313) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.support.AbstractPlatformTransactionManager.startTransaction(AbstractPlatformTransactionManager.java:532) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.support.AbstractPlatformTransactionManager.getTransaction(AbstractPlatformTransactionManager.java:405) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.createTransactionIfNecessary(TransactionAspectSupport.java:639) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:374) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:728) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at lab.payment.application.PaymentTransitions$$SpringCGLIB$$0.claimDue(<generated>) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.application.PaymentRecoveryService.recoverDue(PaymentRecoveryService.kt:28) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.infrastructure.config.RecoveryScheduler.run(RecoveryScheduler.kt:22) ~[!/:0.0.1-SNAPSHOT]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source) ~[na:na]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.runInternal(ScheduledMethodRunnable.java:130) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.lambda$run$2(ScheduledMethodRunnable.java:124) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at io.micrometer.observation.Observation.observe(Observation.java:498) ~[micrometer-observation-1.15.3.jar!/:1.15.3]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.run(ScheduledMethodRunnable.java:124) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.config.Task$OutcomeTrackingRunnable.run(Task.java:85) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.support.DelegatingErrorHandlingRunnable.run(DelegatingErrorHandlingRunnable.java:54) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.FutureTask.runAndReset(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source) ~[na:na]
+	at java.base/java.lang.Thread.run(Unknown Source) ~[na:na]
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 1001ms (total=0, active=0, idle=0, waiting=0)
+	at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:714) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:184) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:142) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:127) ~[HikariCP-6.3.2.jar!/:na]
+	at org.springframework.jdbc.datasource.DataSourceTransactionManager.doBegin(DataSourceTransactionManager.java:269) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	... 24 common frames omitted
+Caused by: org.postgresql.util.PSQLException: FATAL: the database system is starting up
+	at org.postgresql.core.v3.ConnectionFactoryImpl.doAuthentication(ConnectionFactoryImpl.java:777) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.core.v3.ConnectionFactoryImpl.tryConnect(ConnectionFactoryImpl.java:234) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.core.v3.ConnectionFactoryImpl.openConnectionImpl(ConnectionFactoryImpl.java:289) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.core.ConnectionFactory.openConnection(ConnectionFactory.java:57) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.jdbc.PgConnection.<init>(PgConnection.java:277) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.Driver.makeConnection(Driver.java:448) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.Driver.connect(Driver.java:298) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at com.zaxxer.hikari.util.DriverDataSource.getConnection(DriverDataSource.java:144) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.PoolBase.newConnection(PoolBase.java:370) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.PoolBase.newPoolEntry(PoolBase.java:207) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.createPoolEntry(HikariPool.java:488) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool$PoolEntryCreator.call(HikariPool.java:752) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool$PoolEntryCreator.call(HikariPool.java:731) ~[HikariCP-6.3.2.jar!/:na]
+	at java.base/java.util.concurrent.FutureTask.run(Unknown Source) ~[na:na]
+	... 3 common frames omitted
+
+2026-11-18T17:59:06.939Z  INFO 1 --- [payment-lab] [nio-8080-exec-7] l.p.application.BankTransferExecutor     : Payment 0454d45c-1996-4e7c-8030-046d8e5a8373 stays PENDING after attempt 1: sync budget exhausted: connect failed: UnknownHostException: bank
+2026-11-18T17:59:08.911Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:09.929Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:10.939Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:11.958Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:12.978Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:13.996Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:15.014Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> PENDING
+2026-11-18T17:59:16.089Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 0454d45c-1996-4e7c-8030-046d8e5a8373 -> SUCCEEDED

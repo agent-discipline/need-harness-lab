@@ -1,0 +1,39 @@
+I fixed C01 r02: a successful payment no longer changes `agencies.settlement_balance_minor`. The net amount only moves into that balance when a separate settlement request is made, so every agency's balance equals the sum of its settled net amounts. The full build passes: 65 tests, 0 failures.
+
+**Cause:** in my original design, settlement happened at payment time. When a payment succeeded, the same statement also added the net amount to the agency's balance.
+
+**Changes**
+- **Payment success:** the net amount is now recorded in the ledger as owed to the agency but not yet settled (`AGENCY_PAYABLE`). The agency row isn't touched at all.
+- **New settlement API, `POST /api/settlements`:**
+  - Requires `Idempotency-Key`; takes `{"agencyId": N}`, or the `X-Agency-Id` header if the body has no `agencyId`.
+  - Bundles all of that agency's successful, unsettled payments into one settlement and adds their net total to `settlement_balance_minor`, all in one transaction.
+  - Locks the agency row first, so two settlements for the same agency can't settle a payment twice.
+  - Responses: 201 new, 200 replay (no second credit), 422 `NOTHING_TO_SETTLE`, 409 if the key was used for another agency, 403 header mismatch, 404 unknown agency.
+  - `GET /api/settlements/{id}` returns a settlement.
+- **Status endpoint:** `GET /api/agencies/{id}/settlement` now also shows the settlement count and the unsettled count and net amount.
+- **Migration V3:** adds the `settlements` table and a `settlement_id` link on payments. If it finds successful payments created under the old model, it stops startup with an error instead of migrating into an inconsistent state. A fresh DB, and the shared DB (which has 0 payments), are unaffected.
+
+**Verification**
+- **Regression test:** sends your exact r02 request on an empty DB with no settlement call. It checks 201 SUCCEEDED, 1 payment, 1 bank transfer, user 900001 at 999,900, and every agency's balance at 0. It also runs the full comparison of all agencies (balance against the sum of settled net) and expects 0 mismatches.
+- **Invariants checked after every DB test** (across all agencies):
+  - balance = sum of settled net = settlement ledger total
+  - amount owed in the ledger = net of successful payments not yet settled
+  - each settlement's totals = the sum of its payments
+- **Settlement tests:**
+  - settling twice credits once
+  - replays and key conflicts
+  - pending and failed payments are excluded
+  - 64 concurrent mixed payments and settlements leave no payment settled twice
+- **Real jar, fresh PostgreSQL 16 with the full seed, Python bank stub:**
+
+| Step | Result |
+|---|---|
+| Payment request | 201 SUCCEEDED, 1 payment, 1 journal row, user 900001 = 999,900 |
+| No settlement yet | agency 901 = 0, agencies with non-zero balance = 0, mismatches = 0 |
+| After `POST /api/settlements` | 201, net 99 → agency 901 = 99 = sum of settled net, mismatches = 0 |
+| V3 on old-model data | startup refused with the intended message; schema stays at V2 |
+
+**Still open**
+- The settlement endpoint's path and body (`POST /api/settlements`, `{"agencyId": ...}`) are my design; the report didn't say how settlement is requested. If the evaluator calls a different path or shape, send it to me and I'll match it. The same applies to returning 422 when there's nothing to settle.
+- The shared DB (`db:5432`) will apply V2 and V3 automatically the next time the app starts there. I didn't connect to it during this fix.
+- Nothing is committed yet.

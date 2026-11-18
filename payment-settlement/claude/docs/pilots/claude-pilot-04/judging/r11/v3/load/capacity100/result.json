@@ -1,0 +1,68 @@
+{
+  "phase": "capacity100",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.17171955299272668,
+      "count": 1047
+    },
+    {
+      "elapsed": 1.334492259004037,
+      "count": 951
+    },
+    {
+      "elapsed": 2.4961571309977444,
+      "count": 905
+    },
+    {
+      "elapsed": 3.653612895999686,
+      "count": 813
+    },
+    {
+      "elapsed": 4.8279343219910515,
+      "count": 728
+    },
+    {
+      "elapsed": 5.9938611319958,
+      "count": 641
+    },
+    {
+      "elapsed": 7.149337167997146,
+      "count": 545
+    },
+    {
+      "elapsed": 8.313883533992339,
+      "count": 478
+    },
+    {
+      "elapsed": 9.490212079996127,
+      "count": 412
+    },
+    {
+      "elapsed": 10.643465563000063,
+      "count": 312
+    },
+    {
+      "elapsed": 11.811998921999475,
+      "count": 208
+    },
+    {
+      "elapsed": 12.96303895500023,
+      "count": 124
+    },
+    {
+      "elapsed": 14.128752877993975,
+      "count": 36
+    },
+    {
+      "elapsed": 15.277269644997432,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

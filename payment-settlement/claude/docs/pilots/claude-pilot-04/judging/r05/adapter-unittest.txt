@@ -1,0 +1,26 @@
+test_bank_payload_changed (test_adapter.T.test_bank_payload_changed) ... ok
+test_clean_failed_released_passes (test_adapter.T.test_clean_failed_released_passes) ... ok
+test_clean_passes (test_adapter.T.test_clean_passes) ... ok
+test_clean_unsettled_passes (test_adapter.T.test_clean_unsettled_passes) ... ok
+test_double_settle_effect (test_adapter.T.test_double_settle_effect) ... ok
+test_duplicate_debit (test_adapter.T.test_duplicate_debit) ... ok
+test_failed_hold_not_released (test_adapter.T.test_failed_hold_not_released) ... ok
+test_failed_with_bank_record (test_adapter.T.test_failed_with_bank_record) ... ok
+test_missing_bank (test_adapter.T.test_missing_bank) ... ok
+test_missing_business_date (test_adapter.T.test_missing_business_date) ... ok
+test_missing_ledger (test_adapter.T.test_missing_ledger) ... ok
+test_orphan_bank (test_adapter.T.test_orphan_bank) ... ok
+test_orphan_item (test_adapter.T.test_orphan_item) ... ok
+test_pending_flagged (test_adapter.T.test_pending_flagged) ... ok
+test_settled_before_success (test_adapter.T.test_settled_before_success) ... ok
+test_settled_without_settle_effect (test_adapter.T.test_settled_without_settle_effect) ... ok
+test_wrong_date (test_adapter.T.test_wrong_date) ... ok
+test_wrong_fee (test_adapter.T.test_wrong_fee) ... ok
+test_wrong_settlement_total (test_adapter.T.test_wrong_settlement_total) ... ok
+test_wrong_tenant (test_adapter.T.test_wrong_tenant) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.004s
+
+OK
+exit=0

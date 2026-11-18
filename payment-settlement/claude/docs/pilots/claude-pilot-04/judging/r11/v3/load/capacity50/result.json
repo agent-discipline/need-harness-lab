@@ -1,0 +1,16 @@
+{
+  "phase": "capacity50",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.1581912050023675,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

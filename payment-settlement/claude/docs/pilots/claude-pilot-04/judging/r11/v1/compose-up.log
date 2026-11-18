@@ -1,0 +1,357 @@
+time="2026-11-19T02:53:00+09:00" level=warning msg="Docker Compose is configured to build using Bake, but buildx isn't installed"
+#0 building with "default" instance using docker driver
+
+#1 [bank internal] load build definition from Dockerfile
+#1 transferring dockerfile: 222B done
+#1 DONE 0.0s
+
+#2 [bank internal] load metadata for docker.io/library/python:3.12-slim
+#2 DONE 0.0s
+
+#3 [bank internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [bank 1/3] FROM docker.io/library/python:3.12-slim
+#4 DONE 0.0s
+
+#5 [bank internal] load build context
+#5 transferring context: 31B done
+#5 DONE 0.0s
+
+#6 [bank 2/3] WORKDIR /app
+#6 CACHED
+
+#7 [bank 3/3] COPY server.py .
+#7 CACHED
+
+#8 [bank] exporting to image
+#8 exporting layers done
+#8 writing image sha256:8d73666877972fdc192faaacd593ac373944fcd0d0568a7ce8cb75f06025b334 done
+#8 naming to docker.io/library/payment-claude-pilot-04-v1-bank 0.0s done
+#8 DONE 0.0s
+
+#9 [bank] resolving provenance for metadata file
+#9 DONE 0.0s
+
+#10 [app internal] load build definition from Dockerfile
+#10 transferring dockerfile: 661B done
+#10 DONE 0.0s
+
+#11 [app internal] load metadata for docker.io/library/eclipse-temurin:21-jre
+#11 DONE 0.0s
+
+#12 [app internal] load metadata for docker.io/library/eclipse-temurin:21-jdk
+#12 DONE 0.0s
+
+#13 [app internal] load .dockerignore
+#13 transferring context: 71B done
+#13 DONE 0.0s
+
+#14 [app build 1/4] FROM docker.io/library/eclipse-temurin:21-jdk
+#14 DONE 0.0s
+
+#15 [app stage-1 1/3] FROM docker.io/library/eclipse-temurin:21-jre
+#15 DONE 0.0s
+
+#16 [app internal] load build context
+#16 transferring context: 67.09kB 0.0s done
+#16 DONE 0.0s
+
+#17 [app build 2/4] WORKDIR /workspace
+#17 CACHED
+
+#18 [app build 3/4] COPY . .
+#18 DONE 0.1s
+
+#19 [app build 4/4] RUN chmod +x gradlew && ./gradlew --no-daemon clean test bootJar
+#19 0.556 Downloading https://services.gradle.org/distributions/gradle-8.14.4-bin.zip
+#19 1.737 .............10%.............20%.............30%.............40%.............50%.............60%.............70%.............80%.............90%..............100%
+#19 7.227 
+#19 7.228 Welcome to Gradle 8.14.4!
+#19 7.228 
+#19 7.228 Here are the highlights of this release:
+#19 7.228  - Java 24 support
+#19 7.228  - GraalVM Native Image toolchain selection
+#19 7.228  - Enhancements to test reporting
+#19 7.228  - Build Authoring improvements
+#19 7.229 
+#19 7.229 For more details see https://docs.gradle.org/8.14.4/release-notes.html
+#19 7.229 
+#19 7.526 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.4/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+#19 9.625 Daemon will be stopped at the end of the build 
+#19 76.23 > Task :clean UP-TO-DATE
+#19 76.23 > Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+#19 87.63 > Task :processResources
+#19 87.63 > Task :processTestResources NO-SOURCE
+#19 103.2 > Task :compileKotlin
+#19 103.2 > Task :compileJava NO-SOURCE
+#19 103.2 > Task :classes
+#19 103.3 > Task :resolveMainClassName
+#19 105.3 > Task :bootJar
+#19 105.4 > Task :jar
+#19 127.3 > Task :compileTestKotlin
+#19 127.3 > Task :compileTestJava NO-SOURCE
+#19 127.3 > Task :testClasses UP-TO-DATE
+#19 132.6 
+#19 132.6 > Task :test
+#19 132.6 
+#19 132.6 AcceptanceC01Test > X-Agency-Id must match the body agency() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC01Test > legacy paths without api prefix still work() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC01Test > C01 normal payment via api path with agency header() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC01Test > C01 payment alone does not change any agency settlement balance() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC02Test > error message names the offending field() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC02Test > boundary amounts 1 and 1,000,000 are accepted() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC02Test > C02 amount above the 1,000,000 limit is a 400 and stores nothing() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC02Test > C02 invalid amount, currency and missing fields are all 400 without side effects() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC07Test > C07 hot user with 100 concurrent payments() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC08Test > payments are only readable by their own agency when X-Agency-Id is given() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC08Test > C08 same key from two agencies creates two independent payments() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC08Test > concurrent use of one key by two agencies yields exactly one payment per agency() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC10Test > other X-Bank-Fault values reach the bank on the first call() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC10Test > fault header validation and legacy alias() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC10Test > C10 bank decline fails the payment without charging the user() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC15Test > business date validation, default and key reuse() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC15Test > C15 settlement of a business date with per-payment fee floor, single credit and replay() SKIPPED
+#19 132.6 
+#19 132.6 AcceptanceC15Test > only payments of the requested business date are settled() SKIPPED
+#19 132.7 
+#19 132.7 AcceptanceC15Test > the database rejects settling a payment into another date's settlement() SKIPPED
+#19 132.7 
+#19 132.7 AcceptanceC16Test > C16 concurrent settlements with different keys all succeed and share one payment exactly once() SKIPPED
+#19 132.7 
+#19 132.7 AcceptanceC16Test > waiting settlements do not hold DB connections() SKIPPED
+#19 132.7 
+#19 132.7 ConcurrencyIntegrationTest > concurrent payments into one agency settle exactly() SKIPPED
+#19 132.7 
+#19 132.7 ConcurrencyIntegrationTest > concurrent payments never overdraw a user() SKIPPED
+#19 132.7 
+#19 132.7 ConcurrencyIntegrationTest > 100 concurrent requests with one key create one payment and one transfer() SKIPPED
+#19 132.7 
+#19 132.7 HotUserIsolationIntegrationTest > hot user row lock does not starve other users or produce 503() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > bank decline releases held funds() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > agency settlement summary() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > bank 5xx keeps funds held, recovery completes the payment once() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > successful payment debits user, credits agency net, records one bank transfer() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > currency is required() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > same key with a different body is a conflict() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > payment lookup errors() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > unknown user or agency is 404 and leaves nothing behind() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > replay with same key returns the same payment without new effects() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > timeout before commit stays pending, then recovery completes it once() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > timeout after commit is resolved synchronously through the lookup API() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > insufficient balance fails without touching the bank and is replayable() SKIPPED
+#19 132.7 
+#19 132.7 PaymentApiIntegrationTest > request validation() SKIPPED
+#19 132.7 
+#19 132.7 SettlementIntegrationTest > concurrent settlements and payments never settle a payment twice() SKIPPED
+#19 132.7 
+#19 132.7 SettlementIntegrationTest > only succeeded payments are settled() SKIPPED
+#19 132.7 
+#19 132.7 SettlementIntegrationTest > request validation and agency header() SKIPPED
+#19 132.7 
+#19 132.7 SettlementIntegrationTest > settlement credits exactly the unsettled net and only once() SKIPPED
+#19 132.7 
+#19 132.7 SettlementIntegrationTest > replay returns the same settlement without crediting again, keys are per agency() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > lookup failures never fail a payment() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > claims are exclusive while leased() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > crash after the bank succeeded is settled from the lookup without a second transfer() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > competing resolvers apply the capture once() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > gives up after max attempts when the bank confirms no transfer() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > does not give up while the last attempt may still be in flight() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > crash before the bank call is completed by recovery() SKIPPED
+#19 132.8 
+#19 132.8 PaymentRecoveryIntegrationTest > bank outage keeps payment pending until the bank is back() SKIPPED
+#19 132.9 
+#19 132.9 RecoveryPolicyTest > backoff doubles and is capped() PASSED
+#19 132.9 
+#19 132.9 SyncRetryIntegrationTest > definitive refusals are not retried() SKIPPED
+#19 132.9 
+#19 132.9 SyncRetryIntegrationTest > persistent unavailability gives up at the deadline and leaves the payment pending() SKIPPED
+#19 132.9 
+#19 132.9 SyncRetryIntegrationTest > a request swallowed by the bank is answered synchronously after a re-send() SKIPPED
+#19 132.9 
+#19 132.9 SyncRetryIntegrationTest > unknown outcome looks up first and re-sends only if not recorded() SKIPPED
+#19 132.9 
+#19 132.9 SyncRetryIntegrationTest > transient unavailability is retried to success() SKIPPED
+#19 133.1 
+#19 133.1 UserGateTest > different users are not blocked by each other() PASSED
+#19 133.3 
+#19 133.3 UserGateTest > same user runs one at a time() PASSED
+#19 133.3 
+#19 133.3 BusinessCalendarTest > business date is the Asia Seoul date, switching at 15h UTC() PASSED
+#19 133.3 
+#19 133.3 BusinessCalendarTest > today follows the clock() PASSED
+#19 133.3 
+#19 133.3 FeePolicyTest > fee plus net always equals amount() PASSED
+#19 133.3 
+#19 133.3 FeePolicyTest > 100 bps is one percent rounded down() PASSED
+#19 133.3 
+#19 133.3 FeePolicyTest > rejects invalid inputs() PASSED
+#19 133.3 
+#19 133.3 FeePolicyTest > boundary fee rates() PASSED
+#19 133.3 
+#19 133.3 LedgerPostingsTest > settle moves exactly the captured payable into the settlement balance() PASSED
+#19 133.3 
+#19 133.3 LedgerPostingsTest > authorize then release returns user to start() PASSED
+#19 133.3 
+#19 133.3 LedgerPostingsTest > capture splits net to agency payable and fee to platform() PASSED
+#19 133.3 
+#19 133.3 LedgerPostingsTest > every posting balances to zero() PASSED
+#19 133.4 
+#19 133.4 LedgerPostingsTest > zero fee leg is omitted() PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [1] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283330@1f443fae PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [2] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283550@1eb6e1c PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [3] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283770@2b8bd14b PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [4] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283990@5f303ecd PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [5] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283bb0@25a73de1 PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [6] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283dd0@771db12c PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [7] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c283ff0@26ae880a PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [8] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c284210@3c017078 PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [9] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c284430@3be4f71 PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [10] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c284650@6bd16207 PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > rejects invalid requests(Function0) > [11] build=lab.payment.domain.PaymentRequestTest$Companion$$Lambda/0x000077af4c284870@58399d82 PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > accepts a valid request() PASSED
+#19 133.4 
+#19 133.4 PaymentRequestTest > same request comparison ignores the key() PASSED
+#19 133.4 
+#19 133.4 ClaimLimitIntegrationTest > claim respects its limit under nested-loop plans() SKIPPED
+#19 133.4 
+#19 133.4 WarmupIntegrationTest > warm-up leaves no trace in the database or the bank() SKIPPED
+#19 133.4 
+#19 133.4 WarmupIntegrationTest > health is UP once the application is ready() SKIPPED
+#19 133.9 
+#19 133.9 ConcurrencyLimitedBankGatewayTest > queue timeout sends nothing and reports a retryable outcome() PASSED
+#19 134.2 
+#19 134.2 ConcurrencyLimitedBankGatewayTest > caps in-flight calls and lets queued calls through in order() PASSED
+#19 134.4 
+#19 134.4 ConcurrencyLimitedBankGatewayTest > waiting for a slot never outlasts the caller deadline() PASSED
+#19 134.9 
+#19 134.9 HttpBankGatewayTest > deadline caps the wait and an expired deadline sends nothing() PASSED
+#19 135.0 
+#19 135.0 HttpBankGatewayTest > decline and 5xx record nothing() PASSED
+#19 137.0 
+#19 137.0 HttpBankGatewayTest > timeouts are cut well below the 3s stall() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > success is idempotent per key() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > bank outage on lookup is a failed lookup, not a not-found() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > same key with different body is not reported as success() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > refused connection means not delivered, never an exception() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > retry after failure with same key succeeds once() PASSED
+#19 137.1 
+#19 137.1 HttpBankGatewayTest > keys are URL encoded on lookup() PASSED
+#19 137.1 
+#19 137.1 OneShotHttpClientTest > chunked responses and header injection are rejected() PASSED
+#19 137.1 
+#19 137.1 OneShotHttpClientTest > request headers and body arrive in a single read() PASSED
+#19 137.1 
+#19 137.1 OneShotHttpClientTest > closing without a response is an IOException, not a delivery failure() PASSED
+#19 137.1 
+#19 137.1 OneShotHttpClientTest > body without content-length is read until close() PASSED
+#19 137.4 
+#19 137.4 OneShotHttpClientTest > silent server times out within the given time() PASSED
+#19 137.4 
+#19 137.4 OneShotHttpClientTest > refused connection is not delivered() PASSED
+#19 137.4 
+#19 137.4 OneShotHttpClientTest > content-length framing does not wait for the server to close() PASSED
+#19 137.7 
+#19 137.7 BUILD SUCCESSFUL in 2m 17s
+#19 137.7 8 actionable tasks: 7 executed, 1 up-to-date
+#19 DONE 138.1s
+
+#20 [app stage-1 2/3] WORKDIR /app
+#20 CACHED
+
+#21 [app stage-1 3/3] COPY --from=build /workspace/build/libs/app.jar app.jar
+#21 DONE 0.1s
+
+#22 [app] exporting to image
+#22 exporting layers
+#22 exporting layers 0.2s done
+#22 writing image sha256:acc1dce5fceb4f62099b8d61d0d97b6b8dbcd80228e69470d97df8abaabe7561 done
+#22 naming to docker.io/library/payment-claude-pilot-04-v1-app 0.0s done
+#22 DONE 0.2s
+
+#23 [app] resolving provenance for metadata file
+#23 DONE 0.0s
+ app  Built
+ bank  Built
+ Network payment-claude-pilot-04-v1_default  Creating
+ Network payment-claude-pilot-04-v1_default  Created
+ Volume payment-claude-pilot-04-v1_pgdata  Creating
+ Volume payment-claude-pilot-04-v1_pgdata  Created
+ Volume payment-claude-pilot-04-v1_bankdata  Creating
+ Volume payment-claude-pilot-04-v1_bankdata  Created
+ Container payment-claude-pilot-04-v1-bank-1  Creating
+ Container payment-claude-pilot-04-v1-db-1  Creating
+ Container payment-claude-pilot-04-v1-bank-1  Created
+ Container payment-claude-pilot-04-v1-db-1  Created
+ Container payment-claude-pilot-04-v1-app-1  Creating
+ Container payment-claude-pilot-04-v1-app-1  Created
+ Container payment-claude-pilot-04-v1-bank-1  Starting
+ Container payment-claude-pilot-04-v1-db-1  Starting
+ Container payment-claude-pilot-04-v1-bank-1  Started
+ Container payment-claude-pilot-04-v1-db-1  Started
+ Container payment-claude-pilot-04-v1-bank-1  Waiting
+ Container payment-claude-pilot-04-v1-db-1  Waiting
+ Container payment-claude-pilot-04-v1-bank-1  Healthy
+ Container payment-claude-pilot-04-v1-db-1  Healthy
+ Container payment-claude-pilot-04-v1-app-1  Starting
+ Container payment-claude-pilot-04-v1-app-1  Started
+ Container payment-claude-pilot-04-v1-db-1  Waiting
+ Container payment-claude-pilot-04-v1-bank-1  Waiting
+ Container payment-claude-pilot-04-v1-app-1  Waiting
+ Container payment-claude-pilot-04-v1-bank-1  Healthy
+ Container payment-claude-pilot-04-v1-db-1  Healthy
+ Container payment-claude-pilot-04-v1-app-1  Healthy

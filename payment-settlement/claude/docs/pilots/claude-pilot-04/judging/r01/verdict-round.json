@@ -1,0 +1,151 @@
+{
+  "run_id": "claude-pilot-04",
+  "judged_by": "메인 세션(실험 통제, Claude Fable 5.2) — judging/r01의 원자료 JSON을 직접 읽고 판정(1회째 완료 선언)",
+  "judged_at": "2026-11-18T12:11:08+00:00",
+  "round": 1,
+  "criteria": {
+    "C01": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C02": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C03": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "판정기 status는 PASS이나 404의 본문이 \"no such endpoint\" — 없는 사용자·대행사를 판별한 404가 아니라 경로가 없어서 난 404(acceptance.md: skeleton 404가 통과하면 평가기 결함). 요구를 충족한 것으로 보지 않음"
+    },
+    "C04": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C05": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C06": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C07": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C08": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C09": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C10": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C11": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C12": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C13": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v2/acceptance-faults.json"
+      ],
+      "note": "결제 요청이 404라 은행 기록 경계를 만들 수 없음(구현 원인)"
+    },
+    "C14": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v2/acceptance-faults.json"
+      ],
+      "note": "결제 요청이 404라 은행 기록 경계를 만들 수 없음(구현 원인)"
+    },
+    "C15": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C16": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C17": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v2/acceptance-faults.json"
+      ],
+      "note": "fixture 결제가 404"
+    },
+    "C18": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v1/acceptance-http.json"
+      ],
+      "note": "계약 경로(/api/payments, /api/settlements)에 응답하는 endpoint가 없어 404 \"no such endpoint\""
+    },
+    "C19": {
+      "result": "PARTIAL",
+      "evidence": [
+        "judging/r01/v1/acceptance-audit.json",
+        "judging/r01/v2/acceptance-audit.json",
+        "judging/r01/v3/post-load-audit.json"
+      ],
+      "note": "집계는 모두 0이나 결제·원장·은행 기록이 0건이라 대조할 거래가 없음 — 불변식이 지켜졌다는 근거가 되지 못함"
+    },
+    "C20": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r01/v3/load/summary.json",
+        "judging/r01/v3/load-check.stdout"
+      ],
+      "note": "8단계 모두 k6 setup이 404로 중단(exit 107), 부하 구간 미시작 — 구현 원인"
+    }
+  }
+}

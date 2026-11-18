@@ -1,0 +1,4 @@
+status|failure_code|count
+FAILED|INSUFFICIENT_BALANCE|50
+SUCCEEDED||65
+(2 rows)

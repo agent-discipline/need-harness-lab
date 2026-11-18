@@ -1,0 +1,35 @@
+ec7b322a19ecbb965a99b895d1e972392e402e8d starter
+판정 대상 = 작업 트리(Compose build context). 미커밋 변경(git status --short) 32줄:
+ M build.gradle.kts
+ D src/main/kotlin/lab/payment/application/.gitkeep
+ D src/main/kotlin/lab/payment/domain/.gitkeep
+ D src/main/kotlin/lab/payment/infrastructure/.gitkeep
+ M src/main/resources/application.yml
+ D src/main/resources/db/migration/.gitkeep
+?? .gitignore
+?? docs/
+?? src/main/kotlin/lab/payment/api/ApiExceptionHandler.kt
+?? src/main/kotlin/lab/payment/api/PaymentApi.kt
+?? src/main/kotlin/lab/payment/api/PaymentDtos.kt
+?? src/main/kotlin/lab/payment/api/SettlementApi.kt
+?? src/main/kotlin/lab/payment/application/BankTransferExecutor.kt
+?? src/main/kotlin/lab/payment/application/PaymentRecoveryService.kt
+?? src/main/kotlin/lab/payment/application/PaymentService.kt
+?? src/main/kotlin/lab/payment/application/PaymentTransitions.kt
+?? src/main/kotlin/lab/payment/application/RecoveryPolicy.kt
+?? src/main/kotlin/lab/payment/application/SettlementService.kt
+?? src/main/kotlin/lab/payment/application/port/
+?? src/main/kotlin/lab/payment/domain/Exceptions.kt
+?? src/main/kotlin/lab/payment/domain/FeePolicy.kt
+?? src/main/kotlin/lab/payment/domain/Ledger.kt
+?? src/main/kotlin/lab/payment/domain/Payment.kt
+?? src/main/kotlin/lab/payment/domain/PaymentRequest.kt
+?? src/main/kotlin/lab/payment/domain/Settlement.kt
+?? src/main/kotlin/lab/payment/infrastructure/bank/
+?? src/main/kotlin/lab/payment/infrastructure/config/
+?? src/main/kotlin/lab/payment/infrastructure/persistence/
+?? src/main/resources/db/migration/V1__payments_and_ledger.sql
+?? src/main/resources/db/migration/V2__ledger_view.sql
+?? src/main/resources/db/migration/V3__separate_settlement.sql
+?? src/test/
+작업 트리 내용 해시(존재하는 추적+미추적 파일, .gitignore 제외, 경로순 sha256sum의 sha256): 80229b91cd1df1e12163ad78fa8c789c98979fce33c72c60453055e5e5228dad

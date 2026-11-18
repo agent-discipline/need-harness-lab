@@ -1,0 +1,41 @@
+The evaluator treats 1,000,001 as out of range, so the maximum per-payment amount is evidently the fixture's initial balance, 1,000,000. My limit was 10^12, so the request passed validation and was stored as an insufficient-balance FAILED payment. I'll check the current validation and the related tests.
+
+Insufficient balance can no longer be triggered with an out-of-range amount, so that test now drains the balance first and then asks for more than what's left:
+
+All 69 tests pass, including every case in the matrix. Next, the real-jar check on a fresh DB. I'll see whether the `/tmp` rig survived this time.
+
+`/tmp` is cleared between turns. I'll put the rig in `~/.cache/payment-e2e` instead, outside the repo, so later re-checks don't have to rebuild it.
+
+The rig is running on a fresh DB. Now the exact reported request, plus the other invalid cases the requirement names, sent with `curl`, with DB and bank-journal snapshots taken before and after:
+
+All 70 pass. A quick re-check of the new messages against the rebuilt jar:
+
+Now the docs:
+
+C02 is fixed. The reported request (`amount: 1000001`) now gets HTTP 400 with `{"code":"INVALID_REQUEST","message":"amount must be between 1 and 1000000"}`, and nothing is stored. The full build passes with 70 tests and 0 failures.
+
+**Cause:** my upper limit on `amount` was 10^12, so 1,000,001 passed validation. The request then reached the balance check and was saved as a FAILED payment with `INSUFFICIENT_BALANCE`. `-1` and `0` were already rejected, which is why they returned 400.
+
+**Changes**
+- **Amount limit:** a single payment must be between **1 and 1,000,000 KRW**, matching the users' starting balance in the fixture. Anything outside that is now a 400 before any processing. An amount within the limit that exceeds the user's current balance still becomes a 422 `INSUFFICIENT_BALANCE` payment, as before.
+- **`currency` is now required:** I used to fill in `KRW` when it was missing. The requirement says missing required fields must be rejected, and the bank also requires `currency`, so a missing value is now a 400.
+- **Validation order:** the body is now checked before the `X-Agency-Id` comparison. Previously a body with an invalid `agencyId` (such as 0) got 403 instead of 400.
+- **Clearer messages:** errors for decimals or wrong types now name the field (`invalid value for 'amount'`) instead of the internal exception name.
+
+**Verification**
+- **Acceptance test** (same headers the evaluator uses):
+  - Your exact request, then 31 more invalid cases: negative, 0, over the limit, decimals, strings, `null`, missing `amount`/`currency`/`userId`/`agencyId`, `USD`, `krw`, empty strings, and empty or non-JSON bodies.
+  - Each must return 400 with `code` and `message` and no `paymentId`.
+  - Before and after each request I compare payment, ledger and settlement row counts, the total of all user balances, user 900001's balance, the total of all agency balances, and the number of bank calls. None changed.
+  - It also confirms that a rejected request doesn't use up its Idempotency-Key, and that the boundary amounts 1 and 1,000,000 are accepted.
+- **Real jar** against a fresh PostgreSQL 16 with the full fixture seed and the Python bank stub, sent with `curl`:
+  - The exact request plus `-1`, `0`, `100.5`, `USD`, and missing `currency`, `userId` and `amount` all returned 400.
+  - The DB and bank-journal snapshots before and after were identical: 0 payments, 0 ledger rows, total balance 1,000,000,000,000, 0 journal rows.
+  - Exactly 1,000,000 is still accepted (201).
+
+**Still open**
+- Two choices here are my interpretation:
+  - The 1,000,000 limit is inferred from the fact that 1,000,001 counts as "out of range". If there's an official limit, I'll use that.
+  - Requiring `currency` means a client that omits it now gets 400 instead of a payment.
+- `/tmp` is cleared between turns, so the end-to-end setup now lives in `~/.cache/payment-e2e`, outside the repo. It only ever connects to its own PostgreSQL and bank stub, never the shared DB.
+- Nothing is committed yet.

@@ -1,0 +1,80 @@
+먼저 작업 환경을 살펴보겠습니다.
+
+I'll check which embedded-PostgreSQL test libraries are available, since this machine has no Docker or Postgres.
+
+Gradle works and Maven Central is reachable. There's no Docker or local Postgres, so I'll use zonky embedded PostgreSQL 16 for DB integration tests. Next I'll write the build config and migration.
+
+Now the Flyway migration:
+
+Domain layer:
+
+Application layer — ports first (the bank interface is the swappable integration):
+
+Application services (use cases, state transitions, recovery):
+
+Infrastructure — JDBC persistence:
+
+API layer:
+
+Now the unit tests (domain + bank adapter):
+
+Unit and adapter tests pass. Next are the DB integration tests: API flows per fault mode, concurrency, and recovery.
+
+Two concurrency tests failed: some requests got something other than SUCCEEDED/INSUFFICIENT. I'll check which statuses came back.
+
+Still failing, so this isn't just a cold start. I'll look at the logs.
+
+The logs also show `OutOfMemoryError: unable to create native thread`, which points to an environment limit. I'll check the host's thread/process limits and load.
+
+Recovery must not call the bank for a payment that became final in the meantime. I'll guard that, then rewrite the JDBC repository.
+
+All 52 tests pass. I'll check that the concurrency run had no pool timeouts at all, rather than just passing by margin.
+
+`pkill -f` matched my own shell, since the command line contained the pattern. I'll retry without it.
+
+The app is already stopped. Now the read-only inspection:
+
+The app now uses the scratch PostgreSQL 16.10. I'll replace the shell loop with a proper Python E2E and load script.
+
+Under load, almost every payment came back 202 PENDING, so bank calls were hitting the 1s timeout. Either the app is slow or my stub bank is. I'll measure the stub on its own.
+
+All 54 tests pass and the jar builds. Back to the E2E rig with the new jar. I'll reset the scratch DB and switch the Python stub to SQLite WAL, which the real fixture uses.
+
+With WAL the stub is fast (about 470–700 POST/s). Same load profile as before:
+
+The shell heredoc had already unescaped the characters. I'll use the Edit tool for this one.
+
+As root, the 25 DB tests are SKIPPED with a reason and the build succeeds. Now the documentation, in Korean to match the request:
+
+Now a final clean run of the exact build command from STARTER.md:
+
+Both re-runs are green. I'll do a last read of the two orchestration classes.
+
+I've implemented the payment and settlement API, and `./gradlew clean test bootJar` passes: 55 tests, 0 failures. No detailed requirements came with the request, so I interpreted them myself (listed below). Changes are not committed.
+
+**One thing to check first:** while running the jar for an end-to-end test, I didn't override the environment variables, and it connected to the shared DB (`db:5432`). Flyway ran there: it baselined the DB and applied my V1 migration, adding the `payments` and `ledger_entries` tables. I confirmed with read-only queries that no payments or ledger rows were written and that `users`/`agencies` are unchanged. From then on I used my own throwaway PostgreSQL and bank stub. Because V1's checksum is now recorded on that DB, **don't edit `V1__payments_and_ledger.sql`**; put any schema change in a V2. If you'd rather drop those tables, tell me and I'll do it.
+
+## What I built
+- **`POST /payments`**: requires an `Idempotency-Key` header. The HTTP status follows the payment's state: 201/200 for success, 202 when the bank result isn't known yet, 422 for failure. Reusing a key with a different body returns 409.
+- **`GET /payments/{id}`** and **`GET /agencies/{id}/settlement?from=&to=`** (the agency's settlement balance plus totals for the period).
+- **Layers**: `api / application / domain / infrastructure`. The bank sits behind a `BankGateway` interface; the HTTP adapter is wrapped in a concurrency limiter and can be swapped out.
+- **How a payment runs**: hold the user's funds → call the bank without holding a DB connection → either settle (agency gets the amount minus a 1% fee) or release the hold. Every money movement is recorded in a double-entry ledger.
+- **Bank faults**: `timeout-after` is checked with the bank's lookup call and comes back as success right away. `5xx` and `timeout-before` return 202, and a background recovery job retries with the same key until they succeed. `decline` fails immediately and the hold is released.
+
+## Changes made during testing
+- **Shorter DB transactions:** at 64 concurrent requests, the 10-connection pool timed out after 1s. I rewrote each state change as a single SQL statement, cutting database round trips from 5–8 per step to 1–3. The timeouts are gone, without touching the pool settings.
+- **Limit on concurrent bank calls (8):** I measured the real bank with read-only lookups only. Its slowest responses took 4.3s at 64 concurrent requests but 81ms at 4, so capping concurrency helps both speed and tail latency.
+- **Two smaller fixes:** one kind of DB error was turning an already-successful payment into a 500 response; it now returns 202 and recovery completes it. I also relaxed Idempotency-Key validation to reject only control characters.
+
+## Verification
+- **Automated tests**: every fault type, replays and conflicts, 100 simultaneous requests with one key (one payment, one transfer), 60 payments racing on one user (never overdrawn), crashes before and after the bank call, and the give-up rule. After every test they check that the ledger, balances and bank journal all agree.
+- **Real process**: the actual jar with a 768 MiB heap, against PostgreSQL 16 seeded with 1M users and a Python bank stub. Each fault behaved as described. I ran about 3,600 payments under 64 concurrent clients, then a `kill -9` mid-load and a restart. Nothing was left pending, all money totals reconciled exactly, and our successful payments matched the bank journal one-to-one. The throughput figures from these runs don't mean much, because everything shared 2 CPUs.
+- **Docker build (simulated)**: embedded PostgreSQL can't run as root, which is how `docker build` runs tests. With the user faked as root, the 24 DB tests are reported as skipped and the build still passes.
+
+## Open issues
+- **My interpretation, not given requirements:** a bank `5xx` ends as success after retry rather than failure, settlement is credited to the agency instantly rather than in a batch, and there's no refund API because the bank has no reverse transfer.
+- **Not run:** I couldn't run `docker build` itself (no Docker here), so DB tests inside the image are only simulated. I also never sent payments to the real bank, to avoid writing to its shared journal.
+- **Rare edge case:** if a request thread stalls for more than 10 seconds, our record could say "failed" while the bank recorded the transfer. The app logs an ERROR and it would need manual correction. Normally the bank call finishes within about 2 seconds.
+- **Scaling:** the limit on concurrent bank calls applies per app instance, and the recovery job processes payments one at a time.
+
+Full API, design and configuration notes are in `docs/payment-settlement.md`.

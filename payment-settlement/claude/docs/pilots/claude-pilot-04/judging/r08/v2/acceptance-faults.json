@@ -1,0 +1,1040 @@
+{
+  "cases": {
+    "C13": {
+      "status": "PASS",
+      "observed_before_kill": "PENDING",
+      "bank_record": {
+        "key": "5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+        "payload": {
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "paymentId": "5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+          "userId": 900010
+        },
+        "result": {
+          "bankTransferId": "f25c25a7-8d59-550b-8a00-9d14c7163799",
+          "status": "SUCCEEDED"
+        }
+      },
+      "killed_at": 1795010912.9473524,
+      "healthy_at": 1795010929.140231,
+      "final_at": 1795010934.0132754,
+      "initial": {
+        "transport_error": "Remote end closed connection without response"
+      },
+      "replay": {
+        "status": 200,
+        "body": {
+          "paymentId": "5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "f25c25a7-8d59-550b-8a00-9d14c7163799",
+          "createdAt": "2026-11-18T14:08:32.135248Z",
+          "completedAt": "2026-11-18T14:08:45.517800Z"
+        }
+      },
+      "audit": {
+        "case": "C19",
+        "status": "PASS",
+        "passed": true,
+        "errors": [],
+        "error_count": 0,
+        "aggregates": {
+          "user_seed_count": 0,
+          "agency_seed_count": 0,
+          "negative_balance": 0,
+          "balance_conservation": 0,
+          "balance_vs_ledger_user": 0,
+          "agency_balance_vs_settlements": 0,
+          "ledger_signed_total": 0,
+          "orphan_user": 0,
+          "orphan_agency": 0
+        },
+        "queries": {
+          "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+          "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+          "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0",
+          "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status IN ('SUCCEEDED','PENDING') GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(p.amount_minor),0)<>1000000) t",
+          "balance_vs_ledger_user": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger_entries l ON l.account_type='USER' AND l.account_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor-coalesce(sum(l.amount_minor),0)<>1000000) t",
+          "agency_balance_vs_settlements": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN (SELECT agency_id, sum(net_minor) AS net FROM settlements GROUP BY agency_id) s ON s.agency_id=a.id WHERE a.settlement_balance_minor<>coalesce(s.net,0)) t",
+          "ledger_signed_total": "SELECT abs(coalesce(sum(amount_minor),0)) FROM ledger_entries",
+          "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+          "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+        },
+        "absent_tables": [
+          "settlement_items"
+        ],
+        "info": {
+          "settlement_columns": "id,idempotency_key,agency_id,payment_count,gross_minor,fee_minor,net_minor,created_at,business_date"
+        },
+        "counts": {
+          "payments": 1,
+          "ledger": 5,
+          "settlements": 0,
+          "items": 0,
+          "bank": 1,
+          "pending": 0,
+          "succeeded": 1,
+          "failed": 0
+        }
+      }
+    },
+    "C14": {
+      "status": "PASS",
+      "observed_before_kill": "PENDING",
+      "bank_record": {
+        "key": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+        "payload": {
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "userId": 900010
+        },
+        "result": {
+          "bankTransferId": "2fd8159b-62c3-5081-ab3a-54047f2a47a5",
+          "status": "SUCCEEDED"
+        }
+      },
+      "killed_at": 1795010935.2584822,
+      "healthy_at": 1795010942.0399637,
+      "final_at": 1795010949.769154,
+      "initial": {
+        "status": 202,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      },
+      "replay": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "2fd8159b-62c3-5081-ab3a-54047f2a47a5",
+          "createdAt": "2026-11-18T14:08:54.378612Z",
+          "completedAt": "2026-11-18T14:09:05.196179Z"
+        }
+      },
+      "audit": {
+        "case": "C19",
+        "status": "PASS",
+        "passed": true,
+        "errors": [],
+        "error_count": 0,
+        "aggregates": {
+          "user_seed_count": 0,
+          "agency_seed_count": 0,
+          "negative_balance": 0,
+          "balance_conservation": 0,
+          "balance_vs_ledger_user": 0,
+          "agency_balance_vs_settlements": 0,
+          "ledger_signed_total": 0,
+          "orphan_user": 0,
+          "orphan_agency": 0
+        },
+        "queries": {
+          "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+          "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+          "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0",
+          "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status IN ('SUCCEEDED','PENDING') GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(p.amount_minor),0)<>1000000) t",
+          "balance_vs_ledger_user": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger_entries l ON l.account_type='USER' AND l.account_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor-coalesce(sum(l.amount_minor),0)<>1000000) t",
+          "agency_balance_vs_settlements": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN (SELECT agency_id, sum(net_minor) AS net FROM settlements GROUP BY agency_id) s ON s.agency_id=a.id WHERE a.settlement_balance_minor<>coalesce(s.net,0)) t",
+          "ledger_signed_total": "SELECT abs(coalesce(sum(amount_minor),0)) FROM ledger_entries",
+          "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+          "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+        },
+        "absent_tables": [
+          "settlement_items"
+        ],
+        "info": {
+          "settlement_columns": "id,idempotency_key,agency_id,payment_count,gross_minor,fee_minor,net_minor,created_at,business_date"
+        },
+        "counts": {
+          "payments": 2,
+          "ledger": 10,
+          "settlements": 0,
+          "items": 0,
+          "bank": 2,
+          "pending": 0,
+          "succeeded": 2,
+          "failed": 0
+        }
+      }
+    },
+    "C17": {
+      "status": "FAIL",
+      "boundary_fixture": [
+        [
+          "3bf5211b-df19-45ce-91e5-5e309cd709d5",
+          "2020-01-01T14:59:59Z"
+        ],
+        [
+          "ddb9c760-7c70-4380-bab0-17f872ae7d7b",
+          "2020-01-01T15:00:00Z"
+        ],
+        [
+          "396b4f9d-9a7a-4e54-ab16-633b7b1e957c",
+          "2020-01-01T15:00:01Z"
+        ]
+      ],
+      "first": {
+        "settlementId": "dd2a8b06-44bd-4a44-9041-f300b9a42428",
+        "agencyId": 920,
+        "businessDate": "2020-01-01",
+        "status": "SUCCEEDED",
+        "paymentCount": 1,
+        "grossAmount": 101,
+        "feeAmount": 1,
+        "netAmount": 100,
+        "createdAt": "2026-11-18T14:09:10.449447Z"
+      },
+      "second": {
+        "settlementId": "05daefd7-0d91-4b07-86b9-7dff3968ce32",
+        "agencyId": 920,
+        "businessDate": "2020-01-02",
+        "status": "SUCCEEDED",
+        "paymentCount": 2,
+        "grossAmount": 205,
+        "feeAmount": 2,
+        "netAmount": 203,
+        "createdAt": "2026-11-18T14:09:10.519297Z"
+      },
+      "additional": {
+        "settlementId": "aa25df56-277c-47d7-84f0-a18a4a1d21a2",
+        "agencyId": 920,
+        "businessDate": "2020-01-02",
+        "status": "SUCCEEDED",
+        "paymentCount": 1,
+        "grossAmount": 104,
+        "feeAmount": 1,
+        "netAmount": 103,
+        "createdAt": "2026-11-18T14:09:10.727822Z"
+      },
+      "audit": {
+        "case": "C19",
+        "status": "PASS",
+        "passed": true,
+        "errors": [],
+        "error_count": 0,
+        "aggregates": {
+          "user_seed_count": 0,
+          "agency_seed_count": 0,
+          "negative_balance": 0,
+          "balance_conservation": 0,
+          "balance_vs_ledger_user": 0,
+          "agency_balance_vs_settlements": 0,
+          "ledger_signed_total": 0,
+          "orphan_user": 0,
+          "orphan_agency": 0
+        },
+        "queries": {
+          "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+          "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+          "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0",
+          "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status IN ('SUCCEEDED','PENDING') GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(p.amount_minor),0)<>1000000) t",
+          "balance_vs_ledger_user": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger_entries l ON l.account_type='USER' AND l.account_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor-coalesce(sum(l.amount_minor),0)<>1000000) t",
+          "agency_balance_vs_settlements": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN (SELECT agency_id, sum(net_minor) AS net FROM settlements GROUP BY agency_id) s ON s.agency_id=a.id WHERE a.settlement_balance_minor<>coalesce(s.net,0)) t",
+          "ledger_signed_total": "SELECT abs(coalesce(sum(amount_minor),0)) FROM ledger_entries",
+          "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+          "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+        },
+        "absent_tables": [
+          "settlement_items"
+        ],
+        "info": {
+          "settlement_columns": "id,idempotency_key,agency_id,payment_count,gross_minor,fee_minor,net_minor,created_at,business_date"
+        },
+        "counts": {
+          "payments": 6,
+          "ledger": 38,
+          "settlements": 3,
+          "items": 4,
+          "bank": 6,
+          "pending": 0,
+          "succeeded": 6,
+          "failed": 0
+        }
+      },
+      "scope": "KST timestamp fixture and immutable additional snapshot",
+      "late_success": {
+        "status": "FAIL",
+        "error": "{'status': 422, 'body': {'code': 'NOTHING_TO_SETTLE', 'message': 'agency 921 has no unsettled succeeded payments for business date 2026-11-18'}}"
+      }
+    },
+    "final_audit": {
+      "case": "C19",
+      "status": "FAIL",
+      "passed": false,
+      "errors": [
+        "pending:18e14be2-2daf-4d85-9b72-5dd60197108a"
+      ],
+      "error_count": 1,
+      "aggregates": {
+        "user_seed_count": 0,
+        "agency_seed_count": 0,
+        "negative_balance": 0,
+        "balance_conservation": 0,
+        "balance_vs_ledger_user": 0,
+        "agency_balance_vs_settlements": 0,
+        "ledger_signed_total": 0,
+        "orphan_user": 0,
+        "orphan_agency": 0
+      },
+      "queries": {
+        "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+        "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+        "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0",
+        "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status IN ('SUCCEEDED','PENDING') GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(p.amount_minor),0)<>1000000) t",
+        "balance_vs_ledger_user": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger_entries l ON l.account_type='USER' AND l.account_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor-coalesce(sum(l.amount_minor),0)<>1000000) t",
+        "agency_balance_vs_settlements": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN (SELECT agency_id, sum(net_minor) AS net FROM settlements GROUP BY agency_id) s ON s.agency_id=a.id WHERE a.settlement_balance_minor<>coalesce(s.net,0)) t",
+        "ledger_signed_total": "SELECT abs(coalesce(sum(amount_minor),0)) FROM ledger_entries",
+        "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+        "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+      },
+      "absent_tables": [
+        "settlement_items"
+      ],
+      "info": {
+        "settlement_columns": "id,idempotency_key,agency_id,payment_count,gross_minor,fee_minor,net_minor,created_at,business_date"
+      },
+      "counts": {
+        "payments": 7,
+        "ledger": 40,
+        "settlements": 3,
+        "items": 4,
+        "bank": 6,
+        "pending": 1,
+        "succeeded": 6,
+        "failed": 0
+      }
+    }
+  },
+  "requests": [
+    {
+      "path": "/api/payments/5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.20526625600177795,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "f25c25a7-8d59-550b-8a00-9d14c7163799",
+          "createdAt": "2026-11-18T14:08:32.135248Z",
+          "completedAt": "2026-11-18T14:08:45.517800Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900010,
+        "agencyId": 910,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "C13",
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.109363553012372,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "5b0736a2-da60-4b6c-aa05-9fbe6f0618b6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "f25c25a7-8d59-550b-8a00-9d14c7163799",
+          "createdAt": "2026-11-18T14:08:32.135248Z",
+          "completedAt": "2026-11-18T14:08:45.517800Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900010,
+        "agencyId": 910,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "C14",
+      "agency": 910,
+      "fault": "timeout-after",
+      "elapsed_seconds": 2.045467711010133,
+      "response": {
+        "status": 202,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.010225175006780773,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.008729095992748626,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009160326997516677,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009833100004470907,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009620179000194184,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.01083790800475981,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009074190005776472,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.008579532004659995,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009412536004674621,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009133561994531192,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.00686228099220898,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.007510830997489393,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.009206365997670218,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "PENDING",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "createdAt": "2026-11-18T14:08:54.378612Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments/d48b8e02-1158-40bc-a487-6839ab0bddc6",
+      "request": null,
+      "key": null,
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.007662200994673185,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "2fd8159b-62c3-5081-ab3a-54047f2a47a5",
+          "createdAt": "2026-11-18T14:08:54.378612Z",
+          "completedAt": "2026-11-18T14:09:05.196179Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900010,
+        "agencyId": 910,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "C14",
+      "agency": 910,
+      "fault": null,
+      "elapsed_seconds": 0.0114998039935017,
+      "response": {
+        "status": 200,
+        "body": {
+          "paymentId": "d48b8e02-1158-40bc-a487-6839ab0bddc6",
+          "status": "SUCCEEDED",
+          "userId": 900010,
+          "agencyId": 910,
+          "amount": 100,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 99,
+          "bankTransferId": "2fd8159b-62c3-5081-ab3a-54047f2a47a5",
+          "createdAt": "2026-11-18T14:08:54.378612Z",
+          "completedAt": "2026-11-18T14:09:05.196179Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900020,
+        "agencyId": 920,
+        "amount": 101,
+        "currency": "KRW"
+      },
+      "key": "clock-0",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.06854190200101584,
+      "response": {
+        "status": 201,
+        "body": {
+          "paymentId": "3bf5211b-df19-45ce-91e5-5e309cd709d5",
+          "status": "SUCCEEDED",
+          "userId": 900020,
+          "agencyId": 920,
+          "amount": 101,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 100,
+          "bankTransferId": "5eecfe7b-5b86-581c-bc54-b3f95ccde687",
+          "createdAt": "2026-11-18T14:09:09.796147Z",
+          "completedAt": "2026-11-18T14:09:09.850372Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900020,
+        "agencyId": 920,
+        "amount": 102,
+        "currency": "KRW"
+      },
+      "key": "clock-1",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.033609492995310575,
+      "response": {
+        "status": 201,
+        "body": {
+          "paymentId": "ddb9c760-7c70-4380-bab0-17f872ae7d7b",
+          "status": "SUCCEEDED",
+          "userId": 900020,
+          "agencyId": 920,
+          "amount": 102,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 101,
+          "bankTransferId": "b5bcf1f8-a5c4-549d-a5a9-6b01c9776615",
+          "createdAt": "2026-11-18T14:09:09.864905Z",
+          "completedAt": "2026-11-18T14:09:09.884789Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900020,
+        "agencyId": 920,
+        "amount": 103,
+        "currency": "KRW"
+      },
+      "key": "clock-2",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.06220452800334897,
+      "response": {
+        "status": 201,
+        "body": {
+          "paymentId": "396b4f9d-9a7a-4e54-ab16-633b7b1e957c",
+          "status": "SUCCEEDED",
+          "userId": 900020,
+          "agencyId": 920,
+          "amount": 103,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 102,
+          "bankTransferId": "8938561e-a7e9-58c9-8780-c13e19629203",
+          "createdAt": "2026-11-18T14:09:09.897229Z",
+          "completedAt": "2026-11-18T14:09:09.947285Z"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 920,
+        "businessDate": "2020-01-01"
+      },
+      "key": "clock-before",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.08451612299541011,
+      "response": {
+        "status": 201,
+        "body": {
+          "settlementId": "dd2a8b06-44bd-4a44-9041-f300b9a42428",
+          "agencyId": 920,
+          "businessDate": "2020-01-01",
+          "status": "SUCCEEDED",
+          "paymentCount": 1,
+          "grossAmount": 101,
+          "feeAmount": 1,
+          "netAmount": 100,
+          "createdAt": "2026-11-18T14:09:10.449447Z"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 920,
+        "businessDate": "2020-01-02"
+      },
+      "key": "clock-after",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.015593457996146753,
+      "response": {
+        "status": 201,
+        "body": {
+          "settlementId": "05daefd7-0d91-4b07-86b9-7dff3968ce32",
+          "agencyId": 920,
+          "businessDate": "2020-01-02",
+          "status": "SUCCEEDED",
+          "paymentCount": 2,
+          "grossAmount": 205,
+          "feeAmount": 2,
+          "netAmount": 203,
+          "createdAt": "2026-11-18T14:09:10.519297Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900020,
+        "agencyId": 920,
+        "amount": 104,
+        "currency": "KRW"
+      },
+      "key": "clock-late",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.03167257200402673,
+      "response": {
+        "status": 201,
+        "body": {
+          "paymentId": "6583e86c-ff54-455d-aa29-f5ff3126e8f2",
+          "status": "SUCCEEDED",
+          "userId": 900020,
+          "agencyId": 920,
+          "amount": 104,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 103,
+          "bankTransferId": "755732aa-3972-5943-97c1-38a61d30ab91",
+          "createdAt": "2026-11-18T14:09:10.534884Z",
+          "completedAt": "2026-11-18T14:09:10.554828Z"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 920,
+        "businessDate": "2020-01-02"
+      },
+      "key": "clock-after",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.011330776993418112,
+      "response": {
+        "status": 200,
+        "body": {
+          "settlementId": "05daefd7-0d91-4b07-86b9-7dff3968ce32",
+          "agencyId": 920,
+          "businessDate": "2020-01-02",
+          "status": "SUCCEEDED",
+          "paymentCount": 2,
+          "grossAmount": 205,
+          "feeAmount": 2,
+          "netAmount": 203,
+          "createdAt": "2026-11-18T14:09:10.519297Z"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 920,
+        "businessDate": "2020-01-02"
+      },
+      "key": "clock-additional",
+      "agency": 920,
+      "fault": null,
+      "elapsed_seconds": 0.013910632987972349,
+      "response": {
+        "status": 201,
+        "body": {
+          "settlementId": "aa25df56-277c-47d7-84f0-a18a4a1d21a2",
+          "agencyId": 920,
+          "businessDate": "2020-01-02",
+          "status": "SUCCEEDED",
+          "paymentCount": 1,
+          "grossAmount": 104,
+          "feeAmount": 1,
+          "netAmount": 103,
+          "createdAt": "2026-11-18T14:09:10.727822Z"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900021,
+        "agencyId": 921,
+        "amount": 107,
+        "currency": "KRW"
+      },
+      "key": "late-success",
+      "agency": 921,
+      "fault": null,
+      "elapsed_seconds": 0.5386798730032751,
+      "response": {
+        "status": 202,
+        "body": {
+          "paymentId": "18e14be2-2daf-4d85-9b72-5dd60197108a",
+          "status": "PENDING",
+          "userId": 900021,
+          "agencyId": 921,
+          "amount": 107,
+          "currency": "KRW",
+          "feeBps": 100,
+          "feeAmount": 1,
+          "netAmount": 106,
+          "createdAt": "2026-11-18T14:09:15.311831Z"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 921,
+        "businessDate": "2026-11-18"
+      },
+      "key": "late-before",
+      "agency": 921,
+      "fault": null,
+      "elapsed_seconds": 0.04217614799563307,
+      "response": {
+        "status": 422,
+        "body": {
+          "code": "NOTHING_TO_SETTLE",
+          "message": "agency 921 has no unsettled succeeded payments for business date 2026-11-18"
+        }
+      }
+    }
+  ]
+}

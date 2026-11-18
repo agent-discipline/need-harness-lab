@@ -1,0 +1,44 @@
+{
+  "phase": "capacity200",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.14637889199366327,
+      "count": 296
+    },
+    {
+      "elapsed": 1.3031619429966668,
+      "count": 241
+    },
+    {
+      "elapsed": 2.453847726996173,
+      "count": 187
+    },
+    {
+      "elapsed": 3.596617128001526,
+      "count": 126
+    },
+    {
+      "elapsed": 4.739285212999675,
+      "count": 94
+    },
+    {
+      "elapsed": 5.892994615001953,
+      "count": 51
+    },
+    {
+      "elapsed": 7.0438921390014,
+      "count": 1
+    },
+    {
+      "elapsed": 8.180724602992996,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

@@ -1,0 +1,137 @@
+{
+  "project": "payment-claude-pilot-04-v3",
+  "phases": [
+    {
+      "phase": "warmup",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.14983771300467197,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "normal",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15487973199924454,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "spike_recovery",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.153378121991409,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "soak",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.14432594800018705,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity25",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.14556180698855314,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity50",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15665872699173633,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity100",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15475279999373015,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity200",
+      "k6_exit_code": 107,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.1505431160039734,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    }
+  ],
+  "all_acceptance_passed": false,
+  "c20_passed": false,
+  "phase_gates_passed": false,
+  "sustainable_rps": null
+}

@@ -1,0 +1,60 @@
+{
+  "phase": "capacity200",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.1635889539902564,
+      "count": 907
+    },
+    {
+      "elapsed": 1.3470474269997794,
+      "count": 820
+    },
+    {
+      "elapsed": 2.501415509992512,
+      "count": 725
+    },
+    {
+      "elapsed": 3.6545714789972408,
+      "count": 647
+    },
+    {
+      "elapsed": 4.825432098994497,
+      "count": 593
+    },
+    {
+      "elapsed": 6.004932753989124,
+      "count": 502
+    },
+    {
+      "elapsed": 7.154884157993365,
+      "count": 394
+    },
+    {
+      "elapsed": 8.324525669988361,
+      "count": 302
+    },
+    {
+      "elapsed": 9.47625233999861,
+      "count": 219
+    },
+    {
+      "elapsed": 10.633230321996962,
+      "count": 161
+    },
+    {
+      "elapsed": 11.778666314989096,
+      "count": 91
+    },
+    {
+      "elapsed": 12.926959723990876,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

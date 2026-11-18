@@ -1,0 +1,2 @@
+time="2026-11-18T14:42:29Z" level=warning msg="Insufficient VUs, reached 400 active VUs and cannot initialize more" executor=constant-arrival-rate scenario=spike
+time="2026-11-18T14:43:36Z" level=error msg="thresholds on metrics 'checks, committed_response, committed_response{segment:recovery}, committed_response{segment:spike}, dropped_iterations, payment_latency, payment_latency{segment:recovery}, payment_latency{segment:spike}' have been crossed"

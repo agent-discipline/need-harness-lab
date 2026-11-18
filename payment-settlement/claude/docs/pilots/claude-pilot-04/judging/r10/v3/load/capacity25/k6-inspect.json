@@ -1,0 +1,238 @@
+{
+  "Id": "62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5",
+  "Created": "2026-11-18T17:01:20.017886537Z",
+  "Path": "k6",
+  "Args": [
+    "run",
+    "--summary-export=/tmp/summary.json",
+    "/tests/workload.js"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-18T17:01:20.166540405Z",
+    "FinishedAt": "2026-11-18T17:03:21.31767569Z"
+  },
+  "Image": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+  "ResolvConfPath": "/var/lib/docker/containers/62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5/hostname",
+  "HostsPath": "/var/lib/docker/containers/62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5/hosts",
+  "LogPath": "/var/lib/docker/containers/62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5/62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5-json.log",
+  "Name": "/payment-claude-pilot-04-v3-load-4-1795021279",
+  "RestartCount": 0,
+  "Driver": "overlay2",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "docker-default",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    },
+    "NetworkMode": "payment-claude-pilot-04-v3_default",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "no",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 1073741824,
+    "NanoCpus": 2000000000,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 2147483648,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": [],
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/evaluation/k6",
+        "Target": "/tests",
+        "ReadOnly": true
+      }
+    ],
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle",
+      "/sys/devices/system/cpu/cpu8/thermal_throttle",
+      "/sys/devices/system/cpu/cpu9/thermal_throttle",
+      "/sys/devices/system/cpu/cpu10/thermal_throttle",
+      "/sys/devices/system/cpu/cpu11/thermal_throttle",
+      "/sys/devices/system/cpu/cpu12/thermal_throttle",
+      "/sys/devices/system/cpu/cpu13/thermal_throttle",
+      "/sys/devices/system/cpu/cpu14/thermal_throttle",
+      "/sys/devices/system/cpu/cpu15/thermal_throttle",
+      "/sys/devices/system/cpu/cpu16/thermal_throttle",
+      "/sys/devices/system/cpu/cpu17/thermal_throttle",
+      "/sys/devices/system/cpu/cpu18/thermal_throttle",
+      "/sys/devices/system/cpu/cpu19/thermal_throttle",
+      "/sys/devices/system/cpu/cpu20/thermal_throttle",
+      "/sys/devices/system/cpu/cpu21/thermal_throttle",
+      "/sys/devices/system/cpu/cpu22/thermal_throttle",
+      "/sys/devices/system/cpu/cpu23/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "GraphDriver": {
+    "Data": {
+      "ID": "62b1a963b5b5473918a0ac259636b720d2033ea089a5b3c846c079ce3bb1a0b5",
+      "LowerDir": "/var/lib/docker/overlay2/d4b6ba2a51bb69522d8de4f0845c98500f7d884de534cec82f5055a2ce189416-init/diff:/var/lib/docker/overlay2/5d81bc8e7bcbfceb70f650b44c2955dc1078f8c6a25b65b1d607da4b7ac85c0f/diff:/var/lib/docker/overlay2/67e568845446bab1e13f91e49230e236e927017661758809b77b27e19892ec4f/diff:/var/lib/docker/overlay2/206bbc2cf5b852b90bf03bf1c54eacc042908606680c5d4a19d6b1d2923240cb/diff:/var/lib/docker/overlay2/d5ac93ec86271b547b8d4a775561f24e4b305b232a5c08cadc3192a3682389c2/diff",
+      "MergedDir": "/var/lib/docker/overlay2/d4b6ba2a51bb69522d8de4f0845c98500f7d884de534cec82f5055a2ce189416/merged",
+      "UpperDir": "/var/lib/docker/overlay2/d4b6ba2a51bb69522d8de4f0845c98500f7d884de534cec82f5055a2ce189416/diff",
+      "WorkDir": "/var/lib/docker/overlay2/d4b6ba2a51bb69522d8de4f0845c98500f7d884de534cec82f5055a2ce189416/work"
+    },
+    "Name": "overlay2"
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/evaluation/k6",
+      "Destination": "/tests",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    }
+  ],
+  "Config": {
+    "Hostname": "62b1a963b5b5",
+    "Domainname": "",
+    "User": "12345",
+    "AttachStdin": false,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "BASE_URL=http://app:8080",
+      "PHASE=capacity",
+      "RUN_ID=payment-claude-pilot-04-v3-load-4-1795021279",
+      "RATE=25",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "Cmd": [
+      "run",
+      "--summary-export=/tmp/summary.json",
+      "/tests/workload.js"
+    ],
+    "Image": "grafana/k6:1.2.3",
+    "Volumes": null,
+    "WorkingDir": "/home/k6",
+    "Entrypoint": [
+      "k6"
+    ],
+    "Labels": {}
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "payment-claude-pilot-04-v3_default": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "b8969741d4a3d1d9037a891a5569ef39715561b610e49cbcbe186ac6a6f9340c",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "payment-claude-pilot-04-v3-load-4-1795021279",
+          "62b1a963b5b5"
+        ]
+      }
+    }
+  }
+}

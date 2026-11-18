@@ -1,0 +1,38 @@
+The evaluator's fault-injection header is `X-Bank-Fault`, but my controller only read `X-Fault` (the bank fixture's own header name). `X-Bank-Fault: decline` was silently ignored, the bank call went through without a fault, and the payment succeeded. I'll check the current handler.
+
+The real jar matches the expected result. Now the docs, which still name `X-Fault` as the client header:
+
+C10 is fixed. Your exact request now returns 422, the payment ends FAILED, the bank records no transfer, and the user is not charged. The full build passes with 80 tests and 0 failures.
+
+**Cause:** my code only recognised the fault header under the bank fixture's own name, `X-Fault`. The `X-Bank-Fault: decline` header in your request was ignored, so the bank call went out without a fault and the payment succeeded.
+
+**Changes**
+- **Header name:** `X-Bank-Fault` is now the request header. It's passed to the bank as `X-Fault` on that payment's first bank call only; automatic retries never carry it.
+- **Compatibility and checks:** `X-Fault` still works as an alternative name. If both are sent with different values, or the value isn't one of the four allowed, the request gets a 400 and nothing is stored. Surrounding spaces and upper/lower case are ignored.
+- **Existing tests:** all fault tests (decline, 5xx, both timeouts, recovery) now send `X-Bank-Fault`, the header the evaluator uses.
+
+**Verification**
+- **Acceptance test with your exact request** (key `p04r06v1-decline`, `X-Bank-Fault: decline`). It checks:
+  - 422 with `status: FAILED` and `code: BANK_DECLINED`;
+  - the bank was called once and recorded nothing;
+  - user 900001's balance is unchanged: the amount was held and then released, a net change of 0;
+  - no ledger row for the payment, and the agency balance is 0;
+  - after the recovery job runs it is still FAILED, and resending the request returns the same 422 with the same `paymentId`.
+- **The other three fault values** behave as before:
+  - `timeout-after`: 201, because the bank recorded the transfer before stalling and the app found it.
+  - `5xx` and `timeout-before`: 202 at first, then the recovery job retries without the fault and they end as SUCCEEDED, with exactly one bank transfer each.
+- **Real app process** on a fresh database, with the Python bank stand-in:
+
+| Check | Result |
+|---|---|
+| Your exact request | HTTP 422, FAILED, BANK_DECLINED |
+| User 900001 balance | 1,000,000 (unchanged) |
+| Ledger | hold −100 / +100, then release −100 / +100 |
+| Bank journal | 0 rows |
+| After 15s (recovery has run) + resend | still 422 FAILED, same `paymentId`; balance and journal unchanged |
+| `timeout-after` / `5xx` / `timeout-before` | 201 / 202 / 202, all SUCCEEDED by the end |
+
+**Still open**
+- **5xx and timeout-before:** these end as SUCCEEDED because the retries go out without the fault. If the evaluator expects them to end as FAILED, that's a policy change I'd need to make.
+- **Fault passthrough:** it's on by default. A real deployment should turn it off with `BANK_FAULT_PASSTHROUGH=false`.
+- **Not committed:** nothing is committed yet.

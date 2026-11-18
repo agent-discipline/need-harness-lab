@@ -1,0 +1,38 @@
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T12:21:50.671Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T12:21:50.676Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T12:21:55.562Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T12:21:55.583Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T12:21:55.584Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T12:21:55.666Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T12:21:55.667Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 4727 ms
+2026-11-18T12:21:56.439Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T12:21:56.851Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@5dfc2a4
+2026-11-18T12:21:56.854Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T12:21:56.903Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T12:21:57.036Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-11-18T12:21:57.042Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 2 migrations (execution time 00:00.075s)
+2026-11-18T12:21:57.062Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" with baseline ...
+2026-11-18T12:21:57.194Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbBaseline     : Successfully baselined schema with version: 0
+2026-11-18T12:21:57.264Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 0
+2026-11-18T12:21:57.285Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - payments and ledger"
+2026-11-18T12:21:57.384Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - ledger view"
+2026-11-18T12:21:57.409Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Successfully applied 2 migrations to schema "public", now at version v2 (execution time 00:00.084s)
+2026-11-18T12:21:59.151Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T12:21:59.291Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T12:21:59.350Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 10.067 seconds (process running for 11.146)
+2026-11-18T12:22:03.769Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T12:22:03.769Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T12:22:03.771Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms
+2026-11-18T12:22:41.049Z  INFO 1 --- [payment-lab] [nio-8080-exec-6] l.p.application.BankTransferExecutor     : Payment d54a9363-b356-4cf3-a57f-94d5f5e8bfda stays PENDING after attempt 1: timeout after 1000ms
+2026-11-18T12:22:42.763Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment d54a9363-b356-4cf3-a57f-94d5f5e8bfda -> SUCCEEDED

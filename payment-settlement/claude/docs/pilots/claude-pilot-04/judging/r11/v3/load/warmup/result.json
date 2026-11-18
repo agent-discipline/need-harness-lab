@@ -1,0 +1,16 @@
+{
+  "phase": "warmup",
+  "k6_exit_code": 0,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.16098658498958685,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": true
+}

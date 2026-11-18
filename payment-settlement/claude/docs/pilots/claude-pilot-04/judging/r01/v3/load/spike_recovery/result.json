@@ -1,0 +1,16 @@
+{
+  "phase": "spike_recovery",
+  "k6_exit_code": 107,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.153378121991409,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

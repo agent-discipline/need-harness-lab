@@ -1,0 +1,16 @@
+{
+  "phase": "soak",
+  "k6_exit_code": 0,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.16504020099819172,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": 0.004252652908868004,
+  "passed": true
+}

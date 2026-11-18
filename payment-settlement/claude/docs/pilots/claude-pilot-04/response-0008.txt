@@ -1,0 +1,47 @@
+C15 is fixed. A settlement is now recorded for the `businessDate` you request, and it only includes that agency's payments that succeeded on that date (Asia/Seoul). The full build passes with 86 tests and 0 failures.
+
+**Cause:** settlements had no business date at all. A settlement request swept up every unsettled payment of the agency, whatever day it succeeded on, and the `businessDate` in the request was ignored.
+
+**Changes**
+- **Business date of a payment:** when a payment succeeds, it is stamped with the Asia/Seoul date of that moment. A payment that succeeds at 00:30 KST belongs to the new day.
+- **Settlement by date:** `POST /api/settlements` reads `businessDate` (`YYYY-MM-DD`), includes only that agency's unsettled successful payments with that date, and stores the date on the settlement. The date appears in the POST response and in `GET /api/settlements/{id}`.
+- **Database safeguard:** a constraint makes the database itself reject linking a payment to a settlement of a different agency or date.
+- **Request rules:**
+  - Leaving out `businessDate` means today in Seoul. A badly formatted or future date is a 400.
+  - Resending the same key returns the same settlement (200). The same key with a different date is a 409.
+  - Nothing to settle for that date is a 422 `NOTHING_TO_SETTLE`.
+- **Amounts (unchanged):** the fee is rounded down per payment and then summed, gross = fee + net, and the agency balance increases once.
+- **Migration V5:** fills in the business date for existing payments and settlements. If an existing settlement contains payments from more than one date, startup stops with an error instead of guessing.
+
+**Verification**
+- **Acceptance test with your sequence:** agency 904, the three payments `p04r07v1-settle-pay-0/1/2` (101, 199, 10001), then `p04r07v1-settle` sent twice.
+  - First request 201, second 200, with the same response body.
+  - paymentCount 3, gross 10,301, fee 102, net 10,199. The fee is 1 + 1 + 100; rounding the total once would have given 103.
+  - The stored settlement and the GET response carry the date, and all three payments succeeded on that same Seoul date.
+  - Agency 904's balance is 10,199, credited once.
+- **Additional tests:**
+  - Today and yesterday are settled separately, each with only its own payments.
+  - Bad formats and future dates are rejected; an omitted date defaults to today.
+  - The same key with another date is rejected.
+  - The database refuses to put a payment into a settlement for another date.
+  - The day changes at 15:00 UTC (midnight in Seoul).
+- **Checked after every DB test:** each successful payment's date is the Seoul date of its success time, and each settled payment has the same date and agency as its settlement.
+- **Real app process** on a fresh database, with today's Seoul date (2026-11-18):
+
+| Check | Result |
+|---|---|
+| Settlement, sent twice | 201, then 200 with the same `settlementId` |
+| Response and GET | `businessDate` "2026-11-18", count 3, 10301 / 102 / 10199 |
+| Stored settlement | business date 2026-11-18 |
+| The 3 payments | each succeeded on 2026-11-18 Seoul time, matching the settlement |
+| Agency 904 balance | 10,199 |
+
+- **Upgrading an older database:**
+  - Existing rows got the correct date, including one that succeeded at 01:00 KST and one at 00:30 KST the next day.
+  - A database with an old settlement spanning two dates was refused with the intended message, and stayed on the previous version with no partial changes.
+
+**Still open**
+- **Defaulting to today:** I chose to default a missing `businessDate` to today rather than reject the request. If it should be required, that's a one-line change.
+- **Several settlements per date:** if a payment succeeds after a date was already settled, settling that date again with a new key creates a second settlement for the same date. If there must be only one settlement per agency per date, I'd need to change that.
+- **Shared DB:** `db:5432` will apply V2–V5 the next time the app starts there. I didn't connect to it during this work.
+- **Not committed:** nothing is committed yet.

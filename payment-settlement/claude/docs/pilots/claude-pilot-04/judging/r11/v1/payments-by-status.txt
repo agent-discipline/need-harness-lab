@@ -1,0 +1,5 @@
+status|failure_code|count
+FAILED|BANK_DECLINED|1
+FAILED|INSUFFICIENT_BALANCE|50
+SUCCEEDED||64
+(3 rows)

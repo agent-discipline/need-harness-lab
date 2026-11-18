@@ -1,0 +1,30 @@
+C16 is fixed: 50 concurrent settlements for the same agency and date with different keys now all succeed. Exactly one settlement takes the payment, the other 49 are recorded as 0 payments / 0 KRW, and the payment is never in two settlements. The full build passes with 88 tests and 0 failures.
+
+**Cause:** when a settlement found nothing left to settle, it returned 422 `NOTHING_TO_SETTLE` and saved nothing. In a concurrent race, everything after the first request ended up there.
+
+**Changes**
+- **Empty settlements:** a settlement with nothing to include is now saved as 0 payments / 0 KRW for that date, returned as 201, and returned as 200 when the same key is sent again. The 422 error no longer exists.
+- **Concurrent settlements no longer exhaust the pool:** this is the same problem as C07's hot user.
+  - Concurrent settlements for one agency were each waiting on that agency's row while holding a DB connection, so a burst could tie up all 10 connections and turn unrelated requests into 503s.
+  - Settlements now queue per agency in the app, without holding a connection. The C07 per-user queue and this one share one implementation.
+  - Correctness still rests on the database: each settlement locks the agency row, and only payments not yet settled can be included.
+
+**Verification**
+- **Acceptance test with your sequence:** payment `p04r08v1-settle-race-pay` (101 KRW, agency 905), then 50 settlements `p04r08v1-settle-race-0..49` at once.
+  - All 50 return 200 or 201, and the `paymentCount` values sum to 1.
+  - Exactly one settlement has 1 payment (gross 101, fee 1, net 100); the other 49 are all zeros with the same `businessDate`.
+  - There are 50 distinct settlement IDs, the payment points to the one that took it, and agency 905's balance is 100.
+  - Sending one of the empty settlements' keys again returns the same settlement with 200.
+- **Pool test:** an outside transaction locks agency 905's row while 30 settlements for 905 and 8 payments for other agencies arrive. The payments must complete while the lock is still held. Without the queue, **all 8 payments got 503**; with it, they all succeed and the settlements complete once the lock is released.
+- **Real app process,** run twice, each on a freshly started app and a freshly seeded database. I added `tools/e2e/settle_race.py` to the end-to-end harness for this.
+
+| Run | Responses | Σ paymentCount | Settlements stored | Agency 905 balance | 503s |
+|---|---|---|---|---|---|
+| 1 | 201 × 50 (1 with the payment, 49 empty) | 1 | 50 (1 date, Σ gross 101) | 100 | 0 |
+| 2 | 201 × 50 (1 with the payment, 49 empty) | 1 | 50 (1 date, Σ gross 101) | 100 | 0 |
+
+**Still open**
+- **Empty-settlement rows:** these accumulate (49 rows in this scenario). That's what the requirement implies, but it means any request without new payments still writes a row.
+- **Multiple app instances:** the per-agency queue works within one app process. With several instances, settlement waits could again tie up connections per instance, but no payment would ever be settled twice.
+- **Shared DB:** `db:5432` will apply V2–V5 the next time the app starts there. I didn't connect to it during this work.
+- **Not committed:** nothing is committed yet.

@@ -1,0 +1,20 @@
+{
+  "run_id": "claude-pilot-04",
+  "event_count": 152,
+  "input_tokens": 32208042,
+  "output_tokens": 291573,
+  "total_tokens": 32499615,
+  "cached_input_tokens": 31658192,
+  "cache_write_input_tokens": 549534,
+  "reasoning_tokens": null,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "claude-opus-5-5"
+  ],
+  "actual_models": [
+    "claude-opus-5-5"
+  ],
+  "actual_model_missing_events": 0
+}
+

@@ -1,0 +1,48 @@
+This run settles the cold-start question: the app was **not** restarted between stages and the health check passed first. Soak at 30 RPS is perfect (p95 60ms, all 27,000 synchronous), 50 RPS is borderline (p95 467ms), and 100 RPS collapses. That pattern means effective throughput to the bank tops out around 55–60 payments/s in your environment. The question is whether the limit is the bank itself, or something in how the app talks to it.
+
+The real bank's POST cost is the missing number. My earlier probes only used GETs, so as not to write to the shared journal. The contract offers a safe way to measure it, though: **`X-Fault: decline` with a fresh key records nothing**. That covers almost the whole POST path (request parsing, JSON, validation, the SQLite key lookup) without a write.
+
+I'll use it to measure two things against the real bank:
+
+1. Capacity at different concurrency levels.
+2. Whether the **JDK HttpClient** that the app uses is slower per POST than a client that sends headers and body in one write. A classic cause is Nagle's algorithm interacting with delayed ACKs, which adds ~40ms per request when a small body follows the headers in a separate packet.
+
+103 of 104 pass, including all the new client tests and the existing adapter contract tests. One recovery test failed: "Expected size: 3 but was: 5". I'll look at the failure in detail.
+
+`build/probe` was removed by an earlier `./gradlew clean`, since it sits under `build/`. I'll recreate the directory and run again.
+
+The regression test now catches the bug deterministically. On the old query, `claimDue(3)` claimed **40** rows; on the fixed query it passes. Full build:
+
+I made two more fixes for C20, plus a separate bug I found along the way. In my local setup, run in your stage order on one app instance, every stage now passes. Whether it passes in your environment needs your next run. The full build passes with 105 tests and 0 failures.
+
+**Cause**
+Since the app wasn't restarted between stages, cold start was ruled out. What remained was the HTTP client the app used to call the bank. To test the bank without writing to its records, I sent requests with `X-Fault: decline`, which per the fixture rules records nothing.
+
+- Against your real bank at 5 concurrent requests, the client I was using (Java's built-in `HttpClient`) failed **3–6% of calls** with `header parser received no bytes`. A Python client sending the same requests had **0 failures**.
+- Against my local stand-in bank: Java client p95 74ms with errors; Python client p95 9ms and about 3× the throughput.
+- Each failed call left the app unsure whether the transfer happened, so it had to look it up and send again: three bank calls instead of one, while the CPU-limited bank was at its busiest. That fits payments slowing down at 50 RPS and collapsing at 100 RPS.
+
+**Changes**
+- **New bank HTTP client (`OneShotHttpClient`):** a small client written for this bank's protocol. It opens one connection per request, sends headers and body together in a single write, and reads the response within a time limit. On the same test it had zero failures against your real bank, and local p95 dropped from 74ms to 7.7ms. Only a failure to connect counts as "not sent"; anything after that is checked with a lookup before resending, as before. Nothing else in the app changed.
+- **Recovery job bug (separate from C20):** the query that picks pending payments for the recovery job could take far more than its limit, depending on PostgreSQL's table statistics. I reproduced it taking 40 payments when asked for 3. Money was never at risk, because every payment status change is guarded, but batch sizes and leases were wrong. The query now selects exactly once, and a regression test that fails on the old query and passes on the new one guards it.
+
+**Verification**
+- **Tests:** new tests cover the new client: the whole request arrives in a single read, responses are read correctly, timeouts fire on time, and failures are classified correctly. The existing bank adapter tests pass unchanged.
+- **Load test, in your stage order on one app instance without restarts** (stand-in bank limited to 0.5 CPU and not pre-warmed, host busy with other workloads; the 50 RPS stage shortened to 2 minutes and soak to 3):
+
+| Stage | p95 | p99 | dropped | 5xx | Not synchronously confirmed |
+|---|---|---|---|---|---|
+| Warm-up 10 RPS | 73ms | 77ms | 0 | 0 | 0 |
+| Normal 50 RPS | 67ms | 74ms | 0 | 0 | 0 |
+| **Spike 100 RPS 30s** | **74ms** | **87ms** | **0** | 0 | **0** |
+| Back to 50 RPS 60s | 66ms | 73ms | 0 | 0 | 0 |
+| Soak 30 RPS | 64ms | 69ms | 0 | 0 | 0 |
+
+There were no "no response" errors and almost no waiting for a bank slot (at most 0.4ms on average). Each payment took about one bank call: 2,855 calls for 2,850 new payments in the spike. Nothing was left PENDING, and memory and thread counts stayed stable.
+
+**Limits of this check**
+- **Still not your environment.** The real bank's cost per *recorded* transfer is unmeasured, because I didn't want to add entries to its records. If writing a record is much more expensive than the decline path, the bank itself could cap throughput below 100/s, and no client change would help. If the spike still fails, the `bank.call` and `bank.slot.wait` numbers at `/actuator/metrics` will show whether time goes into the bank calls themselves or into waiting for a slot.
+- **The earlier "slow fresh journal" effect is gone.** Last time I attributed the start-of-spike slowness partly to my stand-in's new database file. In this run, with a fresh file, the spike passed, so at least part of that was the old client's errors and resends.
+- **Still in place from last round:** the faster-starting Java setting in the Dockerfile, and `/health` returning 503 during the roughly 8-second warm-up.
+
+Nothing is committed yet.

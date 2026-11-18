@@ -1,0 +1,35 @@
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T11:32:40.968Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T11:32:40.972Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T11:32:46.505Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T11:32:46.555Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T11:32:46.556Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T11:32:46.601Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T11:32:46.603Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 5425 ms
+2026-11-18T11:32:47.416Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T11:32:47.912Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@1a0f349
+2026-11-18T11:32:47.915Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T11:32:48.000Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T11:32:48.090Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-11-18T11:32:48.096Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 1 migration (execution time 00:00.026s)
+2026-11-18T11:32:48.172Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" with baseline ...
+2026-11-18T11:32:48.282Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbBaseline     : Successfully baselined schema with version: 0
+2026-11-18T11:32:48.355Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 0
+2026-11-18T11:32:48.377Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - payments and ledger"
+2026-11-18T11:32:48.503Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Successfully applied 1 migration to schema "public", now at version v1 (execution time 00:00.103s)
+2026-11-18T11:32:51.971Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T11:32:52.175Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T11:32:52.210Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 12.754 seconds (process running for 14.059)
+2026-11-18T11:32:53.794Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T11:32:53.795Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T11:32:53.797Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms

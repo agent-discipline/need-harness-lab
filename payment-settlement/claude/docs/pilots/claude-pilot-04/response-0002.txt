@@ -1,0 +1,29 @@
+C01 is fixed. The exact request you sent now returns 201 with `status: "SUCCEEDED"`, and it produces exactly one payment, one user debit, one bank transfer and one ledger row.
+
+**Cause:** the controllers were mapped to `/payments` and `/agencies/...` with no `/api` prefix. Spring returned 404 before any application code ran, which is why nothing was written to the DB or the bank journal.
+
+**Changes**
+- **Paths:** `/api/payments`, `/api/payments/{id}` and `/api/agencies/{id}/settlement` are now the canonical paths. The old paths without `/api` still work as aliases.
+- **`X-Agency-Id` header:** now accepted. I treated it as "the agency making the call", so if it differs from the body's `agencyId` the request is rejected with 403 `AGENCY_MISMATCH`, and a value that isn't a positive integer gets 400. That's my own interpretation.
+- **`ledger` view (V2 migration):** FIXTURE.md refers to a `ledger` table and the requirement counts one ledger entry per payment. My ledger is double-entry, so one successful payment writes 5 rows to `ledger_entries`. I added a read-only `ledger` view with one row per settled payment. I made it a V2 migration because V1 is already applied on the shared DB and its checksum must not change.
+- **Tests:** they now seed full fixture size (1,000,000 users, 1,000 agencies), so IDs like 900001 and 901 exist.
+
+**Verification**
+- **Regression test** `AcceptanceC01Test` sends the same path, headers and body you gave. It checks the 201 response and SUCCEEDED status, that only user 900001's balance changed (down 100), one USER ledger leg, exactly one bank POST and journal entry, one `ledger` row, and agency 901's settlement balance of 99. The same class also covers the header mismatch and the legacy paths.
+- **Full build:** `./gradlew clean test bootJar` passes with 58 tests and 0 failures.
+- **Real process:** I sent the identical request with `curl` to the built jar, running against a throwaway PostgreSQL 16 with the full seed and a Python bank stub. The `/tmp` scratch area had been wiped, so I rebuilt it first.
+
+| Check | Result |
+|---|---|
+| Response | `HTTP/1.1 201`, `status: SUCCEEDED`, fee 1, net 99 |
+| `payments` | 1 row, SUCCEEDED |
+| User 900001 | 999,900; only one user's balance changed |
+| Bank journal | 1 entry, keyed by the paymentId |
+| `ledger` / `ledger_entries` | 1 row / AUTHORIZE 2 legs + CAPTURE 3 legs, balanced |
+| Agency 901 settlement balance | 99 |
+
+**Still open**
+- I don't know the column names the evaluator expects in `ledger`. If its query differs from my view (`payment_id, user_id, agency_id, amount_minor, fee_minor, net_minor, …`), please send me the expected schema.
+- If a mismatched `X-Agency-Id` is supposed to get something other than 403, that will need adjusting.
+- The shared DB (`db:5432`) gets the V2 view automatically the next time the app starts there. I didn't touch it during this fix.
+- Nothing is committed yet.

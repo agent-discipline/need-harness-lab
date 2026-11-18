@@ -1,0 +1,237 @@
+{
+  "project": "payment-claude-pilot-04-v3",
+  "phases": [
+    {
+      "phase": "warmup",
+      "k6_exit_code": 0,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.16627908499503974,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": true
+    },
+    {
+      "phase": "normal",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15923730299982708,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "spike_recovery",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15306813399365637,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "soak",
+      "k6_exit_code": 0,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15741238500049803,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": false,
+      "soak_rss_growth": 0.0031777464091464758,
+      "passed": false
+    },
+    {
+      "phase": "capacity25",
+      "k6_exit_code": 0,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.16576501799863763,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": true
+    },
+    {
+      "phase": "capacity50",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.15339958299591672,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity100",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.17994466100935824,
+          "count": 744
+        },
+        {
+          "elapsed": 1.3328539439971792,
+          "count": 657
+        },
+        {
+          "elapsed": 2.5001889780105557,
+          "count": 591
+        },
+        {
+          "elapsed": 3.65935656100919,
+          "count": 545
+        },
+        {
+          "elapsed": 4.813771916000405,
+          "count": 465
+        },
+        {
+          "elapsed": 5.965955974999815,
+          "count": 380
+        },
+        {
+          "elapsed": 7.147430746001191,
+          "count": 303
+        },
+        {
+          "elapsed": 8.298707563008065,
+          "count": 224
+        },
+        {
+          "elapsed": 9.445588083006442,
+          "count": 177
+        },
+        {
+          "elapsed": 10.60799020100967,
+          "count": 114
+        },
+        {
+          "elapsed": 11.769172553002136,
+          "count": 37
+        },
+        {
+          "elapsed": 12.927332300998387,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    },
+    {
+      "phase": "capacity200",
+      "k6_exit_code": 99,
+      "summary_saved": true,
+      "pending_samples": [
+        {
+          "elapsed": 0.1649051340064034,
+          "count": 857
+        },
+        {
+          "elapsed": 1.32615154699306,
+          "count": 816
+        },
+        {
+          "elapsed": 2.4850273250049213,
+          "count": 739
+        },
+        {
+          "elapsed": 3.6380054369947175,
+          "count": 649
+        },
+        {
+          "elapsed": 4.795529637005529,
+          "count": 566
+        },
+        {
+          "elapsed": 5.94954387100006,
+          "count": 490
+        },
+        {
+          "elapsed": 7.09004474899848,
+          "count": 447
+        },
+        {
+          "elapsed": 8.239811314997496,
+          "count": 386
+        },
+        {
+          "elapsed": 9.405907809006749,
+          "count": 290
+        },
+        {
+          "elapsed": 10.562184320006054,
+          "count": 205
+        },
+        {
+          "elapsed": 11.713826113002142,
+          "count": 121
+        },
+        {
+          "elapsed": 12.89530552100041,
+          "count": 42
+        },
+        {
+          "elapsed": 14.053833526006201,
+          "count": 5
+        },
+        {
+          "elapsed": 15.206218402003287,
+          "count": 1
+        },
+        {
+          "elapsed": 16.356998282004497,
+          "count": 0
+        }
+      ],
+      "pending_converged": true,
+      "audit_passed": true,
+      "resources_passed": true,
+      "soak_rss_growth": null,
+      "passed": false
+    }
+  ],
+  "all_acceptance_passed": false,
+  "c20_passed": false,
+  "phase_gates_passed": false,
+  "sustainable_rps": 25
+}

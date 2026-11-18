@@ -1,0 +1,176 @@
+{
+  "run_id": "claude-pilot-04",
+  "judged_by": "메인 세션(실험 통제, Claude Fable 5.2) — 진행자가 모은 11회째 판정 원자료(judging/r11/)의 JSON을 직접 읽고 판정",
+  "judged_at": "2026-11-18T18:35:05+00:00",
+  "judged_state": "턴 0011 뒤 작업 트리(HEAD ec7b322 starter + 미커밋 변경, judging/r11/source-head.txt). 에이전트가 끝까지 커밋하지 않아 작업 트리를 판정 대상으로 삼음",
+  "rounds": "판정 11회·피드백 10회(judging/r01~r11). 회차별 판정기 status는 각 폴더 observations.md",
+  "criteria": {
+    "C01": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "정상 결제 201·SUCCEEDED, 시나리오 뒤 전수 대조 PASS"
+    },
+    "C02": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "잘못된 입력 거절, 전후 행 수 변화 없음"
+    },
+    "C03": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "없는 사용자 404(USER_NOT_FOUND)·없는 대행사 404(AGENCY_NOT_FOUND) — 경로 없음 404가 아님을 응답 본문으로 확인, 전후 스냅샷 해시 동일"
+    },
+    "C04": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "같은 키 재전송 시 같은 결제, 효과 1회"
+    },
+    "C05": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "같은 키에 다른 본문 409, 원본 보존"
+    },
+    "C06": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "동일 키 동시 요청에서 결제 1건"
+    },
+    "C07": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json",
+        "judging/r11/v1/payments-by-status.txt"
+      ],
+      "note": "한 사용자 동시 100건 중 성공 50건, 음수 잔액 0. 거절 50건은 FAILED 행으로 남지만 원장 순효과 0·은행 기록 없음(어댑터 허용 규칙 2 — 파일럿 03과 같은 처리)"
+    },
+    "C08": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "서로 다른 대행사의 같은 키는 각각 201"
+    },
+    "C09": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "헤더 불일치 403, 다른 대행사 조회 404"
+    },
+    "C10": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "은행 decline → 422, FAILED 행(홀드 해제로 순효과 0), 은행 기록 없음(허용 규칙 1·2)"
+    },
+    "C11": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "timeout-before·5xx 모두 202 뒤 SUCCEEDED로 수렴, 거짓 성공 없음"
+    },
+    "C12": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "timeout-after 뒤 SUCCEEDED, 은행 기록 1건"
+    },
+    "C13": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v2/acceptance-faults.json",
+        "judging/r11/v2/acceptance-audit.json"
+      ],
+      "note": "app SIGKILL(은행 기록 있음·DB PENDING 확인 뒤) → 재기동 뒤 SUCCEEDED, 재전송 200"
+    },
+    "C14": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v2/acceptance-faults.json",
+        "judging/r11/v2/acceptance-audit.json"
+      ],
+      "note": "db SIGKILL → 복구 뒤 SUCCEEDED, 재전송 200"
+    },
+    "C15": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "정산 201, 재전송 200 같은 settlementId"
+    },
+    "C16": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "동시 정산 50건 모두 201, paymentCount 합 1"
+    },
+    "C17": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v2/acceptance-faults.json",
+        "judging/r11/v2/acceptance-audit.json"
+      ],
+      "note": "영업일 경계 3건·늦은 추가·늦은 성공 단언 통과. fixture는 completed_at과 business_date를 함께 주입(파일럿 03과 같은 처리)"
+    },
+    "C18": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-http.json",
+        "judging/r11/v1/acceptance-audit.json"
+      ],
+      "note": "빈 정산 201 0건·0원, 재전송 200"
+    },
+    "C19": {
+      "result": "PASS",
+      "evidence": [
+        "judging/r11/v1/acceptance-audit.json",
+        "judging/r11/v2/acceptance-audit.json",
+        "judging/r11/v3/post-load-audit.json"
+      ],
+      "note": "세 stack 전수 대조 PASS, 집계 9개 모두 0. 거래가 있는 상태의 대조임(v1 payments 115·은행 64, v2 7·7, v3 70,222·70,222, PENDING 0). 은행 키가 결제 id 그대로이고 settlement_items 테이블 대신 payments.settlement_id를 쓰는 점은 어댑터가 대조 방법으로 흡수(허용 규칙 4·5)"
+    },
+    "C20": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/r11/v3/load/summary.json",
+        "judging/r11/v3/load-check.stdout",
+        "judging/r11/v3/load/normal/k6-summary.json",
+        "judging/r11/v3/load/spike_recovery/k6-summary.json",
+        "judging/r11/v3/post-load-pending.txt",
+        "judging/r11/v3/post-load-audit.json",
+        "judging/r11/v3/host-samples.txt"
+      ],
+      "note": "필수 단계 미달: normal 50RPS 5분은 p95 367ms·p99 1046ms·dropped 0으로 지연은 임계 안이나 동기 확정 응답이 14,947/15,001(나머지 54건). spike_recovery는 p95 5991ms·p99 6151ms·dropped 676, 동기 확정 4,858/5,325. soak 통과, sustainable 25RPS. 5xx·유실·이중 처리 0, 부하 뒤 PENDING 0·전수 대조 PASS. C20 피드백을 두 번 받은 뒤의 측정(9·10회째도 미달: judging/r09, judging/r10)"
+    }
+  }
+}

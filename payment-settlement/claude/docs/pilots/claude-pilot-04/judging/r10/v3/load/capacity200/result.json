@@ -1,0 +1,72 @@
+{
+  "phase": "capacity200",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.1649051340064034,
+      "count": 857
+    },
+    {
+      "elapsed": 1.32615154699306,
+      "count": 816
+    },
+    {
+      "elapsed": 2.4850273250049213,
+      "count": 739
+    },
+    {
+      "elapsed": 3.6380054369947175,
+      "count": 649
+    },
+    {
+      "elapsed": 4.795529637005529,
+      "count": 566
+    },
+    {
+      "elapsed": 5.94954387100006,
+      "count": 490
+    },
+    {
+      "elapsed": 7.09004474899848,
+      "count": 447
+    },
+    {
+      "elapsed": 8.239811314997496,
+      "count": 386
+    },
+    {
+      "elapsed": 9.405907809006749,
+      "count": 290
+    },
+    {
+      "elapsed": 10.562184320006054,
+      "count": 205
+    },
+    {
+      "elapsed": 11.713826113002142,
+      "count": 121
+    },
+    {
+      "elapsed": 12.89530552100041,
+      "count": 42
+    },
+    {
+      "elapsed": 14.053833526006201,
+      "count": 5
+    },
+    {
+      "elapsed": 15.206218402003287,
+      "count": 1
+    },
+    {
+      "elapsed": 16.356998282004497,
+      "count": 0
+    }
+  ],
+  "pending_converged": true,
+  "audit_passed": true,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

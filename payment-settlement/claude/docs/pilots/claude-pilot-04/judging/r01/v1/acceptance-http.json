@@ -1,0 +1,4564 @@
+{
+  "all_acceptance_passed": false,
+  "namespace": "p04r01v1",
+  "cases": {
+    "C01": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        0,
+        1
+      ]
+    },
+    "C02": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        1,
+        2
+      ]
+    },
+    "C03": {
+      "status": "PASS",
+      "scope": "HTTP+DB+BANK",
+      "audit": {
+        "case": "C19",
+        "status": "PASS",
+        "passed": true,
+        "errors": [],
+        "error_count": 0,
+        "aggregates": {
+          "user_seed_count": 0,
+          "agency_seed_count": 0,
+          "negative_balance": 0,
+          "balance_conservation": 0,
+          "balance_vs_ledger_user": 0,
+          "agency_balance_vs_settlements": 0,
+          "ledger_signed_total": 0,
+          "orphan_user": 0,
+          "orphan_agency": 0
+        },
+        "queries": {
+          "user_seed_count": "SELECT abs(count(*)-1000000) FROM users",
+          "agency_seed_count": "SELECT abs(count(*)-1000) FROM agencies",
+          "negative_balance": "SELECT count(*) FROM users WHERE balance_minor<0",
+          "balance_conservation": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN payments p ON p.user_id=u.id AND p.status IN ('SUCCEEDED','PENDING') GROUP BY u.id,u.balance_minor HAVING u.balance_minor+coalesce(sum(p.amount_minor),0)<>1000000) t",
+          "balance_vs_ledger_user": "SELECT count(*) FROM (SELECT u.id FROM users u LEFT JOIN ledger_entries l ON l.account_type='USER' AND l.account_id=u.id GROUP BY u.id,u.balance_minor HAVING u.balance_minor-coalesce(sum(l.amount_minor),0)<>1000000) t",
+          "agency_balance_vs_settlements": "SELECT count(*) FROM (SELECT a.id FROM agencies a LEFT JOIN (SELECT NULL::bigint AS agency_id, 0::bigint AS net WHERE false) s ON s.agency_id=a.id WHERE a.settlement_balance_minor<>coalesce(s.net,0)) t",
+          "ledger_signed_total": "SELECT abs(coalesce(sum(amount_minor),0)) FROM ledger_entries",
+          "orphan_user": "SELECT count(*) FROM payments p LEFT JOIN users u ON u.id=p.user_id WHERE u.id IS NULL",
+          "orphan_agency": "SELECT count(*) FROM payments p LEFT JOIN agencies a ON a.id=p.agency_id WHERE a.id IS NULL"
+        },
+        "absent_tables": [
+          "settlements",
+          "settlement_items"
+        ],
+        "info": {
+          "agency_balance_vs_succeeded_net_mismatches": 0
+        },
+        "counts": {
+          "payments": 0,
+          "ledger": 0,
+          "settlements": 0,
+          "items": 0,
+          "bank": 0,
+          "pending": 0,
+          "succeeded": 0,
+          "failed": 0
+        }
+      },
+      "snapshots": {
+        "before": {
+          "sha256": "e70290cb25f3645ac176154ff47e2a7b12a11f4b9a8a23f0558983d0feefe1cc",
+          "row_counts": {
+            "payments": 0,
+            "ledger_entries": 0,
+            "settlements": 0,
+            "settlement_items": 0
+          }
+        },
+        "after": {
+          "sha256": "e70290cb25f3645ac176154ff47e2a7b12a11f4b9a8a23f0558983d0feefe1cc",
+          "row_counts": {
+            "payments": 0,
+            "ledger_entries": 0,
+            "settlements": 0,
+            "settlement_items": 0
+          }
+        }
+      },
+      "request_indices": [
+        2,
+        4
+      ]
+    },
+    "C04": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        4,
+        5
+      ]
+    },
+    "C05": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        5,
+        7
+      ]
+    },
+    "C06": {
+      "status": "FAIL",
+      "error": "[{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}]",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        7,
+        107
+      ]
+    },
+    "C07": {
+      "status": "FAIL",
+      "error": "[{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}]",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        107,
+        207
+      ]
+    },
+    "C08": {
+      "status": "FAIL",
+      "error": "[{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}]",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        207,
+        209
+      ]
+    },
+    "C09": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        209,
+        210
+      ]
+    },
+    "C10": {
+      "status": "FAIL",
+      "error": "decline must return 422",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        210,
+        211
+      ]
+    },
+    "C11": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        211,
+        212
+      ]
+    },
+    "C12": {
+      "status": "FAIL",
+      "error": "{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        212,
+        213
+      ]
+    },
+    "C13": {
+      "status": "NOT_RUN",
+      "remaining": "external fault/clock/SQL/performance evidence required"
+    },
+    "C14": {
+      "status": "NOT_RUN",
+      "remaining": "external fault/clock/SQL/performance evidence required"
+    },
+    "C15": {
+      "status": "FAIL",
+      "error": "settlement fixture payment failed",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        213,
+        214
+      ]
+    },
+    "C16": {
+      "status": "FAIL",
+      "error": "fixture failed",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        214,
+        215
+      ]
+    },
+    "C17": {
+      "status": "NOT_RUN",
+      "remaining": "external fault/clock/SQL/performance evidence required"
+    },
+    "C18": {
+      "status": "FAIL",
+      "error": "[{'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}, {'status': 404, 'body': {'code': 'NOT_FOUND', 'message': 'no such endpoint'}}]",
+      "scope": "HTTP_ONLY",
+      "request_indices": [
+        215,
+        217
+      ]
+    },
+    "C19": {
+      "status": "NOT_RUN",
+      "remaining": "external fault/clock/SQL/performance evidence required"
+    },
+    "C20": {
+      "status": "NOT_RUN",
+      "remaining": "external fault/clock/SQL/performance evidence required"
+    }
+  },
+  "requests": [
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "normal",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4350789520103717,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": -1,
+        "currency": "KRW"
+      },
+      "key": "invalid-0",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.013984197998070158,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 1000001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "missing-{'user': 1000001}",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.008677395002450794,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 1001,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "missing-{'agency': 1001}",
+      "agency": 1001,
+      "fault": null,
+      "elapsed_seconds": 0.008312042002216913,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "replay",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.012117321995901875,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "conflict",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.009175782994134352,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 101,
+        "currency": "KRW"
+      },
+      "key": "conflict",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.00907459000882227,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.015342601007432677,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.013002830994082615,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.011742365997633897,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.018378111999481916,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.020547166001051664,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.022293118003290147,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.020331045001512393,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.015424839002662338,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.02039616600086447,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.012144660999183543,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.02174885300337337,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.08350324799539521,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.09771444599027745,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.0975266309978906,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.0841407510015415,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.08612410300702322,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.09125779499299824,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.10061338800005615,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.08321253799658734,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.08899633899272885,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16126049500599038,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.17519611801253632,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16450069900020026,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1753561530058505,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1825433600024553,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16150686399487313,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16587390900531318,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.18361929200182203,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14993538400449324,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1682314929930726,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1640990299929399,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1618359580024844,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.17205608199583367,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16870646900497377,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1616641689906828,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16865899501135573,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16681350300495978,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.26143440799205564,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2427389869990293,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.24183485700632446,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.23876528700930066,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2400022009969689,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.23729064701183233,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.24195935401075985,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2718669449968729,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.23819316900335252,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.23837012500735,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.22864975201082416,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.23915446900355164,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.22802101900742855,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2335605769912945,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3067478089942597,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.34493780801130924,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3345519489957951,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3136792389996117,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3356005279929377,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3577030080050463,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3312767180032097,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.32469799400132615,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.32910187100060284,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.33074148000741843,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3308362899988424,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3547550829971442,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.29266456299228594,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2784859649982536,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.39911851299984846,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3764600309950765,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.40785009899991564,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3754165720019955,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.41734989298856817,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.38052383399917744,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.36658481899939943,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.43068217900872696,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3878466419992037,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.42442261399992276,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4146666830056347,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4045943989913212,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.42441169400990475,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.45809814901440404,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.37721021300239954,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.38096235001285095,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.41466311301337555,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3856482499977574,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.40398110399837606,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3906056410050951,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3819037330104038,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.47545866599830333,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.49112539600173477,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.47770239401143044,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.49612865700328257,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.5199042919994099,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.5098375360103091,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4695382299978519,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.48281748199951835,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.47492092300672084,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.5096480500069447,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.47325039700081106,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.5091551219957182,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4817342290043598,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900002,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "race",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.5369757829903392,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-3",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.013343486993107945,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-1",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.01861455499602016,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-5",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.014185268999426626,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-2",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.020910189996357076,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-0",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.02268156899663154,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-7",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.015503727991017513,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-4",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.019490410006255843,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-6",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.020282141005736776,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-8",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.030857814999762923,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-9",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.0627695770090213,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-11",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.06055133699555881,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-12",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.0605263030010974,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-36",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.02587106999999378,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-13",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.06138728599762544,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-15",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.06177675400977023,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-10",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.07083006500033662,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-26",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1315189110027859,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-21",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1410377040010644,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-29",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.13460124300036114,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-35",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1275408770015929,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-16",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.15676693701243494,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-14",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16060471000673715,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-19",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.15338061799411662,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-23",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14742842499981634,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-24",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14543802000116557,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-37",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.13234332000138238,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-30",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1419824150070781,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-20",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.15633968099427875,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-32",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1404355859995121,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-25",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14932966900232714,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-43",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1245742729952326,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-17",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16484686800686177,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-31",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1422873950068606,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-22",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.15463075999286957,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-28",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1471636570058763,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-27",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14862945000641048,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-33",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.14080159198783804,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-18",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16513551799289417,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-50",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.18527384899789467,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-49",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1896001450077165,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-41",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.21142884700384457,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-60",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.17944630200508982,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-44",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.20955389000300784,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-40",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2163665529951686,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-46",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.20758570700127166,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-57",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.18459171999711543,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-58",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.18370840398711152,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-66",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.174625430998276,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-42",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.21529777099203784,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-55",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1899573690025136,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-72",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.16919389899703674,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-68",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.1754979010001989,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-39",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3100230029958766,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-67",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2631183930061525,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-69",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2623592699965229,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-38",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3153585270047188,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-45",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3091718429932371,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-53",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.29120035500091035,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-76",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2650518909940729,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-54",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.29393136699218303,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-83",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2580678550002631,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-75",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2676194280065829,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-65",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.28044349000265356,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-56",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.29398679798759986,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-73",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2708377889939584,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-61",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2913585450005485,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-80",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2670100870018359,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-64",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.28859242200269364,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-52",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.302550650012563,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-79",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.269514708998031,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-59",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2944877629925031,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-71",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2780551650066627,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-63",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2904818440001691,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-91",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2562223379936768,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-48",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3083471029967768,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-62",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2920268119924003,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-70",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2804438910097815,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-78",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2715380480076419,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-81",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2680666050000582,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-74",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.2762519019888714,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-97",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3286312250129413,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-92",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.33533310701022856,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-82",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.34729243999754544,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-99",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3287303429970052,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-96",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.33523651798896026,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-88",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3453115309966961,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-77",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.35947141599899624,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-85",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.35117274199728854,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-34",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.4293168959993636,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-51",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.394973189002485,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-84",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.35535239399177954,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-98",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3401004999905126,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-94",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3451418589975219,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-95",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.34387752901238855,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-93",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3471313690097304,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-87",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.35412525400170125,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-89",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.3533350030047586,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-86",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.357008439998026,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-47",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.41283108000061475,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900003,
+        "agencyId": 901,
+        "amount": 20000,
+        "currency": "KRW"
+      },
+      "key": "hot-90",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.352624924009433,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 902,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "tenant",
+      "agency": 902,
+      "fault": null,
+      "elapsed_seconds": 0.012384239002130926,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 903,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "tenant",
+      "agency": 903,
+      "fault": null,
+      "elapsed_seconds": 0.011112956999568269,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 902,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "mismatch",
+      "agency": 901,
+      "fault": null,
+      "elapsed_seconds": 0.008219231996918097,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "decline",
+      "agency": 901,
+      "fault": "decline",
+      "elapsed_seconds": 0.00914480299979914,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "fault-timeout-before",
+      "agency": 901,
+      "fault": "timeout-before",
+      "elapsed_seconds": 0.007374666995019652,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 901,
+        "amount": 100,
+        "currency": "KRW"
+      },
+      "key": "fault-timeout-after",
+      "agency": 901,
+      "fault": "timeout-after",
+      "elapsed_seconds": 0.011651038003037684,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 904,
+        "amount": 101,
+        "currency": "KRW"
+      },
+      "key": "settle-pay-0",
+      "agency": 904,
+      "fault": null,
+      "elapsed_seconds": 0.008347737995791249,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/payments",
+      "request": {
+        "userId": 900001,
+        "agencyId": 905,
+        "amount": 101,
+        "currency": "KRW"
+      },
+      "key": "settle-race-pay",
+      "agency": 905,
+      "fault": null,
+      "elapsed_seconds": 0.010488646003068425,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 906,
+        "businessDate": "2000-01-01"
+      },
+      "key": "empty",
+      "agency": 906,
+      "fault": null,
+      "elapsed_seconds": 0.011216478000278585,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    },
+    {
+      "path": "/api/settlements",
+      "request": {
+        "agencyId": 906,
+        "businessDate": "2000-01-01"
+      },
+      "key": "empty",
+      "agency": 906,
+      "fault": null,
+      "elapsed_seconds": 0.00936737000301946,
+      "response": {
+        "status": 404,
+        "body": {
+          "code": "NOT_FOUND",
+          "message": "no such endpoint"
+        }
+      }
+    }
+  ]
+}

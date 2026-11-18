@@ -1,0 +1,207 @@
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T14:08:17.897Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T14:08:17.901Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T14:08:22.436Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T14:08:22.492Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T14:08:22.492Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T14:08:22.531Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T14:08:22.532Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 4429 ms
+2026-11-18T14:08:23.309Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T14:08:23.722Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@3302035b
+2026-11-18T14:08:23.724Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T14:08:23.798Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T14:08:23.895Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-11-18T14:08:23.900Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 5 migrations (execution time 00:00.069s)
+2026-11-18T14:08:23.921Z  INFO 1 --- [payment-lab] [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" with baseline ...
+2026-11-18T14:08:24.052Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbBaseline     : Successfully baselined schema with version: 0
+2026-11-18T14:08:24.111Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 0
+2026-11-18T14:08:24.129Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - payments and ledger"
+2026-11-18T14:08:24.294Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - ledger view"
+2026-11-18T14:08:24.322Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - separate settlement"
+2026-11-18T14:08:24.396Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - idempotency per agency"
+2026-11-18T14:08:24.433Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - settlement business date"
+2026-11-18T14:08:24.489Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Successfully applied 5 migrations to schema "public", now at version v5 (execution time 00:00.251s)
+2026-11-18T14:08:26.290Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T14:08:26.439Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T14:08:26.503Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 9.989 seconds (process running for 11.087)
+2026-11-18T14:08:30.903Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T14:08:30.903Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T14:08:30.905Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+Picked up JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:ActiveProcessorCount=2
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.5.5)
+
+2026-11-18T14:08:35.745Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Starting PaymentApplicationKt v0.0.1-SNAPSHOT using Java 21.0.13 with PID 1 (/app/app.jar started by ? in /app)
+2026-11-18T14:08:35.750Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : No active profile set, falling back to 1 default profile: "default"
+2026-11-18T14:08:40.751Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-18T14:08:40.771Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-18T14:08:40.772Z  INFO 1 --- [payment-lab] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.44]
+2026-11-18T14:08:40.851Z  INFO 1 --- [payment-lab] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-18T14:08:40.853Z  INFO 1 --- [payment-lab] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 4832 ms
+2026-11-18T14:08:41.632Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-18T14:08:42.043Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@634aa81e
+2026-11-18T14:08:42.045Z  INFO 1 --- [payment-lab] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-18T14:08:42.119Z  INFO 1 --- [payment-lab] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://db:5432/payment (PostgreSQL 16.15)
+2026-11-18T14:08:42.224Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 6 migrations (execution time 00:00.080s)
+2026-11-18T14:08:42.268Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": 5
+2026-11-18T14:08:42.271Z  INFO 1 --- [payment-lab] [           main] o.f.core.internal.command.DbMigrate      : Schema "public" is up to date. No migration necessary.
+2026-11-18T14:08:44.160Z  INFO 1 --- [payment-lab] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-11-18T14:08:44.347Z  INFO 1 --- [payment-lab] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-18T14:08:44.415Z  INFO 1 --- [payment-lab] [           main] lab.payment.PaymentApplicationKt         : Started PaymentApplicationKt in 9.985 seconds (process running for 11.15)
+2026-11-18T14:08:45.533Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 5b0736a2-da60-4b6c-aa05-9fbe6f0618b6 -> SUCCEEDED
+2026-11-18T14:08:48.717Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-18T14:08:48.718Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-18T14:08:48.720Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-11-18T14:08:55.408Z  WARN 1 --- [payment-lab] [nio-8080-exec-5] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@634aa81e (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T14:08:55.409Z  WARN 1 --- [payment-lab] [nio-8080-exec-5] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@4ec8094e (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T14:08:55.410Z  WARN 1 --- [payment-lab] [nio-8080-exec-5] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@7e9f637d (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-11-18T14:08:56.412Z  WARN 1 --- [payment-lab] [nio-8080-exec-5] lab.payment.application.PaymentService   : Could not record bank outcome for payment d48b8e02-1158-40bc-a487-6839ab0bddc6; left for recovery: Failed to obtain JDBC Connection
+2026-11-18T14:08:56.621Z  WARN 1 --- [payment-lab] [   scheduling-1] .p.i.c.RecoveryScheduler$$SpringCGLIB$$0 : Recovery run failed
+
+org.springframework.transaction.CannotCreateTransactionException: Could not open JDBC Connection for transaction
+	at org.springframework.jdbc.datasource.DataSourceTransactionManager.doBegin(DataSourceTransactionManager.java:313) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.support.AbstractPlatformTransactionManager.startTransaction(AbstractPlatformTransactionManager.java:532) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.support.AbstractPlatformTransactionManager.getTransaction(AbstractPlatformTransactionManager.java:405) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.createTransactionIfNecessary(TransactionAspectSupport.java:639) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:374) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:728) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at lab.payment.application.PaymentTransitions$$SpringCGLIB$$0.claimDue(<generated>) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.application.PaymentRecoveryService.recoverDue(PaymentRecoveryService.kt:28) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.infrastructure.config.RecoveryScheduler.run(RecoveryScheduler.kt:22) ~[!/:0.0.1-SNAPSHOT]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source) ~[na:na]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.runInternal(ScheduledMethodRunnable.java:130) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.lambda$run$2(ScheduledMethodRunnable.java:124) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at io.micrometer.observation.Observation.observe(Observation.java:498) ~[micrometer-observation-1.15.3.jar!/:1.15.3]
+	at org.springframework.scheduling.support.ScheduledMethodRunnable.run(ScheduledMethodRunnable.java:124) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.config.Task$OutcomeTrackingRunnable.run(Task.java:85) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at org.springframework.scheduling.support.DelegatingErrorHandlingRunnable.run(DelegatingErrorHandlingRunnable.java:54) ~[spring-context-6.2.10.jar!/:6.2.10]
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.FutureTask.runAndReset(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source) ~[na:na]
+	at java.base/java.lang.Thread.run(Unknown Source) ~[na:na]
+Caused by: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 1000ms (total=0, active=0, idle=0, waiting=0)
+	at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:714) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:184) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:142) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:127) ~[HikariCP-6.3.2.jar!/:na]
+	at org.springframework.jdbc.datasource.DataSourceTransactionManager.doBegin(DataSourceTransactionManager.java:269) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	... 24 common frames omitted
+Caused by: org.postgresql.util.PSQLException: This connection has been closed.
+	at org.postgresql.jdbc.PgConnection.checkClosed(PgConnection.java:1012) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at org.postgresql.jdbc.PgConnection.setNetworkTimeout(PgConnection.java:1736) ~[postgresql-42.7.7.jar!/:42.7.7]
+	at com.zaxxer.hikari.pool.PoolBase.setNetworkTimeout(PoolBase.java:582) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.PoolBase.isConnectionDead(PoolBase.java:174) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:166) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:142) ~[HikariCP-6.3.2.jar!/:na]
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:127) ~[HikariCP-6.3.2.jar!/:na]
+	at org.springframework.jdbc.datasource.DataSourceUtils.fetchConnection(DataSourceUtils.java:160) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.datasource.DataSourceUtils.doGetConnection(DataSourceUtils.java:118) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.datasource.DataSourceUtils.getConnection(DataSourceUtils.java:81) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:653) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:723) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:748) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:804) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.query(NamedParameterJdbcTemplate.java:218) ~[spring-jdbc-6.2.10.jar!/:6.2.10]
+	at lab.payment.infrastructure.persistence.JdbcPaymentRepository.completeSucceeded(JdbcPaymentRepository.kt:113) ~[!/:0.0.1-SNAPSHOT]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:360) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:138) ~[spring-tx-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:728) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at lab.payment.infrastructure.persistence.JdbcPaymentRepository$$SpringCGLIB$$0.completeSucceeded(<generated>) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.application.PaymentTransitions.succeed(PaymentTransitions.kt:68) ~[!/:0.0.1-SNAPSHOT]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:360) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:724) ~[spring-aop-6.2.10.jar!/:6.2.10]
+	at lab.payment.application.PaymentTransitions$$SpringCGLIB$$0.succeed(<generated>) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.application.BankTransferExecutor.attempt(BankTransferExecutor.kt:32) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.application.PaymentService.pay(PaymentService.kt:37) ~[!/:0.0.1-SNAPSHOT]
+	at lab.payment.api.PaymentApi.create(PaymentApi.kt:45) ~[!/:0.0.1-SNAPSHOT]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source) ~[na:na]
+	at kotlin.reflect.jvm.internal.calls.CallerImpl$Method.callMethod(CallerImpl.kt:97) ~[kotlin-reflect-2.2.0.jar!/:2.2.0-release-294]
+	at kotlin.reflect.jvm.internal.calls.CallerImpl$Method$Instance.call(CallerImpl.kt:113) ~[kotlin-reflect-2.2.0.jar!/:2.2.0-release-294]
+	at kotlin.reflect.jvm.internal.KCallableImpl.callDefaultMethod$kotlin_reflection(KCallableImpl.kt:207) ~[kotlin-reflect-2.2.0.jar!/:2.2.0-release-294]
+	at kotlin.reflect.jvm.internal.KCallableImpl.callBy(KCallableImpl.kt:112) ~[kotlin-reflect-2.2.0.jar!/:2.2.0-release-294]
+	at org.springframework.web.method.support.InvocableHandlerMethod$KotlinDelegate.invokeFunction(InvocableHandlerMethod.java:335) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:255) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:191) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:991) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:896) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:914) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:590) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885) ~[spring-webmvc-6.2.10.jar!/:6.2.10]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51) ~[tomcat-embed-websocket-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.springframework.web.filter.ServerHttpObservationFilter.doFilterInternal(ServerHttpObservationFilter.java:110) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.2.10.jar!/:6.2.10]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:116) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:398) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:903) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1769) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1189) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:658) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63) ~[tomcat-embed-core-10.1.44.jar!/:na]
+	... 1 common frames omitted
+
+2026-11-18T14:09:05.203Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment d48b8e02-1158-40bc-a487-6839ab0bddc6 -> SUCCEEDED
+2026-11-18T14:09:15.823Z  INFO 1 --- [payment-lab] [nio-8080-exec-1] l.p.application.BankTransferExecutor     : Payment 18e14be2-2daf-4d85-9b72-5dd60197108a stays PENDING after attempt 1: HttpConnectTimeoutException: HTTP connect timed out
+2026-11-18T14:09:17.267Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 18e14be2-2daf-4d85-9b72-5dd60197108a -> PENDING
+2026-11-18T14:09:18.353Z  INFO 1 --- [payment-lab] [   scheduling-1] l.p.application.PaymentRecoveryService   : Recovery of payment 18e14be2-2daf-4d85-9b72-5dd60197108a -> SUCCEEDED

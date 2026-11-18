@@ -1,0 +1,55 @@
+This one is about performance under load, so I'll first work out why the app falls short, then reproduce it locally before changing anything.
+
+**What the numbers point to.** The bank fixture is a Python stdlib server, and the earlier read-only probes of the real bank showed its behaviour under concurrency: about 81ms p99 at 4 concurrent requests, but roughly 1s tails at 8 or more. That matches the stdlib `socketserver` listen backlog of 5. When more connections complete the TCP handshake than the server has accepted, the kernel silently drops them and retransmits about 1s later. My bank bulkhead allows **8** concurrent calls, so bursts can overflow that backlog.
+
+Each overflowed call stalls past the 1s timeout. The app then looks the transfer up, may find nothing yet, and returns **202** (the ~2% "not synchronously confirmed" responses at 50 RPS). In the spike, every bulkhead slot is stuck in these 1s stalls, effective bank throughput collapses to about 8/s, requests pile up in Tomcat, and the load generator runs out of VUs: hence p95 of 6s and 664 dropped iterations.
+
+**Plan.** Build a load generator and a bank CPU throttle into the e2e harness, reproduce the problem, then fix it. My sandbox only has 2 CPUs shared by everything, so I can't recreate the exact limits; the goal is to reproduce the mechanism.
+
+Baseline with the current build: bank throttled to 0.5, app started with the evaluator's JVM options, then warm-up 10 RPS for 30s, 50 RPS for 60s, and a 100 RPS spike for 30s.
+
+Now the executor, with in-request retries within the deadline for requests without an injected fault:
+
+The pre-warm didn't run: the stub bank wasn't listening yet right after setup (a race in my script). I'll wait for its `/health` first and repeat.
+
+All 97 tests pass, warning-free. Now the docs: the performance design, the new settings, `/health` readiness, and the Dockerfile flag.
+
+I made changes that address C20, but I could not reproduce the evaluator's failure exactly, so the real check will be your next run. On my local setup all stages now pass, with zero non-synchronous responses, zero 5xx and zero dropped iterations. The full build passes with 97 tests and 0 failures.
+
+**What I found**
+Two causes, both measured:
+
+1. **A freshly started app can't keep up with a spike.** On about 1.5 CPUs, Java's default compiler spends the first minute compiling hot code and competes with request handling. A cold app at 100 RPS gave p95 1,969ms, 800 dropped iterations and 152 non-synchronous responses. The same app, once warm, gave p95 61–131ms. If each of your stages starts a fresh app, this fits your results: the 30-second spike starts cold and collapses, and the 5-minute 50 RPS stage absorbs a bad first few seconds (p95 493ms, about 2% non-synchronous).
+2. **Bursts of bank calls stall for about a second.** The bank is a small Python server whose connection queue holds only 5 waiting connections. While it's slowed by its 0.5-CPU limit, extra connections are dropped and retried by TCP after about 1s. I allowed 8 at once, and after such a stall a payment fell back to 202. Read-only tests against the real bank showed this: 81ms worst-case at 4 concurrent requests, but 1,045ms in a burst at 100/s.
+
+**Changes**
+- **Java compiler setting:** I added `-XX:TieredStopAtLevel=1` to the Dockerfile's start command. It makes Java compile quickly and cheaply; this app doesn't need the slower, faster-peaking compiler. It applies on top of your `JAVA_TOOL_OPTIONS` and doesn't touch any CPU, memory or pool limit. On a cold app at 100 RPS it took p95 from 1,145ms to 36ms.
+- **Start-up warm-up of about 8 seconds:** the app runs its own hot paths before taking real load: requests that end in 400 or 404, payment and settlement database work that is always rolled back, and read-only bank lookups. **`GET /health` returns 503 `WARMING_UP` until this finishes**, then 200. A test confirms it leaves no rows, no balance changes and no bank writes.
+- **At most 5 bank calls at once** (was 8), so our connections always fit in the bank's queue.
+- **Normal payments retry within the request:** each payment without an injected fault gets 1.2 seconds for its bank calls. If a call isn't delivered or times out, the app checks whether the bank recorded it and resends with the same key if not, which is safe because the bank deduplicates by key. Only if 1.2s runs out does it answer 202. Each attempt now times out after 600ms (was 1,000ms), so the worst case is about 1.3 seconds. Requests with `X-Bank-Fault` behave exactly as before.
+- **Bank timing metrics** (`bank.call` and `bank.slot.wait` under `/actuator/metrics`), used for the diagnosis.
+
+**Verification**
+- **Local harness** (in the repo under `tools/e2e/`): the real jar with your JVM options, PostgreSQL 16 with the full fixture data, a Python bank stand-in limited to 0.5 CPU, and an open-model load generator with your 95%/5% mix. The app is started fresh before each run and the load waits for `/health`, as yours probably does.
+
+| Stage (fresh app each time) | p95 | p99 | dropped | 5xx | Non-synchronous |
+|---|---|---|---|---|---|
+| Warm-up 10 RPS 30s | 76ms | 81ms | 0 | 0 | 0 |
+| Normal 50 RPS 120s | 71ms | 79ms | 0 | 0 | 0 |
+| Spike 100 RPS 30s | 73ms | 123ms | 0 | 0 | 0 |
+| Then 50 RPS 60s | 68ms | 73ms | 0 | 0 | 0 |
+| Soak 30 RPS 5 min | 67ms | 70ms | 0 | 0 | 0 |
+
+- **No leaks:** after each stage, heap was 133–208MB, threads 38–49, and no DB connections active or waiting. Nothing was left PENDING.
+- **New tests:** the in-request retry rules, the deadline limits on bank calls, a bank that swallows a request (still 201 with one transfer), and the warm-up leaving no trace.
+
+**Limits of this check**
+- **My environment isn't yours.** I have 2 CPUs shared by everything, I emulate the bank's CPU limit by pausing the process, my soak ran 5 minutes rather than 15, and I never wrote to the shared bank, so its real cost per payment is unmeasured.
+- **A brand-new bank journal is also slow at first.** In my stand-in, the first ~10 seconds against a new SQLite file are slow regardless of the app. The spike row above was run after pre-warming that file; with a brand-new file the spike reached p95 ~1.6s. If your bank also starts with an empty journal per stage, the spike's first seconds may be affected, and the app can't influence that.
+- **Overload limit:** at a harsher 0.3-CPU bank, my stand-in tops out around 80 payments/s. Nobody could confirm all of 100/s synchronously there. The app stays controlled (responses within about 1.3s, no 5xx, overflow answered 202 and completed by recovery), but it won't meet the SLO.
+
+**Please check in your setup**
+- **Dockerfile:** I changed its start command. If your harness doesn't build from this Dockerfile, the compiler flag won't apply and the cold-start problem may return.
+- **Health checks:** `/health` returns 503 for about 8 seconds after start-up. That's intended, but your health check must wait for 200 rather than fail on the first 503.
+
+Nothing is committed yet.
