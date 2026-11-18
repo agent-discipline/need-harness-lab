@@ -1,9 +1,9 @@
 {
   "harness_adapter_verified": {"value": true, "evidence": [
-    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-manifest.json",
-    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-invocation.json",
-    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-result.json",
-    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r3-arm3-turn-0001-stdout.jsonl"]},
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r4-arm3-manifest.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r4-arm3-turn-0001-invocation.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r4-arm3-turn-0001-result.json",
+    "payment-settlement/claude/docs/results/setup/v3/smoke-v3r4-arm3-turn-0001-stdout.jsonl"]},
   "acceptance_suite_verified": {"value": true, "evidence": [
     "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt",
     "payment-settlement/codex/docs/pilots/detailed-01/acceptance-issues.md"]}
