@@ -1,0 +1,135 @@
+{
+  "run_id": "smoke-v3r5-arm3",
+  "arm": 3,
+  "core": 1,
+  "provider": "claude-code",
+  "pilot": false,
+  "cli_version": "2.1.326",
+  "requested_model": "claude-fable-5-2",
+  "requested_worker_model": "claude-opus-5-5",
+  "context_variant": "default",
+  "subagents": "opus-high",
+  "actual_model": "claude-fable-5-2",
+  "effort": "high",
+  "session_id": "56610424-3977-4522-915d-046b4d5611a6",
+  "cache_policy": "observed-cache",
+  "strict_zero_cache_supported": false,
+  "image": "payment-claude-runner:2.1.326",
+  "image_frozen": false,
+  "refreeze_smoke": true,
+  "readiness": null,
+  "contract_sha256": null,
+  "config_volume": "payment-claude-e656bb42996242a28a87885a241556a6",
+  "reviewer_volume": "payment-claude-reviewer-a30e066bdfe24a96b9ae812d714371a1",
+  "requested_reviewer_model": "claude-fable-5-2",
+  "reviewer_uid": 2001,
+  "source": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/3/core1",
+  "workspace": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/.runs/smoke-v3r5-arm3/workspace",
+  "network": null,
+  "workspace_git_init": true,
+  "harness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/harness-source",
+  "harness_seed": {
+    "sources": {
+      "core.md": {
+        "core.md": "0951d4e1e004e686ef2226945fe5568281ef44820221caa19526c6769e64409a"
+      },
+      "HISTORY.md": {
+        "HISTORY.md": "84768d280616e5c13c7d1e83c66c06d0307b72833467ff464bffe46052b31eaf"
+      },
+      "hooks": {
+        "capture-prompt.sh": "07b3bcd76dd275e2333e92b197bb08cc0d20590eaa401160317c9584d2c7755b",
+        "codex-scan.sh": "3ce7a6a3333cfd707b6fec059d9117170f2e29f4e927686bb5dddabb5d2101f2",
+        "deploy.sh": "ec841839fba43c7ae8db5930c7af10f1c5ff7df8ef9cc0d77da382b09ab4aa70",
+        "detect-layer.sh": "afa5654f39577478833a1cd6303de97b0b0e37b2420564f2ba0dbaaea76567f7",
+        "gate-guard.sh": "e5e1ff1593c88761d21cceeced35266172449f9ee694eb3314713152b2b458d4",
+        "git-guard.sh": "a72bd522edd9c4850a0ef655450d0b6fb34876c6268d8f05897ad70193bc3650",
+        "reinject-mode.sh": "871fa929280f913be86d4e167604b7cee135b512dbe6440c9ac9248f1c252e45",
+        "session-mode-guard.sh": "43a969b2e2169e61b1fbe03aee145b18b9a8a516d581e827fa680fdc49130642",
+        "set-state.sh": "1056fae592738c132efd0061b977b2c3e5bc136986b6e79c6318658665ece1ba",
+        "state-lib.sh": "d69ad2083550f70bc7b10def90ccefad741afc5e19202317d946d6ad8e236fd5",
+        "task-mode-guard.sh": "bd67a1b779f0449d35c5b5f95c85fa30573d840a457c088a995de79918c46464",
+        "tests/baseline.manifest": "a482b885eb9f790650845f61a2873cecbd7da0e1415c68841f39f99c0bc022e1",
+        "tests/cases/codex-scan.sh": "f211184fe40bf182b2453af9fc525cf43388617c551186c7e0bb75509f49e112",
+        "tests/cases/cwd-resolution.sh": "6d3d514c3661abc33f518b78f5e7213d0c1f2b0d8c569c05f0857f2f3c619882",
+        "tests/cases/detect-layer.sh": "dbb769f9ba80c4318fa9b4278328373249d990124dc18f87834a19d34791fe04",
+        "tests/cases/gate-guard.sh": "e7182d053acbe1edb76e96824d0a21fb027c0c63d527598b1862091e866c9042",
+        "tests/cases/git-guard.sh": "b8f9275979d0bddaad36acc8ccc418fb5c97ce48c5520982edb82d6ef167466b",
+        "tests/cases/misc-guards.sh": "1988fc683309c8495c1500663ba1a584ac73cdbc5a876d67fdf7ae9b4796fde5",
+        "tests/cases/sidecar-docsroot.sh": "a300b3e17b2235035e27c1c9f6b0baa59d184dafd67d8951ea7967b4cd0d0939",
+        "tests/cases/state-schema.sh": "90897bfb9e7914f528fb039a2d6a31d2263a7e03faa0498dd8fbb25bbd4c52a3",
+        "tests/lib.sh": "6a778fcb02db6ec70cf1b1d559ac8e28463c93d1339d66be2f85698ac26f6565",
+        "tests/run.sh": "777067bad35fd92d87e997a08a22b9994faff59eb3d99329e7197aca863c4f81",
+        "tests/tests.lock": "a1b8bd52e98ac209f8dd5f4bf1dd0eb8959c8959a00f8982eeb92158b2951a61"
+      },
+      "playbooks": {
+        "design-taste.md": "8fccdc06209d231b15d994aa108f80d539cff14b350cbf4e575118ad69fa2134",
+        "implementation-lazymode.md": "1aec1a5b4e6570f5c34070e0c8093f218a0626821026be4dba87327f68090628",
+        "issue-archive.md": "8acba9076513d13f0975c32267408827cce4773937d9f36102f888b6b5aa2a5f",
+        "open-source.md": "d8e0da8079a4daf91248d51fa8eab94bd8c44c265e1a1a36d6ce42534e082e0b",
+        "refactoring.md": "2a7e7ecc08b49929356b1cb0986125ca157643527ab29d99abbf2d4bec340701",
+        "review.md": "a82b89d7f8a77b5a70d2de26ed4d733cd04a0793366275a7c8fe5e326cc20917"
+      },
+      "templates": {
+        "log.md": "da77d8fcebc1132bdd17f9d55ec737ef72f3df917d8ef2019b18a60ae1f5177c",
+        "measurement-log.md": "9b867b02de596f566c741ecfc65a425775ba931d0d5a585a99ccebf2549800db",
+        "next.md": "61b9068a75af8e1466c3997a08435acdfa58a4f5a69b12d5613e067715a2a6fd",
+        "requirement-spec.md": "8b5f7bb3306450623b3cf28672a4f1fcb2386d723587845b1a63281dfcd002d6"
+      },
+      "agents": {
+        "explorer.md": "6c61afe5e46affe0569702dd00204abba4f6c836dc44acce43746605a799dcbf"
+      }
+    },
+    "runner": {
+      "CLAUDE.md": {
+        "harness-bootstrap-CLAUDE.md": "1e3d226ee1999e9a55a97b86d32a37f24ccfff2f15803c9c16932f8038531961"
+      },
+      "settings.json": {
+        "harness-settings.json": "cdf35bc7b3fa3abd5e47b34e94936d3df05d89cf6a68b9fa0249b64cbbda8feb"
+      }
+    },
+    "listing": "total 84\ndrwx------ 6 node node  4096 Nov 18 10:03 .\ndrwxr-xr-x 1 node node  4096 Nov 17 19:15 ..\n-rw-r--r-- 1 node node  1684 Nov 18 10:03 CLAUDE.md\n-rw-r--r-- 1 node node 27333 Nov 18 10:03 HISTORY.md\ndrwxr-xr-x 2 node node  4096 Nov 18 10:03 agents\n-rw-r--r-- 1 node node 21487 Nov 18 10:03 core.md\ndrwxr-xr-x 3 node node  4096 Nov 18 10:03 hooks\ndrwxr-xr-x 2 node node  4096 Nov 18 10:03 playbooks\n-rw-r--r-- 1 node node  2113 Nov 18 10:03 settings.json\ndrwxr-xr-x 2 node node  4096 Nov 18 10:03 templates\n"
+  },
+  "selftest": {
+    "at": "2026-11-18T10:03:25.597806+00:00",
+    "rc": 0,
+    "stderr_tail": "VERIFIED 38\n",
+    "cli_args_rejected": "0",
+    "cli_exit": "1",
+    "cli_result_lines": "1",
+    "cli_tools": "Task,Bash,Edit,Glob,Grep,NotebookEdit,Read,ToolSearch,WebFetch,WebSearch,Write",
+    "workspace_git_exit": "0",
+    "settings_sha_match": "1",
+    "hooks_checked": "8",
+    "harness_hash_match": "1",
+    "harness_no_extras": "1",
+    "gate_l1_write_exit": "2",
+    "gate_docs_write_exit": "0",
+    "bash_hooks_benign": "git-guard=0;codex-scan=0;gate-guard=0;",
+    "bash_hooks_teeth_exit": "2",
+    "git_guard_push": "ask",
+    "reviewer_on_path": "1",
+    "reviewer_helper_present": "1",
+    "selftest_failed": "0",
+    "passed": true
+  },
+  "created_at": "2026-11-18T10:03:21.706967+00:00",
+  "observed_tools": [
+    "Task",
+    "Bash",
+    "Edit",
+    "Glob",
+    "Grep",
+    "NotebookEdit",
+    "Read",
+    "ToolSearch",
+    "WebFetch",
+    "WebSearch",
+    "Write"
+  ],
+  "actual_role_models": {
+    "pm": [
+      "claude-fable-5-2"
+    ]
+  },
+  "actual_model_note": "client-observed in transcripts (message.model); null when absent or ambiguous"
+}
