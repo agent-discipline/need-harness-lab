@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -196,6 +197,59 @@ CORRECTNESS = tuple('C%02d' % n for n in range(1, 20))      # C01..C19; C20 is t
 K6_LATENCY = ('payment_latency', 'http_req_duration')   # the workload's own payment latency first
 
 
+PHASE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
+
+
+def count_of(samples):
+    """The last PENDING count of a phase, or None when the samples are not a list of {count: int}."""
+    if isinstance(samples, list) and samples and isinstance(samples[-1], dict) and isinstance(samples[-1].get('count'), int):
+        return samples[-1]['count']
+    return None
+
+
+def phase_figures(folder, summary_path, phase):
+    """One phase row from load_check.py's summary entry and the k6-summary.json beside it. The phase name is used as
+    a path component only when it is a plain name (no separator, no '..') and the file it names is inside the record
+    folder; a field in an unexpected shape is None with a note. Returns None for a phase without a plain name."""
+    name = phase.get('phase') if isinstance(phase, dict) else None
+    if not isinstance(name, str) or not PHASE_NAME.fullmatch(name) or '..' in name:
+        return None
+    notes = []
+    pending = count_of(phase.get('pending_samples'))
+    if phase.get('pending_samples') is not None and pending is None:
+        notes.append('pending_samples in an unexpected shape')
+    row = {'phase': name, 'passed': phase.get('passed'), 'k6_exit_code': phase.get('k6_exit_code'),
+           'pending_converged': phase.get('pending_converged'), 'pending_last': pending,
+           'audit_passed': phase.get('audit_passed'), 'resources_passed': phase.get('resources_passed'),
+           'p95_ms': None, 'p99_ms': None, 'latency_metric': None, 'dropped_iterations': None,
+           'committed_response_ratio': None, 'unexpected_failure_ratio': None, 'requests': None, 'notes': notes}
+    k6 = (summary_path.parent / name / 'k6-summary.json').resolve()
+    if folder.resolve() not in k6.parents:
+        notes.append('k6-summary.json would lie outside the record folder; not read')
+        return row
+    try:
+        metrics = json.loads(k6.read_text())['metrics']
+        if not isinstance(metrics, dict):
+            raise ValueError('metrics is not an object')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        row['k6_summary'] = 'unreadable: %s' % exc
+        return row
+    def number(value):
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    for metric in K6_LATENCY:
+        if isinstance(metrics.get(metric), dict) and 'p(95)' in metrics[metric]:
+            row.update(p95_ms=number(metrics[metric].get('p(95)')), p99_ms=number(metrics[metric].get('p(99)')), latency_metric=metric)
+            break
+    dropped = metrics.get('dropped_iterations')
+    row['dropped_iterations'] = number(dropped.get('count')) if isinstance(dropped, dict) else None   # absent stays None
+    for key, metric in (('committed_response_ratio', 'committed_response'), ('unexpected_failure_ratio', 'unexpected_failure')):
+        if isinstance(metrics.get(metric), dict):
+            row[key] = number(metrics[metric].get('value'))
+    if isinstance(metrics.get('iterations'), dict):
+        row['requests'] = number(metrics['iterations'].get('count'))
+    return row
+
+
 def load_metrics(folder, c20_evidence):
     """C20 phase figures moved from the judging artifacts the verdict cites for C20 (load_check.py's summary.json and
     each phase's k6-summary.json/result.json beside it). Nothing is filled in: a figure the files do not hold is None,
@@ -213,33 +267,14 @@ def load_metrics(folder, c20_evidence):
         return {'available': False, 'source': cited[0], 'reason': 'unreadable or another shape: %s' % exc}
     rows, problems = [], []
     for phase in phases:
-        name = phase.get('phase') if isinstance(phase, dict) else None
-        if not isinstance(name, str):
-            problems.append('a phase without a name')
-            continue
-        row = {'phase': name, 'passed': phase.get('passed'), 'k6_exit_code': phase.get('k6_exit_code'),
-               'pending_converged': phase.get('pending_converged'),
-               'pending_last': (phase.get('pending_samples') or [{}])[-1].get('count') if phase.get('pending_samples') else None,
-               'audit_passed': phase.get('audit_passed'), 'resources_passed': phase.get('resources_passed'),
-               'p95_ms': None, 'p99_ms': None, 'latency_metric': None, 'dropped_iterations': None,
-               'committed_response_ratio': None, 'unexpected_failure_ratio': None, 'requests': None}
         try:
-            metrics = json.loads((path.parent / name / 'k6-summary.json').read_text())['metrics']
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            row['k6_summary'] = 'unreadable: %s' % exc
-            rows.append(row)
+            row = phase_figures(folder, path, phase)
+        except Exception as exc:                        # one odd phase never stops the finish
+            row = {'phase': phase.get('phase') if isinstance(phase, dict) else None,
+                   'error': 'not summarized: %s: %s' % (type(exc).__name__, str(exc)[:200])}
+        if row is None:
+            problems.append('a phase without a plain name: %r' % (phase.get('phase') if isinstance(phase, dict) else phase,))
             continue
-        for metric in K6_LATENCY:
-            if isinstance(metrics.get(metric), dict) and 'p(95)' in metrics[metric]:
-                row.update(p95_ms=metrics[metric].get('p(95)'), p99_ms=metrics[metric].get('p(99)'), latency_metric=metric)
-                break
-        dropped = metrics.get('dropped_iterations')
-        row['dropped_iterations'] = dropped.get('count') if isinstance(dropped, dict) else None   # absent stays None
-        for key, metric in (('committed_response_ratio', 'committed_response'), ('unexpected_failure_ratio', 'unexpected_failure')):
-            if isinstance(metrics.get(metric), dict):
-                row[key] = metrics[metric].get('value')
-        if isinstance(metrics.get('iterations'), dict):
-            row['requests'] = metrics['iterations'].get('count')
         rows.append(row)
     return {'available': True, 'source': cited[0], 'c20_passed': summary.get('c20_passed'),
             'phase_gates_passed': summary.get('phase_gates_passed'), 'sustainable_rps': summary.get('sustainable_rps'),
@@ -299,6 +334,14 @@ def result_summary(run, folder, verdict, cap):
     return out
 
 
+def safe_result_summary(run, folder, verdict, cap):
+    """result_summary, never a reason for the finish to fail: an error is recorded in its place."""
+    try:
+        return result_summary(run, folder, verdict, cap)
+    except Exception as exc:
+        return {'available': False, 'error': 'result summary not made: %s: %s' % (type(exc).__name__, str(exc)[:300])}
+
+
 def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), supersede_reason=None):
     root = Path(root or ROOT)
     run = Path(runs or root / '.runs').resolve() / launch.valid_run(run_id)
@@ -356,7 +399,7 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
     record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_reached=cap is not None, cap=cap,
                   cap_status=cap and cap['status'], cap_when=cap and cap['when'], cap_call=cap and cap['call'],
                   cap_overshoot=cap and cap['overshoot'], finished_at=now, evidence_derivation=derivation,
-                  turns_not_capturable=not_capturable, result_summary=result_summary(run, folder, verdict, cap), **fields)
+                  turns_not_capturable=not_capturable, result_summary=safe_result_summary(run, folder, verdict, cap), **fields)
     tmp = record_path.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(record_path)

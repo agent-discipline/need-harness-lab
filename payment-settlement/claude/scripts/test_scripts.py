@@ -1200,6 +1200,34 @@ class FinishRunTest(unittest.TestCase):
             write(load / 'summary.json', {'phases': 'x'})
             self.assertIn('another shape', finish_run.result_summary(run, folder, verdict, None)['c20']['load']['reason'])
 
+    def test_result_summary_reads_only_plain_phase_names_inside_the_folder_and_never_blocks_the_finish(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / 'rec'
+            load = folder / 'judging/v3/load'
+            outside = Path(tmp) / 'secret'                                     # a file outside the record folder
+            write(outside / 'k6-summary.json', {'metrics': {'payment_latency': {'p(95)': 1.0, 'p(99)': 2.0}}})
+            write(load / 'normal/k6-summary.json', {'metrics': {'payment_latency': {'p(95)': 5.0, 'p(99)': 6.0}}})
+            write(load / 'summary.json', {'phases': [
+                {'phase': '../../../../secret'}, {'phase': 'a/b'}, {'phase': '..'}, {'phase': 7},
+                {'phase': 'normal', 'pending_samples': 'odd'}, {'phase': 'soak', 'pending_samples': [{'count': 'x'}]}]})
+            out = finish_run.load_metrics(folder, ['judging/v3/load/summary.json'])
+            self.assertTrue(out['available'])
+            self.assertEqual([r['phase'] for r in out['phases']], ['normal', 'soak'])     # never a path outside
+            self.assertEqual(len(out['problems']), 4)
+            normal, soak = out['phases']
+            self.assertEqual((normal['p95_ms'], normal['pending_last']), (5.0, None))
+            self.assertIn('pending_samples in an unexpected shape', normal['notes'])
+            self.assertIn('unreadable', soak['k6_summary'])
+            # a link inside the folder that points outside is not followed either
+            (load / 'linked').symlink_to(outside)
+            write(load / 'summary.json', {'phases': [{'phase': 'linked'}]})
+            row = finish_run.load_metrics(folder, ['judging/v3/load/summary.json'])['phases'][0]
+            self.assertIsNone(row['p95_ms'])
+            self.assertIn('outside the record folder', row['notes'][0])
+            # whatever goes wrong inside the summary, the finish gets a record of it instead of an exception
+            with patch.object(finish_run, 'result_summary', side_effect=KeyError('boom')):
+                self.assertIn('boom', finish_run.safe_result_summary(None, folder, None, None)['error'])
+
     def test_arm3_finish_requires_the_user_proxy_but_the_pilot_check_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:                              # no proxy request observed
             root, run, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01')
