@@ -46,7 +46,44 @@ def snapshot_harness(snapshot):
         "purpose": "frozen harness for arm 3; runner seeds core.md, HISTORY.md, hooks, playbooks, templates, agents"},
         indent=2) + "\n")
 
+LIMIT_KEYS = ("token_limit", "time_limit_seconds", "feedback_limit")
+
+def refresh_limits(root=None):
+    """The one exception to "values already present are never overwritten": rewrite only the three cap fields of
+    NOT_STARTED run records from the template (docs/results/run-manifest.example.json), and only while no measured
+    run has started (freeze_readiness.experiment_started). Every other field and every record in another state is left
+    as it is. Returns [(record, field, before, after)] of the fields changed."""
+    root = Path(root or ROOT)
+    import freeze_readiness                      # imported here: the check reads the measured runs' evidence
+    started = freeze_readiness.experiment_started(root)
+    if started:
+        raise ValueError("a measured run has started (%s): run records are not rewritten" % "; ".join(started[:5]))
+    template = json.loads((root / "docs/results/run-manifest.example.json").read_text())
+    changes = []
+    for arm in (1, 2, 3):
+        for core in range(1, 11):
+            plan = root / "docs/experiments" / str(arm) / f"core{core}" / "run.json"
+            current = json.loads(plan.read_text())
+            if current.get("status") != "NOT_STARTED":
+                continue
+            changed = [(key, current.get(key), template[key]) for key in LIMIT_KEYS if current.get(key) != template[key]]
+            if not changed:
+                continue
+            for key, _, after in changed:
+                current[key] = after
+            plan.write_text(json.dumps(current, indent=2, ensure_ascii=False) + "\n")
+            changes += [(str(plan.relative_to(root)), key, before, after) for key, before, after in changed]
+    return changes
+
 def main():
+    if sys.argv[1:] == ["--refresh-limits"]:
+        changes = refresh_limits()
+        for path, key, before, after in changes:
+            print("%s %s: %s -> %s" % (path, key, before, after))
+        print("refreshed %d field(s); other fields and records not in NOT_STARTED unchanged" % len(changes))
+        return
+    if sys.argv[1:]:
+        raise SystemExit("usage: prepare.py [--refresh-limits]")
     record = load(SHARED / "recording/record.py", "record")
     for core in range(1, 11):
         paths = [ROOT / str(arm) / f"core{core}" for arm in (1, 2, 3)]

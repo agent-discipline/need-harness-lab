@@ -10,6 +10,8 @@ python3 payment-settlement/claude/scripts/verify_setup.py
 docker build -t payment-claude-runner:2.1.326 payment-settlement/claude/runner
 ```
 
+한도 값이 바뀌면(예: 승인 ② 토큰 상한 1억 5천만) 템플릿 `docs/results/run-manifest.example.json`을 고친 뒤 `python3 payment-settlement/claude/scripts/prepare.py --refresh-limits`로 준비된 run 기록의 세 한도 칸(`token_limit`·`time_limit_seconds`·`feedback_limit`)만 맞춘다 — 상태가 `NOT_STARTED`인 기록만, 본 실험 run이 하나라도 시작됐으면 거부(`freeze_readiness.experiment_started`), 바꾼 칸의 전후 값을 출력한다. 다른 칸은 바꾸지 않는다(그 밖에 `prepare.py`는 있는 값을 덮어쓰지 않는다).
+
 인증: 구독 계정에서 한 번 `claude setup-token`을 실행해 장기 토큰을 만들고, **repo 밖** 파일(예: `~/.config/payment-lab/claude.env`)에 `CLAUDE_CODE_OAUTH_TOKEN=<토큰>` 한 줄만 넣어 `chmod 600` 한다. 실행기는 이 파일을 `docker --env-file`로만 넘기고 경로만 기록한다(repo 안 경로·다른 키·느슨한 권한은 거부). 추가 자격증명 파일은 없다.
 
 - 1·2번: 컨테이너는 이미지 사용자 `node`(uid 1000)로 `claude`를 바로 실행하고 토큰은 컨테이너 환경에서 받는다(변경 없음).

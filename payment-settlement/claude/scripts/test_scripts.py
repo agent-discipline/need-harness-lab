@@ -20,6 +20,7 @@ import consult_contract
 import freeze_readiness
 import finish_run
 import preflight
+import prepare
 import record_evaluation_cost
 import start_cycle
 
@@ -1566,6 +1567,49 @@ class ExportSetupEvidenceTest(unittest.TestCase):
             write(runs / 'empty/manifest.json', {})
             with self.assertRaises(ValueError):                       # a run without a turn proves nothing
                 exporter.export(runs, ['empty'], Path(tmp) / 'out-empty', self.TOKEN)
+
+
+class RefreshLimitsTest(unittest.TestCase):
+    def root(self, tmp):
+        root = Path(tmp) / 'claude'
+        write(root / 'docs/results/run-manifest.example.json', {'token_limit': 150000000, 'time_limit_seconds': 28800,
+                                                                 'feedback_limit': 30, 'provider': 'claude-code'})
+        for arm in (1, 2, 3):
+            for core in range(1, 11):
+                write(root / 'docs/experiments' / str(arm) / ('core%d' % core) / 'run.json',
+                      {'run_id': 'claude-arm%d-core%02d' % (arm, core), 'status': 'NOT_STARTED', 'token_limit': 20000000,
+                       'time_limit_seconds': 28800, 'feedback_limit': 30, 'provider': 'claude-code', 'note': 'kept'})
+        write(root / 'docs/results/cycles.json', [{'cycle': c, 'status': 'NOT_STARTED'} for c in range(1, 11)])
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '--allow-empty', '-m', 's'], check=True)
+        return root
+
+    def test_only_the_cap_fields_of_not_started_records_are_refreshed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.root(tmp)
+            before = {p: json.loads(p.read_text()) for p in root.glob('docs/experiments/*/*/run.json')}
+            changes = prepare.refresh_limits(root)
+            self.assertEqual(len(changes), 30)
+            self.assertEqual({(k, b, a) for _, k, b, a in changes}, {('token_limit', 20000000, 150000000)})
+            for path, old in before.items():
+                new = json.loads(path.read_text())
+                self.assertEqual({k for k in set(old) | set(new) if old.get(k) != new.get(k)}, {'token_limit'})
+            self.assertEqual(prepare.refresh_limits(root), [])                     # nothing left to change
+            # a record not in NOT_STARTED is never touched (reachable only if the start check is passed)
+            rec = root / 'docs/experiments/2/core3/run.json'
+            write(rec, dict(json.loads(rec.read_text()), status='RUNNING', token_limit=20000000))
+            with patch.object(freeze_readiness, 'experiment_started', return_value=[]):
+                self.assertEqual(prepare.refresh_limits(root), [])
+            self.assertEqual(json.loads(rec.read_text())['token_limit'], 20000000)
+
+    def test_refused_once_a_measured_run_has_started(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.root(tmp)
+            (root / '.runs/claude-arm1-core01').mkdir(parents=True)
+            before = {p: p.read_text() for p in root.glob('docs/experiments/*/*/run.json')}
+            with self.assertRaisesRegex(ValueError, 'measured run has started'):
+                prepare.refresh_limits(root)
+            self.assertEqual({p: p.read_text() for p in before}, before)
 
 
 class FirstTurnTimeoutTest(unittest.TestCase):
