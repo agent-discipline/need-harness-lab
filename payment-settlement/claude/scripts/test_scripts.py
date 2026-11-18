@@ -33,7 +33,7 @@ READY_FLAGS = dict(isolation_verified=True, usage_collector_verified=True, harne
 def ready(**extra):
     data = dict(protocol='payment-settlement-v3-claude', provider='claude-code', auth='subscription-oauth-token',
                 reasoning_effort='high', cache_policy='observed-cache', billed_cost=None, baseline_sha='abc',
-                contract_sha256='def', image_digests={'runner': 'sha256:1'}, token_limit=20000000,
+                contract_sha256='def', image_digests={'runner': 'sha256:1'}, token_limit=150000000,
                 time_limit_seconds=28800, feedback_limit=30,
                 actual_models={'1': 'claude-opus-5-5', '2': 'claude-opus-5-5', '3': 'claude-fable-5-2'},
                 user_proxy_model='claude-opus-5-5', **READY_FLAGS)
@@ -51,7 +51,7 @@ class PreflightTest(unittest.TestCase):
         base = dict(ready(), arm=1, actual_model='claude-opus-5-5')
         self.assertEqual(preflight.blockers(base), [])
         self.assertIn('protocol must be payment-settlement-v3-claude', preflight.blockers(dict(base, protocol='payment-settlement-v1')))
-        self.assertIn('token_limit must be 20000000', preflight.blockers(dict(base, token_limit=2000000)))
+        self.assertIn('token_limit must be 150000000', preflight.blockers(dict(base, token_limit=20000000)))
         arm3 = dict(base, arm=3, requested_worker_model='claude-opus-5-5', user_proxy_model='claude-opus-5-5')
         self.assertEqual(preflight.blockers(arm3), [])
         for other in (None, 'claude-fable-5-2', 'claude-opus-5-5-x'):
@@ -1003,6 +1003,12 @@ class EvaluationCostLedgerTest(unittest.TestCase):
                 self.assertIn('--item', err)
             with self.assertRaises(ValueError):                                  # the same rule without the CLI
                 record_evaluation_cost.entry('judging-adapter', 'agent-8', 'm', None, 1, 'x', ['claude-arm1-core01'])
+            # one conductor session over two pilots: one line naming both runs, marked unallocated (never split)
+            both = record_evaluation_cost.entry('conductor', 'agent-9', 'claude-fable-5-2', None, 418000, 'completion notice',
+                                                ['claude-pilot-02', 'claude-pilot-03'])
+            self.assertEqual((both['run_ids'], both['per_run_split']), (['claude-pilot-02', 'claude-pilot-03'], 'unallocated'))
+            self.assertEqual(record_evaluation_cost.entry('conductor', 'agent-9', 'm', None, 1, 'x', ['claude-pilot-03'])['per_run_split'],
+                             'single run')
             conductor = ['--role', 'conductor', '--session', 'agent-7', '--model', 'claude-fable-5-2', '--total-tokens', '5',
                          '--source', 'completion notice', '--run-id', 'claude-arm1-core01']
             self.assertNotEqual(self.cli(ledger, *conductor, '--item', 'x')[0], 0)  # conductor: one per session, no item
@@ -1149,6 +1155,49 @@ class FinishRunTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:                              # proxy on another model
             root, _, _ = finish_fixture(tmp, arm=3, run_id='claude-arm3-core01', proxy_model='claude-sonnet-4')
             self.assertIs(self.finish(root, 'claude-arm3-core01')[3]['all_role_models_verified'], False)
+
+    def test_result_summary_reports_correctness_load_figures_tokens_and_time_without_changing_the_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, folder = Path(tmp) / 'run', Path(tmp) / 'rec'
+            t = run / 'turns/0001'
+            write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': '2026-11-18T00:00:00+00:00'})
+            write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'finished_at': '2026-11-18T01:00:00+00:00',
+                                      'cost': {'pinned_session_usd': 1.0, 'reviewer_applicable': False}})
+            (t / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'r1', 'model': 'm', 'role': 'implementer', 'turn': '0001',
+                'usage': {'input_tokens': 10, 'cache_creation_input_tokens': 5, 'cache_read_input_tokens': 80, 'output_tokens': 5}}) + '\n')
+            load = folder / 'judging/v3/load'
+            write(load / 'summary.json', {'phases': [{'phase': 'normal', 'passed': False, 'k6_exit_code': 99,
+                                                      'pending_samples': [{'count': 3}, {'count': 0}], 'pending_converged': True},
+                                                     {'phase': 'soak', 'passed': True}],
+                                          'c20_passed': False, 'phase_gates_passed': False, 'sustainable_rps': 25})
+            write(load / 'normal/k6-summary.json', {'metrics': {'payment_latency': {'p(95)': 1165.0, 'p(99)': 1886.7},
+                                                                'dropped_iterations': {'count': 9}, 'committed_response': {'value': 0.98},
+                                                                'iterations': {'count': 14991}}})
+            write(load / 'soak/k6-summary.json', {'metrics': {'http_req_duration': {'p(95)': 97.0, 'p(99)': 182.6}}})
+            results = {('C%02d' % n): 'PASS' for n in range(1, 21)}
+            results.update(C07='FAIL', C13='NOT_RUN', C20='FAIL')
+            write(folder / 'verdict.json', {'criteria': {'C20': {'evidence': ['judging/v3/load/summary.json']}}})
+            verdict = {'results': results, 'passed': False}
+            summary = finish_run.result_summary(run, folder, verdict, None)
+            self.assertEqual(summary['correctness'], {'criteria': 'C01..C19', 'passed': 17, 'of': 19, 'failed': {'C07': 'FAIL'},
+                                                      'not_run': ['C13']})
+            load_ = summary['c20']['load']
+            self.assertEqual((summary['c20']['result'], load_['sustainable_rps'], load_['c20_passed']), ('FAIL', 25, False))
+            normal, soak = load_['phases']
+            self.assertEqual((normal['p95_ms'], normal['p99_ms'], normal['dropped_iterations'], normal['committed_response_ratio'],
+                              normal['pending_last'], normal['requests']), (1165.0, 1886.7, 9, 0.98, 0, 14991))
+            self.assertEqual((soak['latency_metric'], soak['dropped_iterations'], soak['committed_response_ratio']),
+                             ('http_req_duration', None, None))                  # absent figures stay None, never 0
+            self.assertEqual(summary['tokens']['total_tokens'], 100)
+            self.assertEqual((summary['tokens']['cache_read_input_tokens'], summary['tokens']['tokens_without_cache_reads']), (80, 20))
+            self.assertEqual(summary['tokens']['by_role']['implementer']['tokens_without_cache_reads'], 20)
+            self.assertEqual(summary['elapsed']['seconds'], 3600.0)
+            # the C20 evidence cites no load summary, or it has another shape: the reason is kept, nothing invented
+            write(folder / 'verdict.json', {'criteria': {'C20': {'evidence': ['judging/v3/load-check.stdout']}}})
+            self.assertEqual(finish_run.result_summary(run, folder, verdict, None)['c20']['load']['available'], False)
+            write(folder / 'verdict.json', {'criteria': {'C20': {'evidence': ['judging/v3/load/summary.json']}}})
+            write(load / 'summary.json', {'phases': 'x'})
+            self.assertIn('another shape', finish_run.result_summary(run, folder, verdict, None)['c20']['load']['reason'])
 
     def test_arm3_finish_requires_the_user_proxy_but_the_pilot_check_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:                              # no proxy request observed
@@ -1437,7 +1486,7 @@ class CloseoutRecordsTest(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('sha256:run-image', seen[0])                           # manifest image, not readiness digest
             self.assertNotIn('sha256:1', seen[0])
-            usage = dict(input_tokens=20_000_001, cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=0)
+            usage = dict(input_tokens=freeze_readiness.launch.LIMITS['token_limit'] + 1, cache_creation_input_tokens=0, cache_read_input_tokens=0, output_tokens=0)
             (run_dir / 'consults/0001/events.jsonl').write_text(json.dumps(dict(type='message', id='big', model='m',
                                                                                role='user-proxy', turn='p', usage=usage)) + '\n')
             consult_contract.launch.record_overshoot(run_dir, 'user-proxy')

@@ -192,6 +192,113 @@ def evidence_fields(run, manifest, verdict):
     return fields, derivation
 
 
+CORRECTNESS = tuple('C%02d' % n for n in range(1, 20))      # C01..C19; C20 is the load criterion
+K6_LATENCY = ('payment_latency', 'http_req_duration')   # the workload's own payment latency first
+
+
+def load_metrics(folder, c20_evidence):
+    """C20 phase figures moved from the judging artifacts the verdict cites for C20 (load_check.py's summary.json and
+    each phase's k6-summary.json/result.json beside it). Nothing is filled in: a figure the files do not hold is None,
+    and when the files are not there or not in the expected shape the reason is recorded instead."""
+    cited = [rel for rel in c20_evidence or [] if rel.endswith('load/summary.json')]
+    if not cited:
+        return {'available': False, 'reason': 'no load/summary.json among the C20 evidence of verdict.json'}
+    path = inside(folder, cited[0])
+    try:
+        summary = json.loads(path.read_text())
+        phases = summary['phases']
+        if not isinstance(phases, list):
+            raise ValueError('phases is not a list')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return {'available': False, 'source': cited[0], 'reason': 'unreadable or another shape: %s' % exc}
+    rows, problems = [], []
+    for phase in phases:
+        name = phase.get('phase') if isinstance(phase, dict) else None
+        if not isinstance(name, str):
+            problems.append('a phase without a name')
+            continue
+        row = {'phase': name, 'passed': phase.get('passed'), 'k6_exit_code': phase.get('k6_exit_code'),
+               'pending_converged': phase.get('pending_converged'),
+               'pending_last': (phase.get('pending_samples') or [{}])[-1].get('count') if phase.get('pending_samples') else None,
+               'audit_passed': phase.get('audit_passed'), 'resources_passed': phase.get('resources_passed'),
+               'p95_ms': None, 'p99_ms': None, 'latency_metric': None, 'dropped_iterations': None,
+               'committed_response_ratio': None, 'unexpected_failure_ratio': None, 'requests': None}
+        try:
+            metrics = json.loads((path.parent / name / 'k6-summary.json').read_text())['metrics']
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            row['k6_summary'] = 'unreadable: %s' % exc
+            rows.append(row)
+            continue
+        for metric in K6_LATENCY:
+            if isinstance(metrics.get(metric), dict) and 'p(95)' in metrics[metric]:
+                row.update(p95_ms=metrics[metric].get('p(95)'), p99_ms=metrics[metric].get('p(99)'), latency_metric=metric)
+                break
+        dropped = metrics.get('dropped_iterations')
+        row['dropped_iterations'] = dropped.get('count') if isinstance(dropped, dict) else None   # absent stays None
+        for key, metric in (('committed_response_ratio', 'committed_response'), ('unexpected_failure_ratio', 'unexpected_failure')):
+            if isinstance(metrics.get(metric), dict):
+                row[key] = metrics[metric].get('value')
+        if isinstance(metrics.get('iterations'), dict):
+            row['requests'] = metrics['iterations'].get('count')
+        rows.append(row)
+    return {'available': True, 'source': cited[0], 'c20_passed': summary.get('c20_passed'),
+            'phase_gates_passed': summary.get('phase_gates_passed'), 'sustainable_rps': summary.get('sustainable_rps'),
+            'phases': rows, 'problems': problems,
+            'note': 'figures copied from the k6 and load_check artifacts; None = not in those files (e.g. k6 omits '
+                    'dropped_iterations when none were dropped — not read as 0 here); PENDING convergence after the '
+                    'load is in the judging folder, not summarized here'}
+
+
+def result_summary(run, folder, verdict, cap):
+    """Result figures reported beside the status (decision 2026-11-18, approval 2): the verdict rule is unchanged
+    (PASSED = all of C01..C20 PASS); correctness C01..C19, the C20 result and its load figures, tokens per role and in
+    total (cache reads apart), wall-clock time and the cap annotation."""
+    out = {'rule': 'status unchanged: PASSED only when all of C01..C20 are PASS; these figures are reported beside it'}
+    if verdict:
+        results = verdict['results']
+        out['correctness'] = {'criteria': 'C01..C19', 'passed': sum(1 for c in CORRECTNESS if results[c] == 'PASS'),
+                              'of': len(CORRECTNESS),
+                              'failed': {c: results[c] for c in CORRECTNESS if results[c] in ('FAIL', 'PARTIAL')},
+                              'not_run': [c for c in CORRECTNESS if results[c] == 'NOT_RUN']}
+        try:
+            c20_evidence = json.loads((folder / VERDICT).read_text())['criteria']['C20'].get('evidence')
+        except (OSError, ValueError, KeyError, AttributeError):
+            c20_evidence = None
+        out['c20'] = {'result': results['C20'], 'load': load_metrics(folder, c20_evidence)}
+    else:
+        out['correctness'] = out['c20'] = None
+        out['no_verdict'] = 'no verdict.json (INVALID_INFRA without a verdict table)'
+    ledger = launch.run_ledger(run)
+    roles = {}
+    for role, data in ledger['roles'].items():
+        usage = data['usage']
+        roles[role] = {'requests': data['requests'], 'total_tokens': data['total_tokens'],
+                       'cache_read_input_tokens': usage['cache_read_input_tokens'],
+                       'tokens_without_cache_reads': data['total_tokens'] - usage['cache_read_input_tokens']}
+    cache_reads = sum(r['cache_read_input_tokens'] for r in roles.values())
+    out['tokens'] = {'by_role': roles, 'total_tokens': ledger['total_tokens'], 'cache_read_input_tokens': cache_reads,
+                     'tokens_without_cache_reads': ledger['total_tokens'] - cache_reads,
+                     'usage_complete': ledger['usage_complete'], 'tokens_are_lower_bound': ledger['tokens_are_lower_bound'],
+                     'counted': 'input + cache creation + cache read + output, request-level, every role of the run',
+                     'cost_usd': ledger.get('cost_usd')}
+    starts, ends = [], []
+    for ident, _, _, started in launch.turn_records(run):
+        if started:
+            starts.append(started)
+        try:
+            finished = launch.parse_time(json.loads((run / 'turns' / ident / 'result.json').read_text()).get('finished_at'))
+        except (OSError, ValueError):
+            finished = None
+        if finished:
+            ends.append(finished)
+    out['elapsed'] = {'first_turn_started_at': min(starts).isoformat() if starts else None,
+                      'last_turn_finished_at': max(ends).isoformat() if ends else None,
+                      'seconds': (max(ends) - min(starts)).total_seconds() if starts and ends else None,
+                      'turns': len(launch.turn_records(run))}
+    out['cap'] = None if cap is None else {k: cap.get(k) for k in ('status', 'when', 'call', 'overshoot')}
+    return out
+
+
 def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), supersede_reason=None):
     root = Path(root or ROOT)
     run = Path(runs or root / '.runs').resolve() / launch.valid_run(run_id)
@@ -249,7 +356,7 @@ def finish(run_id, runs=None, root=None, infra_reason=None, infra_evidence=(), s
     record.update(status=status, verdict=verdict, invalid_infra=invalid, cap_reached=cap is not None, cap=cap,
                   cap_status=cap and cap['status'], cap_when=cap and cap['when'], cap_call=cap and cap['call'],
                   cap_overshoot=cap and cap['overshoot'], finished_at=now, evidence_derivation=derivation,
-                  turns_not_capturable=not_capturable, **fields)
+                  turns_not_capturable=not_capturable, result_summary=result_summary(run, folder, verdict, cap), **fields)
     tmp = record_path.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     tmp.replace(record_path)

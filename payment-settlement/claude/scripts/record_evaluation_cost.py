@@ -9,6 +9,8 @@ job, each with its own --item label — required for every judging-adapter line 
 never recorded twice). A conductor line stays one per session and takes no --item. A conductor that wrote the adapter itself records one conductor line marked
 --includes-judging-adapter and no separate adapter line. The ledger is append-only; a line is never rewritten.
 Tokens are either the four request counters or, when the source reports only a total, --total-tokens alone.
+A line that names several runs (--run-id repeated: one conductor session over several runs) records them as
+unallocated (per_run_split): its tokens are never divided among the runs.
 """
 import argparse
 from datetime import datetime, timezone
@@ -87,6 +89,8 @@ def entry(role, session, model, usage, total, source, run_ids, cost_usd=None, in
             'usage_split_observed': usage is not None,
             'total_tokens': total, 'tokens_source': source, 'run_ids': list(run_ids), 'cost_usd': cost_usd,
             'includes_judging_adapter': bool(includes_adapter), 'note': note,
+            # one session over several runs (e.g. a conductor that ran two pilots): the tokens are not split per run
+            'per_run_split': 'unallocated' if len(run_ids) > 1 else 'single run',
             'recorded_at': datetime.now(timezone.utc).isoformat(),
             'counted_in_run_cap': False, 'counted_in_arm_cost': False}
 
