@@ -1,0 +1,379 @@
+{
+    "root_group": {
+        "checks": {
+            "committed synchronous response": {
+                "path": "::committed synchronous response",
+                "id": "a4501ce9de11a75f46e492f572aac0d2",
+                "passes": 3000,
+                "fails": 0,
+                "name": "committed synchronous response"
+            },
+            "replay identity preserved": {
+                "name": "replay identity preserved",
+                "path": "::replay identity preserved",
+                "id": "73a966184d36785819c017b61ce6d905",
+                "passes": 3000,
+                "fails": 0
+            }
+        },
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {}
+    },
+    "metrics": {
+        "payment_latency": {
+            "max": 152.634109,
+            "p(95)": 77.06594019999999,
+            "p(99)": 86.79823957999984,
+            "avg": 29.132935493333324,
+            "min": 1.579669,
+            "med": 24.9049865,
+            "thresholds": {
+                "p(95)<500": false,
+                "p(99)<1500": false
+            }
+        },
+        "data_sent": {
+            "count": 862311,
+            "rate": 7153.6272913055
+        },
+        "iteration_duration": {
+            "max": 154.17476,
+            "p(95)": 77.68061764999996,
+            "p(99)": 87.43166164999987,
+            "avg": 29.810548467666617,
+            "min": 1.988868,
+            "med": 25.5998285
+        },
+        "http_req_waiting": {
+            "max": 152.407591,
+            "p(95)": 76.8464166,
+            "p(99)": 86.57406039999998,
+            "avg": 28.93275272880796,
+            "min": 1.464631,
+            "med": 24.845767000000002
+        },
+        "http_req_sending": {
+            "p(99)": 0.1596264299999999,
+            "avg": 0.054312039735099356,
+            "min": 0.020191,
+            "med": 0.048718,
+            "max": 1.229292,
+            "p(95)": 0.08422754999999991
+        },
+        "dropped_iterations": {
+            "rate": 0,
+            "count": 0,
+            "thresholds": {
+                "count==0": false
+            }
+        },
+        "http_req_duration": {
+            "med": 25.0117705,
+            "max": 152.634109,
+            "p(95)": 77.02366099999999,
+            "p(99)": 86.72558772999997,
+            "avg": 29.115406655629137,
+            "min": 1.579669
+        },
+        "http_req_tls_handshaking": {
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "avg": 0
+        },
+        "replay_fraction": {
+            "passes": 150,
+            "fails": 2850,
+            "value": 0.05
+        },
+        "iterations": {
+            "count": 3000,
+            "rate": 24.88763552119421
+        },
+        "vus_max": {
+            "value": 50,
+            "min": 50,
+            "max": 50
+        },
+        "committed_response": {
+            "passes": 3000,
+            "fails": 0,
+            "thresholds": {
+                "rate==1": false
+            },
+            "value": 1
+        },
+        "http_req_blocked": {
+            "avg": 0.023735345695364198,
+            "min": 0.005315,
+            "med": 0.012393,
+            "max": 1.278519,
+            "p(95)": 0.01808169999999999,
+            "p(99)": 0.5972136399999999
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 3020,
+            "value": 0
+        },
+        "http_req_receiving": {
+            "p(95)": 0.18453224999999993,
+            "p(99)": 0.2551831,
+            "avg": 0.12834188708609215,
+            "min": 0.055983,
+            "med": 0.1228435,
+            "max": 0.449414
+        },
+        "unexpected_failure": {
+            "passes": 0,
+            "fails": 3000,
+            "thresholds": {
+                "rate<0.001": false
+            },
+            "value": 0
+        },
+        "http_req_connecting": {
+            "min": 0,
+            "med": 0,
+            "max": 0.69241,
+            "p(95)": 0,
+            "p(99)": 0.4476334199999999,
+            "avg": 0.007906959602649007
+        },
+        "vus": {
+            "max": 4,
+            "value": 1,
+            "min": 0
+        },
+        "http_req_duration{expected_response:true}": {
+            "max": 152.634109,
+            "p(95)": 77.02366099999999,
+            "p(99)": 86.72558772999997,
+            "avg": 29.115406655629137,
+            "min": 1.579669,
+            "med": 25.0117705
+        },
+        "http_reqs": {
+            "count": 3020,
+            "rate": 25.053553091335505
+        },
+        "data_received": {
+            "count": 944026,
+            "rate": 7831.5250035102945
+        },
+        "checks": {
+            "passes": 6000,
+            "fails": 0,
+            "thresholds": {
+                "rate==1": false
+            },
+            "value": 1
+        }
+    },
+    "setup_data": [
+        {
+            "id": "5985bb84-afd5-4a61-bdb0-5bf817dff886",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-0",
+            "body": {
+                "agencyId": 801,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800001
+            }
+        },
+        {
+            "body": {
+                "userId": 800002,
+                "agencyId": 802,
+                "amount": 100,
+                "currency": "KRW"
+            },
+            "id": "c41fe6b9-7697-4f5b-bd7c-bc9e25b6a4ce",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-1"
+        },
+        {
+            "body": {
+                "agencyId": 803,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800003
+            },
+            "id": "f74a9986-939a-4fc2-aa77-6ef21874d830",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-2"
+        },
+        {
+            "body": {
+                "userId": 800004,
+                "agencyId": 804,
+                "amount": 100,
+                "currency": "KRW"
+            },
+            "id": "aaa27fb2-1526-4f16-8bb4-d21fc0013814",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-3"
+        },
+        {
+            "body": {
+                "agencyId": 805,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800005
+            },
+            "id": "22611464-47cf-4f88-ae17-58077b5bd900",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-4"
+        },
+        {
+            "body": {
+                "agencyId": 806,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800006
+            },
+            "id": "41c2185f-93ef-4015-b285-1fdd59437ae1",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-5"
+        },
+        {
+            "body": {
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800007,
+                "agencyId": 807
+            },
+            "id": "0aa16dd6-4516-4a7e-8379-b0910950b55a",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-6"
+        },
+        {
+            "body": {
+                "currency": "KRW",
+                "userId": 800008,
+                "agencyId": 808,
+                "amount": 100
+            },
+            "id": "18602509-0458-45db-8117-6fe7913ee554",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-7"
+        },
+        {
+            "body": {
+                "agencyId": 809,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800009
+            },
+            "id": "6896029a-495b-4d30-9f0a-7a40b5918019",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-8"
+        },
+        {
+            "body": {
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800010,
+                "agencyId": 810
+            },
+            "id": "03126f4e-fc40-4538-86b4-4f81d80ebc04",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-9"
+        },
+        {
+            "body": {
+                "currency": "KRW",
+                "userId": 800011,
+                "agencyId": 811,
+                "amount": 100
+            },
+            "id": "42c65961-49ba-4ee6-be80-bf494dc0c495",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-10"
+        },
+        {
+            "body": {
+                "userId": 800012,
+                "agencyId": 812,
+                "amount": 100,
+                "currency": "KRW"
+            },
+            "id": "c583bc23-ba57-43f3-a49e-f9101b385942",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-11"
+        },
+        {
+            "id": "f93624a1-d783-46a1-8a27-83bfa1669b82",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-12",
+            "body": {
+                "agencyId": 813,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800013
+            }
+        },
+        {
+            "body": {
+                "agencyId": 814,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800014
+            },
+            "id": "098ac06c-d0b9-400d-9f66-7af6ce57c244",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-13"
+        },
+        {
+            "body": {
+                "currency": "KRW",
+                "userId": 800015,
+                "agencyId": 815,
+                "amount": 100
+            },
+            "id": "ba2653ca-7071-4517-8d73-1c22c1303c5f",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-14"
+        },
+        {
+            "body": {
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800016,
+                "agencyId": 816
+            },
+            "id": "33a01fc9-b178-4ae1-b553-8ed90ef8800d",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-15"
+        },
+        {
+            "body": {
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800017,
+                "agencyId": 817
+            },
+            "id": "7f7ebffc-345c-4144-9b4f-28f69deaa898",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-16"
+        },
+        {
+            "body": {
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800018,
+                "agencyId": 818
+            },
+            "id": "dacced4d-f38a-4cea-8544-62e0dacc1e5a",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-17"
+        },
+        {
+            "body": {
+                "agencyId": 819,
+                "amount": 100,
+                "currency": "KRW",
+                "userId": 800019
+            },
+            "id": "d8d0bc80-5e5c-4ffb-9df7-a7c3b360444d",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-18"
+        },
+        {
+            "body": {
+                "currency": "KRW",
+                "userId": 800020,
+                "agencyId": 820,
+                "amount": 100
+            },
+            "id": "f8e75400-f12e-4b86-930e-e9545915b4de",
+            "key": "payment-claude-pilot-03-v3-load-4-1794987848-seed-19"
+        }
+    ]
+}

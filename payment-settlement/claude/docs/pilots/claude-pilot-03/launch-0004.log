@@ -1,0 +1,4 @@
+2026-11-18T02:20:48Z
+{"exit_code": 0, "session_id_confirmed": true, "event_count": 485, "usage_complete": true, "transcript_models": ["claude-fable-5-2", "claude-opus-5-5"], "roles": ["pm", "reviewer", "worker"]}
+exit=0
+2026-11-18T06:45:56Z

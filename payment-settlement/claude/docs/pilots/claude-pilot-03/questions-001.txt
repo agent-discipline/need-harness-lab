@@ -1,0 +1,86 @@
+지금까지 저장소·하네스 문서(core, review/design-taste/issue-archive playbook, 템플릿)와 실행 환경을 읽었고, 구현 전 인터뷰 질문을 정리했습니다. 아직 파일은 하나도 만들거나 바꾸지 않았습니다.
+
+**확인한 환경 사실**
+- starter는 `GET /health`만 있고, `db:5432`와 `bank:8081`은 이 컨테이너에서 접속됩니다.
+- docker·psql·k6·codex는 없습니다. `fable-review`는 있습니다.
+- `Dockerfile`은 빌드 중 `./gradlew clean test bootJar`를 실행하므로, DB 없는 빌드에서도 `test`가 통과해야 합니다.
+- 요구사항이 가리키는 `infra/README.md`, `acceptance.md`, `postgres/001-seed.sql`은 저장소에 없습니다.
+
+아래 질문에 답해 주세요. 각 항목의 "제안"은 답이 "제안대로"일 때 명세에 그대로 들어갈 내용입니다.
+
+## A. 환경·기준소스
+1. **DB 접속정보**: `DB_USER`/`DB_PASSWORD` 환경변수가 없습니다. `application.yml` 기본값(`lab` / `lab-local-only`)을 써도 됩니까?
+2. **DB·은행 사용 범위**: 이 컨테이너의 `db`·`bank`는 통합 테스트가 써도 되는 일회용입니까? 테스트는 Flyway로 업무 테이블을 만들고, 일부 사용자 잔액과 은행 journal을 바꿉니다. 평가는 새 volume에서 한다고 이해했습니다.
+3. **fixture 스키마**: `users(id, balance_minor)`, `agencies(id, fee_bps, settlement_balance_minor)` 외에 컬럼·제약이 있습니까? 제안: 1번 승인 시 `information_schema`를 읽기 전용으로 조회해 확인하고, 두 테이블의 DDL은 바꾸지 않고 값만 UPDATE합니다.
+4. **누락 문서**: `infra/README.md`는 `FIXTURE.md`와 같은 내용이고, `acceptance.md`는 보내주신 "외부 합격 기준" 문단이 전부라고 봐도 됩니까?
+5. **수정 가능 파일**: `build.gradle.kts`(의존성·테스트 태스크 추가)와 `application.yml`(키 추가)은 수정 가능, `Dockerfile`·Hikari/Tomcat/JVM 한도·`bank.timeout-ms=1000`·`STARTER.md`·`FIXTURE.md`는 수정 금지로 이해합니다. 맞습니까?
+6. **테스트 배치**: 제안은 다음과 같습니다.
+   - `./gradlew test`는 DB 없이 도는 단위 테스트만 둡니다(Docker 빌드용).
+   - `./gradlew integrationTest`를 별도 태스크로 두고, 실제 PostgreSQL·fake-bank에 붙습니다. 접속이 안 되면 skip이 아니라 실패합니다.
+   - Docker가 없어 Testcontainers는 쓰지 않습니다.
+
+## B. 결제 API 세부
+7. **식별자와 응답 형태**: 제안은 `paymentId`·`settlementId`를 서버 생성 UUID 문자열로 하고, POST 응답 body(201/200/202)를 GET과 같은 형태로 합니다. `bankTransferId`는 성공 전에는 `null`입니다.
+8. **금액 의미**: 사용자 차감액 = `amount`, 은행 송금액 = `amount`, 수수료 = `floor(amount*feeBps/10000)`, 대행사 순액 = `amount − fee`(수수료는 금액 안에서 떼어냄)로 이해합니다. 맞습니까?
+9. **헤더·입력 오류 코드**: 제안은 다음과 같습니다.
+   - `X-Agency-Id` 누락 또는 비정수: 400
+   - 헤더와 body의 `agencyId` 불일치: 403 (존재 확인보다 먼저)
+   - 대행사·사용자 없음: 404
+   - `Idempotency-Key` 누락, 129자 이상, 출력 가능 ASCII(0x21–0x7E) 밖: 400
+   - `currency≠"KRW"`, `amount`가 1..1,000,000 밖이거나 정수가 아님(`100.0`, `"100"`): 400
+   - 알 수 없는 JSON 필드: 무시
+10. **수락 전 거절과 멱등성 키**: 제안은 400/403/404일 때 결제 레코드를 만들지 않고 키도 소비하지 않는 것입니다. 맞습니까?
+11. **잔액 부족(409)**: 레코드와 키를 어떻게 합니까?
+    - (a) FAILED 결제를 저장하고 같은 키 재전송에 계속 409를 줍니다. 제안은 이쪽입니다.
+    - (b) 저장하지 않고 재전송 때 다시 평가합니다.
+12. **은행 거절(422)**: 제안은 FAILED 결제를 저장하고, 첫 응답과 같은 키 재전송 모두 422 `{code,message}`를 주는 것입니다. GET은 `status=FAILED`를 반환합니다. 아니면 재전송은 200 + `status:FAILED`여야 합니까? 에러 body에 `paymentId`를 추가해도 됩니까?
+13. **202 범위**: 제안은 다음 경우를 202 + PENDING 표현으로 응답하는 것입니다.
+    - 같은 키의 선행 요청이 처리 중일 때
+    - 첫 은행 시도가 timeout-before / timeout-after / 5xx / 연결 실패일 때
+    - 은행 성공 뒤 DB 확정이 실패했을 때
+
+    5xx를 요청 안에서 즉시 재시도해 201로 만들지는 않습니다. 맞습니까?
+14. **다른 payload 409 비교 대상**: `{userId, agencyId, amount, currency}` 전체로 비교합니다. 맞습니까?
+15. **PENDING 중 잔액 표현**: 이 답에 따라 설계가 갈립니다.
+    - (A) 은행 호출 전에 `users.balance_minor`를 먼저 차감하고 실패 시 되돌립니다. PENDING 동안 잔액이 줄어 보입니다.
+    - (B) `balance_minor`는 성공 확정 때 한 번만 차감하고, PENDING은 보류 합계로 가용액만 막습니다. 어느 시점에도 `초기잔액 − balance = SUCCEEDED 합계`가 성립합니다.
+
+    제안은 (B)입니다. 평가기 대조가 어느 쪽을 전제합니까?
+16. **은행 멱등성 키 형식**: 제안은 `payment:{agencyId}:{paymentId}`입니다. 클라이언트 키 문자와 무관해 URL 인코딩이 안전하고, 결제당 고정이라 재시도에도 바뀌지 않습니다. 평가기가 특정 형식을 기대합니까?
+17. **`X-Bank-Fault` 활성화**: "실험 프로필"을 평가자가 어떻게 켭니까(Spring profile 이름 또는 환경변수)? 제안은 다음과 같습니다.
+    - `bank.fault-injection-enabled`(env `BANK_FAULT_INJECTION_ENABLED`)로 제어하고 기본값은 `true`입니다.
+    - 허용 4개 값 외에는 400입니다.
+    - 플래그가 꺼져 있으면 헤더를 무시합니다.
+18. **복구 정책**: 제안은 다음과 같습니다.
+    - DB에 저장된 PENDING을 스케줄러가 `FOR UPDATE SKIP LOCKED`로 가져갑니다.
+    - 은행 `GET /transfers/{key}`가 200이면 SUCCEEDED로 확정합니다.
+    - 404이면 같은 키로, fault 헤더 없이 POST를 다시 보냅니다. 200이면 SUCCEEDED, 422이면 FAILED입니다.
+    - 그 외 응답이면 PENDING을 유지하고 상한 있는 backoff(수 초)로 다시 시도합니다.
+    - 시간 기반 강제 FAILED는 두지 않습니다.
+
+    기한 초과 시 FAILED 종결이 필요합니까?
+19. **DB 장애 중 응답**: 제안은 업무 API 503 `{code,message}`, `/health`는 항상 200에 `{"status":"DOWN","database":false}`입니다. 정상 시 `/health`는 기존 형태를 유지합니다. 맞습니까?
+
+## C. 정산
+20. **상태와 응답 코드**: 제안은 정산을 단일 DB 트랜잭션으로 동기 처리하고 `status`는 `SUCCEEDED` 하나만 두는 것입니다. 최초 201, 같은 키·같은 payload 재전송 200, 다른 payload 409입니다. 키 범위는 대행사 + operation이라 결제와 같은 키 문자열을 써도 충돌하지 않습니다.
+21. **businessDate 허용 범위**: 제안은 오늘·과거·미래 날짜를 모두 허용하고(대상이 없으면 0/0 성공), 형식 오류만 400으로 하는 것입니다. 맞습니까?
+22. **원장 모델**: 제안은 다음과 같습니다.
+    - 결제 성공 시: 사용자 차감(amount), 대행사 미정산 채무(net), 수수료 수익(fee)을 기록합니다.
+    - 정산 시: 미정산 채무(net 합)를 줄이고 대행사 정산 잔액으로 옮기며, `agencies.settlement_balance_minor += net`을 한 번 반영합니다.
+    - 테이블은 `payments`, `ledger_entries`, `settlements`, `settlement_items`이고, 대조 SQL은 `docs/`에 문서화합니다.
+
+## D. 절차
+23. **stakes**: 높음으로 판정합니다(결제·멱등성·동시성·public API 계약). 따라서 설계 선검증, 구현 diff를 보지 않는 blind 테스트 워커, 듀얼 리뷰 루프(최대 3회, Opus 워커와 `fable-review`), 외부 검색 근거 확인을 수행합니다. 동의합니까? 모드는 지시대로 auto로 기록합니다.
+24. **브랜치·커밋**: 제안은 `main`(90ed838)에서 `feat/payment-settlement-v1`을 만들어 작업하고, 코드와 docs를 별도 커밋으로 나누는 것입니다. push·PR은 하지 않습니다. 정해 주실 것은 다음 세 가지입니다.
+    - 브랜치 이름
+    - 최종 산출물을 브랜치에 둘지, 로컬 `main`에 병합할지
+    - 커밋 메시지의 AI attribution: 하네스 core §6은 금지인데 세션 기본 지침은 `Co-Authored-By`를 붙이라고 합니다. 사용자 규칙이 우선이므로 붙이지 않겠습니다.
+25. **성능 검증 범위**: k6와 자원 제한 컨테이너가 없어 고정 workload SLO는 여기서 판정할 수 없습니다. 제안은 자체 스크립트로 짧은 부하 스모크(예: 50RPS 60초)와 동시성 시나리오(동일키 100, 동일사용자 100, 정산 50)를 돌리는 것입니다. 결과는 SLO 판정이 아니라 참고 증거로 보고합니다. 괜찮습니까?
+26. **CS 이슈 아카이브**: playbook의 대상(`/home/jun/project/study-note`)이 이 환경에 없고, 외부 저장소 쓰기는 범위 밖으로 보입니다. 제안은 log에 "아카이브 보류" 1행과 `NEXT.md` 보류 등재로 처리하는 것입니다. 맞습니까?
+27. **load-bearing 가정**: 착수 직후 스모크로 실증할 두 가지입니다.
+    - 이 컨테이너에서 Gradle 빌드와 `db`·`bank` 대상 통합 테스트가 돌아간다.
+    - fake-bank가 `FIXTURE.md` 계약대로 동작한다(같은 키 재요청이 같은 결과, timeout-after 뒤 GET으로 확인 가능).
+
+    이 외에 꼭 포함할 가정이 있습니까?
+
+답변을 받으면 `docs/plans/2026-11-18/payment-settlement-v1/requirement-spec.md`를 여섯 칸으로 작성해 합의를 요청하겠습니다.

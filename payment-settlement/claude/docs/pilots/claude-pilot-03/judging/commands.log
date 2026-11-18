@@ -1,0 +1,27 @@
+2026-11-18T07:12:00Z | 판정 시작. docker ps에 cx- 컨테이너 0개 확인(07:11:47Z부터 없음). load average 2.98 5.20 5.19
+2026-11-18T07:12:00Z | v1 up: ARM=.runs/claude-pilot-03 CORE=workspace APP_PORT=38011 DB_PORT=39011 BANK_PORT=40011 docker compose -p payment-claude-pilot-03-v1 -f payment-settlement/claude/compose.yaml up -d --build --wait db bank app
+2026-11-18T07:15:09Z | v1 up exit=0
+2026-11-18T07:15:22Z | v1 fixture: users/agencies/payments = 1000000|1000|0, cx- 0개
+2026-11-18T07:15:22Z | v1 http: python3 payment-settlement/claude/docs/pilots/claude-pilot-03/judging/run_http.py --base-url http://localhost:38011 --namespace p03v1 --project payment-claude-pilot-03-v1 --output payment-settlement/claude/docs/pilots/claude-pilot-03/judging/v1/acceptance-http.json
+2026-11-18T07:17:49Z | v1 http exit=2 (1 = FAIL인 항목 있음, 2 = FAIL 없음·전체 합격 주장 안 함)
+2026-11-18T07:17:58Z | v1 audit: python3 payment-settlement/claude/docs/pilots/claude-pilot-03/judging/adapter.py --project payment-claude-pilot-03-v1 --output payment-settlement/claude/docs/pilots/claude-pilot-03/judging/v1/acceptance-audit.json
+2026-11-18T07:18:04Z | v1 audit exit=0
+2026-11-18T07:18:04Z | v1 down: docker compose -p payment-claude-pilot-03-v1 -f payment-settlement/claude/compose.yaml down -v
+2026-11-18T07:18:15Z | v1 down exit=0
+2026-11-18T07:18:24Z | v2 시작 전 cx- 0개. v2 up: ARM=.runs/claude-pilot-03 CORE=workspace APP_PORT=38012 DB_PORT=39012 BANK_PORT=40012 docker compose -p payment-claude-pilot-03-v2 -f payment-settlement/claude/compose.yaml up -d --build --wait db bank app
+2026-11-18T07:18:49Z | v2 up exit=0
+2026-11-18T07:18:49Z | v2 faults: python3 payment-settlement/claude/docs/pilots/claude-pilot-03/judging/run_faults.py --base-url http://localhost:38012 --namespace p03v2 --project payment-claude-pilot-03-v2 --output payment-settlement/claude/docs/pilots/claude-pilot-03/judging/v2/acceptance-faults.json
+2026-11-18T07:20:02Z | v2 faults exit=0
+2026-11-18T07:20:16Z | v2 audit(adapter.py → v2/acceptance-audit.json) exit=0
+2026-11-18T07:20:16Z | v2 down
+2026-11-18T07:20:27Z | v2 down exit=0
+2026-11-18T07:20:41Z | v3 시작 전 cx- 0개, load average 3.87 4.48 4.88. v3 up: ARM=.runs/claude-pilot-03 CORE=workspace APP_PORT=38013 DB_PORT=39013 BANK_PORT=40013 docker compose -p payment-claude-pilot-03-v3 -f payment-settlement/claude/compose.yaml up -d --build --wait db bank app
+2026-11-18T07:21:12Z | v3 up exit=0
+2026-11-18T07:21:13Z | v3 load: python3 payment-settlement/claude/scripts/load_check.py --project payment-claude-pilot-03-v3 --output payment-settlement/claude/docs/pilots/claude-pilot-03/judging/v3/load --pending-sql-file payment-settlement/claude/docs/pilots/claude-pilot-03/judging/pending.sql --audit-command-json '["python3", "-B", "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/pilots/claude-pilot-03/judging/adapter.py", "--project", "payment-claude-pilot-03-v3"]'
+2026-11-18T07:55:11Z | v3 load exit=1 (필수 단계 중 통과하지 못한 것이 있음 — load/summary.json). 07:21:13Z~07:54:27Z, host-samples.txt 67개 표본 모두 cx=0
+2026-11-18T07:55:11Z | v3 부하 종료 뒤 PENDING 소진 관측: 15초 간격 표본 → v3/post-load-pending.txt, 0이 되면(또는 10분 뒤) adapter.py 전수 대조 → v3/post-load-audit.json
+2026-11-18T08:01:18Z | v3 post-load audit exit=0
+2026-11-18T08:01:38Z | v3 k6 컨테이너(종료 상태, payment-claude-pilot-03-v3-load-*) 8개 제거 — 증거는 load/<phase>/k6-inspect.json·k6-summary.json·stdout.txt에 보존
+2026-11-18T08:01:38Z | v3 down: docker compose -p payment-claude-pilot-03-v3 -f payment-settlement/claude/compose.yaml down -v
+2026-11-18T08:01:50Z | v3 down exit=0
+2026-11-18T08:01:50Z | 판정 실행 끝. cx- 컨테이너 0개(시작 07:12Z·v2 시작 전·v3 시작 전·v3 실행 중 표본 67개·종료 시 모두 0)

@@ -1,0 +1,172 @@
+{
+  "run_id": "claude-pilot-03",
+  "judged_by": "메인 세션(실험 통제, Claude Fable 5.2) — 진행자가 모은 판정 원자료(judging/)의 JSON을 직접 읽고 판정",
+  "judged_at": "2026-11-18T08:04:51+00:00",
+  "criteria": {
+    "C01": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "정상 결제 201·SUCCEEDED, 시나리오 뒤 전수 대조 PASS(은행·원장·차감 각 1건)"
+    },
+    "C02": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "잘못된 입력 9종 모두 400, 전후 행 수 변화 없음"
+    },
+    "C03": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "없는 사용자·대행사 각각 404, 변경 없음"
+    },
+    "C04": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "최초 201 뒤 같은 키 20회 모두 200·같은 paymentId, 효과 1회"
+    },
+    "C05": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "같은 키에 다른 금액·다른 사용자 2건 모두 409, 원본 보존"
+    },
+    "C06": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "동일 키 동시 100: 201 1건·202 16건·200 83건, paymentId 1개, 원장 1건분 증가"
+    },
+    "C07": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json",
+        "judging/v1/payments-by-status.txt"
+      ],
+      "note": "한 사용자 동시 100×20,000원: 201 50건·409 50건(성공 총액 1,000,000), 음수 잔액 0. 409는 FAILED(INSUFFICIENT_BALANCE) 행으로 저장되나 원장·은행 기록이 없어 차감 0 — 요구 관측(성공 총액≤100만·음수 없음)을 충족"
+    },
+    "C08": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "서로 다른 대행사 같은 키 각각 201, paymentId 다름"
+    },
+    "C09": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "헤더 불일치 403, 다른 대행사의 조회 404, 변경 없음"
+    },
+    "C10": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "은행 decline → 422, FAILED 1행, 은행 기록 없음, 차감 0"
+    },
+    "C11": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "timeout-before·5xx 모두 202 PENDING(거짓 SUCCEEDED 없음) → 약 11초 뒤 SUCCEEDED(30초 내 수렴)"
+    },
+    "C12": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "timeout-after 202 PENDING → 약 5.4초 뒤 SUCCEEDED, 은행 기록 1건"
+    },
+    "C13": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v2/acceptance-faults.json",
+        "judging/v2/acceptance-audit.json"
+      ],
+      "note": "은행 기록 있음 + DB PENDING 시점에 app SIGKILL → 재기동 뒤 6.9초에 SUCCEEDED, 같은 키 재전송 200·같은 paymentId, 대조 PASS"
+    },
+    "C14": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v2/acceptance-faults.json",
+        "judging/v2/acceptance-audit.json"
+      ],
+      "note": "같은 경계에서 db SIGKILL → 복구 뒤 5.9초에 SUCCEEDED, 대조 PASS"
+    },
+    "C15": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "정산 gross 10301 = fee 102 + net 10199(건별 floor 합), 재전송 200 같은 settlementId"
+    },
+    "C16": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "같은 날짜 정산 동시 50: paymentCount 합 1(1건이 1, 49건이 0), settlement item 중복 0"
+    },
+    "C17": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v2/acceptance-faults.json",
+        "judging/v2/acceptance-audit.json"
+      ],
+      "note": "KST 자정 경계 3건이 확정 날짜대로 2020-01-01 1건·2020-01-02 2건, 늦은 성공은 추가 정산에만 포함. 시각은 평가자 fixture 주입"
+    },
+    "C18": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-http.json",
+        "judging/v1/acceptance-audit.json"
+      ],
+      "note": "빈 정산 0건·0원, 재전송 200 같은 settlementId"
+    },
+    "C19": {
+      "result": "PASS",
+      "evidence": [
+        "judging/v1/acceptance-audit.json",
+        "judging/v2/acceptance-audit.json",
+        "judging/v3/post-load-audit.json"
+      ],
+      "note": "세 stack의 전수 대조 모두 PASS(v1 payments 115, v2 7, v3 수렴 뒤 88,787 = 은행 88,787, 집계 11개 0). 부하 직후의 미수렴(PENDING)은 C20에서 판정"
+    },
+    "C20": {
+      "result": "FAIL",
+      "evidence": [
+        "judging/v3/load/summary.json",
+        "judging/v3/load-check.stdout",
+        "judging/v3/post-load-pending.txt",
+        "judging/v3/post-load-audit.json",
+        "judging/v3/host-samples.txt"
+      ],
+      "note": "필수 단계 미달: normal 50RPS 5분에서 p95 1165ms(<500)·p99 1887ms(<1500)·dropped 9(=0), spike_recovery에서 p95 1183·p99 1557·dropped 5. capacity100·200 뒤 PENDING이 30초 안에 소진되지 않음(전부 수렴까지 약 7분 30초). 5xx·유실·이중 처리는 0, soak 통과, sustainable 25RPS"
+    }
+  }
+}

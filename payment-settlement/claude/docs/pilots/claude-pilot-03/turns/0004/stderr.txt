@@ -1,0 +1,8 @@
+[fable-review-helper] 2026-11-18T02:20:53.088243+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready
+[fable-review-helper] 2026-11-18T02:37:23.707274+00:00 snapshot c5786b17-4fed-4063-9b74-8e4a752a5127 files=25 bytes=191725 excluded=[]
+[fable-review-helper] 2026-11-18T02:48:09.982375+00:00 call in /tmp/dpv-mirror.5vCZ7n exit=0
+[fable-review-helper] 2026-11-18T05:18:13.273231+00:00 snapshot 71c15507-8fe4-4a07-81c9-08facc56bd33 files=94 bytes=951551 excluded=[]
+[fable-review-helper] 2026-11-18T05:28:06.980050+00:00 call in /tmp/rv1-mirror.rcSpw9 exit=0
+[fable-review-helper] 2026-11-18T05:31:08.835245+00:00 snapshot 3ce57195-948b-420c-bbb2-ac83cf2154ab files=94 bytes=951551 excluded=[]
+[fable-review-helper] 2026-11-18T05:37:26.548639+00:00 call in /tmp/rv1-mirror.rcSpw9 exit=0

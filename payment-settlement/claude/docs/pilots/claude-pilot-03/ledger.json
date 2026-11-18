@@ -1,0 +1,143 @@
+{
+  "turn_kinds": {
+    "delivered": {
+      "initial": 1,
+      "feedback": 0,
+      "answer": 3
+    },
+    "declared": {
+      "initial": 1,
+      "feedback": 0,
+      "answer": 3,
+      "recovery": 0
+    }
+  },
+  "turn_kinds_error": null,
+  "roles": {
+    "pm": {
+      "requests": 98,
+      "usage": {
+        "input_tokens": 202,
+        "cache_creation_input_tokens": 491782,
+        "cache_read_input_tokens": 26034989,
+        "output_tokens": 280082
+      },
+      "total_tokens": 26807055
+    },
+    "reviewer": {
+      "requests": 23,
+      "usage": {
+        "input_tokens": 46,
+        "cache_creation_input_tokens": 434665,
+        "cache_read_input_tokens": 1631322,
+        "output_tokens": 153076
+      },
+      "total_tokens": 2219109
+    },
+    "user-proxy": {
+      "requests": 3,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 36221,
+        "cache_read_input_tokens": 5255,
+        "output_tokens": 27485
+      },
+      "total_tokens": 68967
+    },
+    "worker": {
+      "requests": 381,
+      "usage": {
+        "input_tokens": 762,
+        "cache_creation_input_tokens": 1702907,
+        "cache_read_input_tokens": 57773724,
+        "output_tokens": 724930
+      },
+      "total_tokens": 60202323
+    }
+  },
+  "total_tokens": 89297454,
+  "usage_complete": true,
+  "tokens_are_lower_bound": false,
+  "incomplete_calls": [],
+  "observed_tools_and_effort": {
+    "by_role": {
+      "pm": {
+        "web_tool_uses": 4,
+        "efforts": [
+          "high"
+        ]
+      },
+      "reviewer": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "user-proxy": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "worker": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    "web_tool_uses_complete": true,
+    "source": "transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort"
+  },
+  "conflicts": [],
+  "turns": 4,
+  "consults": 3,
+  "consults_completed": 3,
+  "consults_not_completed": [],
+  "cost_usd": 73.988298,
+  "cost_unobserved": [],
+  "cost_by_call": [
+    {
+      "call": "turn/0001",
+      "pinned_session_cumulative_usd": 1.9713299999999998,
+      "pinned_session_increase_usd": 1.97133,
+      "reviewer_usd": 0
+    },
+    {
+      "call": "turn/0002",
+      "pinned_session_cumulative_usd": 4.2094878,
+      "pinned_session_increase_usd": 2.238158,
+      "reviewer_usd": 0
+    },
+    {
+      "call": "turn/0003",
+      "pinned_session_cumulative_usd": 4.8796973999999995,
+      "pinned_session_increase_usd": 0.67021,
+      "reviewer_usd": 0
+    },
+    {
+      "call": "turn/0004",
+      "pinned_session_cumulative_usd": 59.74344279999997,
+      "pinned_session_increase_usd": 54.863745,
+      "reviewer_usd": 13.404312
+    },
+    {
+      "call": "consult/0001",
+      "consult_usd": 0.4572738
+    },
+    {
+      "call": "consult/0002",
+      "consult_usd": 0.20110060000000002
+    },
+    {
+      "call": "consult/0003",
+      "consult_usd": 0.1821686
+    }
+  ],
+  "cost_semantics": "pinned session: total_cost_usd of the turn's last result event is cumulative over the session (observed only when every result event of the turn is the pinned session's); a turn's cost is its increase over the previous observed turn; after an unobserved turn the next increase is an unassigned interval, not that turn's cost; the run's pinned-session cost is the last cumulative value. Reviewer calls and user-proxy consultations are fresh sessions (their total_cost_usd is the call's cost). Unobserved values stay null, never 0.",
+  "cost_note": "CLI total_cost_usd estimates (subscription: billed_cost null)",
+  "reviewer_calls_failed": 0,
+  "reviewer_failed_attempts_without_requests": 0,
+  "reviewer_requests_refused": 0,
+  "updated_at": "2026-11-18T06:47:08.714625+00:00"
+}

@@ -1,0 +1,18 @@
+test_bank_payload_changed (test_adapter.T.test_bank_payload_changed) ... ok
+test_clean_passes (test_adapter.T.test_clean_passes) ... ok
+test_double_item (test_adapter.T.test_double_item) ... ok
+test_duplicate_debit (test_adapter.T.test_duplicate_debit) ... ok
+test_failed_with_bank_record (test_adapter.T.test_failed_with_bank_record) ... ok
+test_missing_bank (test_adapter.T.test_missing_bank) ... ok
+test_missing_ledger (test_adapter.T.test_missing_ledger) ... ok
+test_orphan_bank (test_adapter.T.test_orphan_bank) ... ok
+test_pending_flagged (test_adapter.T.test_pending_flagged) ... ok
+test_wrong_date (test_adapter.T.test_wrong_date) ... ok
+test_wrong_fee (test_adapter.T.test_wrong_fee) ... ok
+test_wrong_settlement_total (test_adapter.T.test_wrong_settlement_total) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.006s
+
+OK
+exit=0

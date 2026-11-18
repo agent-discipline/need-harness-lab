@@ -1,0 +1,116 @@
+{
+  "phase": "capacity200",
+  "k6_exit_code": 99,
+  "summary_saved": true,
+  "pending_samples": [
+    {
+      "elapsed": 0.2080355479993159,
+      "count": 18083
+    },
+    {
+      "elapsed": 1.4334092089993646,
+      "count": 18030
+    },
+    {
+      "elapsed": 2.64940635599487,
+      "count": 17976
+    },
+    {
+      "elapsed": 3.851479519988061,
+      "count": 17923
+    },
+    {
+      "elapsed": 5.05618764499377,
+      "count": 17868
+    },
+    {
+      "elapsed": 6.264412137999898,
+      "count": 17839
+    },
+    {
+      "elapsed": 7.477399336989038,
+      "count": 17803
+    },
+    {
+      "elapsed": 8.67286234999483,
+      "count": 17749
+    },
+    {
+      "elapsed": 9.872041953000007,
+      "count": 17701
+    },
+    {
+      "elapsed": 11.050603316994966,
+      "count": 17649
+    },
+    {
+      "elapsed": 12.273719837990939,
+      "count": 17592
+    },
+    {
+      "elapsed": 13.479278482991504,
+      "count": 17568
+    },
+    {
+      "elapsed": 14.68203685998742,
+      "count": 17525
+    },
+    {
+      "elapsed": 15.891624777999823,
+      "count": 17476
+    },
+    {
+      "elapsed": 17.08493986199028,
+      "count": 17428
+    },
+    {
+      "elapsed": 18.302594524997403,
+      "count": 17377
+    },
+    {
+      "elapsed": 19.512925745992106,
+      "count": 17343
+    },
+    {
+      "elapsed": 20.725402132986346,
+      "count": 17316
+    },
+    {
+      "elapsed": 21.931812851995346,
+      "count": 17264
+    },
+    {
+      "elapsed": 23.125922727995203,
+      "count": 17211
+    },
+    {
+      "elapsed": 24.3306294829963,
+      "count": 17158
+    },
+    {
+      "elapsed": 25.54679525499523,
+      "count": 17105
+    },
+    {
+      "elapsed": 26.75751493498683,
+      "count": 17074
+    },
+    {
+      "elapsed": 27.972021982990555,
+      "count": 17037
+    },
+    {
+      "elapsed": 29.191778478998458,
+      "count": 16985
+    },
+    {
+      "elapsed": 30,
+      "count": 16933
+    }
+  ],
+  "pending_converged": false,
+  "audit_passed": false,
+  "resources_passed": true,
+  "soak_rss_growth": null,
+  "passed": false
+}

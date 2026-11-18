@@ -1,0 +1,126 @@
+{
+  "run_id": "claude-pilot-03",
+  "pilot": true,
+  "scope": "PILOT_EXCLUDED",
+  "counts_toward_30_runs": false,
+  "arm": 3,
+  "core": 1,
+  "status": "CENSORED_BUDGET",
+  "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+  "contract_sha256": "f2ba82725519f30040e5dd4cc2c4a8690c5c1deda7d4fa18d4b95bef383cbc74",
+  "created_at": "2026-11-18T02:07:59.792366+00:00",
+  "verdict": {
+    "file": "verdict.json",
+    "sha256": "d489729cd2083f03b241f1ca20080c94fe3aebdb0c07ee313377133d96162ee4",
+    "judged_by": "메인 세션(실험 통제, Claude Fable 5.2) — 진행자가 모은 판정 원자료(judging/)의 JSON을 직접 읽고 판정",
+    "judged_at": "2026-11-18T08:04:51+00:00",
+    "results": {
+      "C01": "PASS",
+      "C02": "PASS",
+      "C03": "PASS",
+      "C04": "PASS",
+      "C05": "PASS",
+      "C06": "PASS",
+      "C07": "PASS",
+      "C08": "PASS",
+      "C09": "PASS",
+      "C10": "PASS",
+      "C11": "PASS",
+      "C12": "PASS",
+      "C13": "PASS",
+      "C14": "PASS",
+      "C15": "PASS",
+      "C16": "PASS",
+      "C17": "PASS",
+      "C18": "PASS",
+      "C19": "PASS",
+      "C20": "FAIL"
+    },
+    "counts": {
+      "PASS": 19,
+      "FAIL": 1,
+      "PARTIAL": 0,
+      "NOT_RUN": 0
+    },
+    "passed": false,
+    "evidence": {
+      "judging/v1/acceptance-http.json": "aab37305bdd2cf066c6cc08a345b634bd24c57173212d6dd1ed6b3b9915a563e",
+      "judging/v1/acceptance-audit.json": "2b07b6ba2a9885b9f21c4bd43694aa60b58cee1afdfe4eeecd0c77ed838c42aa",
+      "judging/v1/payments-by-status.txt": "9ddf7b992500ac0e30bed012720e73473764e40db393b79712a6726cd2b80f7f",
+      "judging/v2/acceptance-faults.json": "46259e4e5f5804d14e7ae80ab951cd9338e123ef6020154c70eeb9bd7ed48e74",
+      "judging/v2/acceptance-audit.json": "ef43f2671539cf4abbde65becd2a55e8e5115537cd204f1084a8f4513dc7a201",
+      "judging/v3/post-load-audit.json": "d6582c1b3f3175ec3cf317f226a8dd555c5f6d818fe61778e4fe5577f9b80c5d",
+      "judging/v3/load/summary.json": "f95f604ac3ae4faa0d3d98a3f9a071308288eb94b6ccc33d3fc0af99ccce5f63",
+      "judging/v3/load-check.stdout": "657e972904a21142fa05f4bf8ec2f3cf7a55596a8c5da11ee6a9af59bc0f2c25",
+      "judging/v3/post-load-pending.txt": "c6b5bcf884810f37ec11a96c227d6fb8db461d4c5f37a928e580a7b18e19d722",
+      "judging/v3/host-samples.txt": "49662560267cac5f374d043a72aef09d398645f9ab5976d0c9f530cf8bf431ee"
+    },
+    "evidence_missing": [],
+    "evidence_complete": true
+  },
+  "invalid_infra": null,
+  "cap_reached": true,
+  "cap": {
+    "status": "CENSORED_BUDGET",
+    "when": "after call",
+    "call": "turn",
+    "at": "2026-11-18T06:45:56.024434+00:00",
+    "overshoot": {
+      "token_limit": 69297454
+    },
+    "used": {
+      "token_limit": 89297454,
+      "time_limit_seconds": 16870.689889,
+      "feedback_limit": 0
+    },
+    "limits": {
+      "token_limit": 20000000,
+      "time_limit_seconds": 28800,
+      "feedback_limit": 30
+    },
+    "record": "censored.json (runner run directory, unchanged)"
+  },
+  "cap_status": "CENSORED_BUDGET",
+  "cap_when": "after call",
+  "cap_call": "turn",
+  "cap_overshoot": {
+    "token_limit": 69297454
+  },
+  "finished_at": "2026-11-18T08:05:34.294547+00:00",
+  "evidence_derivation": {
+    "all_acceptance_passed": {
+      "source": "verdict.json",
+      "all_pass": false,
+      "evidence_missing": []
+    },
+    "usage_complete": {
+      "source": ".runs/<run> ledger computed at finish",
+      "incomplete_calls": [],
+      "conflicts": 0
+    },
+    "all_role_models_verified": {
+      "source": "manifest actual_role_models + request events (freeze_readiness.run_role_check)",
+      "checks": {
+        "pm": true,
+        "worker": true,
+        "reviewer": true,
+        "user-proxy": true
+      }
+    },
+    "isolation_verified": {
+      "source": "manifest self-tests + readiness evidence.smoke_runs tool surface (freeze_readiness.run_isolation_check)",
+      "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+      "checks": {
+        "init_selftest_passed": true,
+        "call_selftests_passed": true,
+        "no_selftest_failed_before_a_turn": true,
+        "tools_equal_frozen": true
+      }
+    }
+  },
+  "turns_not_capturable": [],
+  "all_acceptance_passed": false,
+  "usage_complete": true,
+  "all_role_models_verified": true,
+  "isolation_verified": true
+}

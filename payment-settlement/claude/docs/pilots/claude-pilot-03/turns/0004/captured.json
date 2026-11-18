@@ -1,0 +1,13 @@
+{
+  "run_id": "claude-pilot-03",
+  "turn": "0004",
+  "files": {
+    "analysis.md": "bebb9880afdfe73ace8963ab0756a4bec74e70c1dbd5d4a4f31daae0960b3611",
+    "invocation.json": "df4c2c2f16d79eb2beed1df51bb946811d5aeb19e7f451973a9551719a3bdbe0",
+    "prompt.txt": "bae688841b2c7ce8f04f3694e3d66f0c9b364a4bea8966353896ab31cd134331",
+    "response.txt": "71ae067d4c95c76dcd8a58997456d7454a040f343cb169a8f3382ba59da797b6",
+    "result.json": "29584692742bd3f3fb1e8c7795afd98b81620926ff676ca6d644abb9e5f982f1",
+    "stderr.txt": "b33cd0511f180a4789d5356d53c89b032c2e6edc1b17278bbf8063b207b9f047",
+    "usage.jsonl": "2a5b36ef0613192af1aa950f0de5689b5a9b3a50bc76b1cb7d22baca880e1ad0"
+  }
+}

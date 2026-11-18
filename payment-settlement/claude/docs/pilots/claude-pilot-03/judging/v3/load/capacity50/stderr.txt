@@ -1,0 +1,1 @@
+time="2026-11-18T07:48:22Z" level=error msg="thresholds on metrics 'payment_latency' have been crossed"

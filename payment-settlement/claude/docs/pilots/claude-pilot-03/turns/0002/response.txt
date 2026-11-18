@@ -1,0 +1,42 @@
+인터뷰 답변을 반영해 설계 결정을 정리하는 중이며, 외부 근거 몇 건을 확인한 뒤 곧바로 `requirement-spec.md`를 작성해 합의를 요청하겠습니다.
+
+명세서를 작성했습니다. 합의를 요청합니다 — 아직 실행물은 하나도 바꾸지 않았고, 승인 전에는 구현을 시작하지 않습니다.
+
+**파일**: `docs/plans/2026-11-18/payment-settlement-v1/requirement-spec.md` (여섯 칸 전부 기입), 같은 폴더에 `log.md`
+
+## 여섯 칸 요약
+
+1. **목표·대상**: `/workspace`의 `lab.payment`에 결제·정산 v1 API를 계약대로 구현합니다. 통합 테스트가 통과하고, 문서의 SQL로 은행 journal과 record-level 대조가 가능하면 끝입니다.
+2. **경계·불변식**: I1–I20으로 정리했습니다. 금액·회계, 상태·멱등성, API 응답 매핑, 은행·복구, 정산, 구조 순입니다.
+3. **기준소스**: 계약 원문 3절, 인터뷰 답변(C01–C20 포함), `FIXTURE.md`·`STARTER.md`, 이 명세의 결정 순으로 우선합니다. 코드 기준점은 `main` @ 90ed838입니다.
+4. **금지영역**: 고정 한도·버전, fixture·판정기·`Dockerfile`, users/agencies DDL, push·PR·이슈, `main` 직접 커밋, AI attribution, 계약 제외 범위입니다.
+5. **검증 방법**: `./gradlew clean test bootJar`, `./gradlew integrationTest`, blind 계약 테스트, 프로세스 `kill -9` 스모크, 대조 SQL 실제 실행, 부하 스모크(참고 증거), 듀얼 리뷰 루프입니다.
+6. **stakes**: 높음입니다. 설계 선검증, blind 테스트 워커, 듀얼 리뷰 루프(최대 3회)를 적용합니다.
+
+## 인터뷰에서 "결정하고 기록하라"로 돌아온 항목의 결정
+
+- **PENDING 중 잔액**: 잔액은 성공 확정 때 한 번만 차감하고, PENDING은 보류 합계로 가용액만 막습니다. 어느 시점에도 `초기잔액 − balance = SUCCEEDED 합계`가 성립합니다.
+- **잔액 부족**: FAILED 결제를 저장하고, 같은 키 재전송에 같은 409를 줍니다.
+- **은행 거절**: 최초와 재전송 모두 422 `{code,message}`입니다. 에러 body에 `paymentId`는 넣지 않습니다.
+- **Idempotency-Key**: 답변대로 1..128 ASCII 전체를 허용합니다. 빈 값, 129자 이상, 비ASCII만 400입니다.
+- **은행 키**: `payment:{agencyId}:{paymentId}`로 결제당 고정입니다.
+- **fault 주입**: `bank.fault-injection-enabled` 기본값 `true`, 환경변수 `BANK_FAULT_INJECTION_ENABLED`로 끕니다.
+- **은행 응답 해석**: 200은 성공, 422와 400은 확정 거절, 그 외는 결과 불명으로 PENDING을 유지합니다.
+- **businessDate**: 외부 검색에서 `AT TIME ZONE` generated column이 형태에 따라 거절된다는 보고가 있어, 앱이 주입 `Clock`으로 계산하고 DB CHECK 제약으로 일관성을 강제합니다.
+- **fixture 테이블**: users/agencies에는 FK도 걸지 않습니다(카탈로그 변경 회피). 값만 갱신합니다.
+- **테스트 배치**: `test`는 DB 없이 돌고, `integrationTest`는 실제 DB·은행에 붙으며 접속 불가 시 실패합니다.
+- **브랜치**: `feat/payment-settlement-v1`, 로컬 커밋만 하고 병합·push는 하지 않습니다.
+
+## 승인에 함께 포함해 요청하는 것
+
+이 컨테이너의 `db`·`bank`에 한정한 DB 변경입니다.
+- Flyway로 업무 테이블을 생성합니다.
+- 통합 테스트와 스모크가 일부 사용자 잔액, 대행사 정산 잔액, 업무 테이블, 은행 journal에 행을 씁니다.
+- 개발 중 migration을 고치면 우리가 만든 업무 테이블과 `flyway_schema_history`만 drop 후 재적용합니다.
+- 테스트로 바뀐 잔액은 원복하지 않고 최종 보고에 상태를 적습니다.
+
+## 여기서 검증할 수 없어 남은 문제로 보고할 것
+
+k6 고정 workload SLO, CPU/RAM 제한 하 동작, 실제 DB 컨테이너 중단, 평가자의 최종 블라인드 설계 리뷰입니다.
+
+**요청**: 이 명세에 합의하십니까? 합의하시면 `set-state.sh`로 SPEC=1과 MODE=auto(지시하신 모드)를 기록하고 task 01부터 진행합니다. 수정할 칸이 있으면 알려 주세요.
