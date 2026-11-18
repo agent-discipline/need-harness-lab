@@ -1285,7 +1285,147 @@ class RunLimitTest(unittest.TestCase):
         self.assertIn('unavailable %d times' % launch.BUDGET_ESTIMATE_FAILURES, monitor.stop['reason'])
         monitor, stops = self.run_monitor([self.assistant('m1', 900)], limit=1000, arm3=True)   # reviewer copy failed:
         self.assertEqual(len(stops), 1)                                         # still the stream's lower bound
-        self.assertEqual(monitor.stop['reviewer_finished_calls'], 0)
+        self.assertEqual((monitor.stop['reviewer_finished_calls'], monitor.stop['reviewer_unobserved']), (None, True))
+        self.assertGreaterEqual(monitor.stop['reviewer_copy_failures_in_a_row'], 1)
+
+    def test_a_stream_file_missing_after_the_grace_is_an_estimate_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            est = launch.StreamEstimate(Path(tmp) / 'stdout.jsonl', grace=60)
+            self.assertEqual(est.update(), 0)                                   # right after the start: normal
+            est.started -= 61
+            with self.assertRaises(FileNotFoundError):
+                est.update()
+            monitor = launch.TurnBudgetMonitor('c', Path(tmp), Path(tmp), base=0, arm3=False, limit=10 ** 12, interval=0.02)
+            monitor.stream.started -= launch.STREAM_GRACE_SECONDS + 1
+            stops = []
+            with patch.object(launch.subprocess, 'run', side_effect=lambda cmd, **kw: stops.append(cmd) or SimpleNamespace(returncode=0)):
+                monitor.start()
+                monitor.join(5)
+            self.assertIn('unavailable', monitor.stop['reason'])
+            self.assertFalse(monitor.stop['cap_reached'])                      # a stopped turn, not a capped run
+            self.assertEqual(stops[0][:2], ['docker', 'stop'])
+
+    def test_a_hung_reviewer_copy_is_an_estimate_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / 'stdout.jsonl').write_text(self.assistant('m1', 1))
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'cp']:
+                    self.assertTrue(kw.get('timeout'))                          # every monitor command has a limit
+                    raise subprocess.TimeoutExpired(cmd, kw['timeout'])
+                return SimpleNamespace(returncode=0)
+            monitor = launch.TurnBudgetMonitor('c', out, out, base=0, arm3=True, limit=10 ** 12, interval=0.02)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run):
+                monitor.start()
+                monitor.join(5)
+            self.assertIn('unavailable %d times' % launch.BUDGET_ESTIMATE_FAILURES, monitor.stop['reason'])
+            self.assertEqual(monitor.stop['container']['stopped_by'], 'stop')
+
+    def test_the_turn_is_stopped_when_the_token_monitor_dies_or_stalls(self):
+        class Dead(threading.Thread):
+            def __init__(self, stall=False):
+                super().__init__(daemon=True)
+                self.done, self.stop, self.crash, self.interval = threading.Event(), None, None, 0.01
+                self.heartbeat, self.stall = time.monotonic(), stall
+            def run(self):
+                if self.stall:
+                    self.done.wait(5)                                          # alive, but no heartbeat
+                else:
+                    self.crash = 'RuntimeError: boom'                           # dies at once
+        for monitor, word in ((Dead(), 'stopped (RuntimeError: boom)'), (Dead(stall=True), 'gave no heartbeat')):
+            stopped = threading.Event()
+            calls = []
+            def fake_run(cmd, **kw):
+                calls.append(cmd[:2])
+                if cmd[:2] == ['docker', 'start']:
+                    stopped.wait(5)
+                    return SimpleNamespace(returncode=143)
+                if cmd[:2] == ['docker', 'stop']:
+                    stopped.set()
+                    return SimpleNamespace(returncode=0)
+                return SimpleNamespace(returncode=0)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run):
+                proc, timed_out, watchdog = launch.watch_turn('c', b'p', None, None, 100, monitor, poll=0.02)
+            self.assertTrue(stopped.is_set())                                   # never a turn without the monitor
+            self.assertIn(word, watchdog['reason'])
+            self.assertEqual((proc.returncode, timed_out), (143, None))
+            monitor.done.set()
+
+    def test_stop_escalates_to_kill_and_reports_a_failure(self):
+        outcomes = {'stop': SimpleNamespace(returncode=1), 'kill': SimpleNamespace(returncode=0)}
+        with patch.object(launch.subprocess, 'run', side_effect=lambda cmd, **kw: outcomes[cmd[1]]):
+            self.assertEqual(launch.stop_container('c')['stopped_by'], 'kill')
+        def hang(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, kw['timeout'])
+        with patch.object(launch.subprocess, 'run', side_effect=hang):
+            result = launch.stop_container('c')
+        self.assertIn('could not be stopped', result['failed'])
+        self.assertTrue(result['stop_timed_out'] and result['kill_timed_out'])
+
+    def test_stops_are_classified_after_the_call(self):
+        t0 = launch.datetime(2026, 11, 18, 3, 0, tzinfo=launch.timezone.utc)
+        def at(seconds):
+            return (t0 + timedelta(seconds=seconds)).isoformat()
+        token = {'cap_reached': True, 'tokens': 151, 'container': {'requested_at': at(10), 'stopped_by': 'stop'}}
+        # the container had ended on its own (exit 0) before the stop request: a normal turn, no mid-turn stop
+        out = launch.classify_stops(0, t0 + timedelta(seconds=5), token, None, False)
+        self.assertIsNone(out['cap_stop'])
+        self.assertEqual(out['stop_requests_after_normal_end'][0]['cap'], 'token_limit')
+        # really stopped: a token cap stop
+        out = launch.classify_stops(143, t0 + timedelta(seconds=12), token, None, False)
+        self.assertEqual(out['cap_stop']['cap'], 'token_limit')
+        # both caps: the earlier one is the cap, the other an annotation
+        timeout = {'at': at(4), 'container': {'requested_at': at(4), 'stopped_by': 'stop'}}
+        out = launch.classify_stops(124, None, token, timeout, True)
+        self.assertEqual(out['cap_stop']['cap'], 'time_limit_seconds')
+        self.assertEqual(out['cap_stop']['also'][0]['cap'], 'token_limit')
+        # a stop for another reason caps nothing; a requested timeout below the run cap is not the run cap either
+        unavailable = {'cap_reached': False, 'reason': 'token estimate unavailable 3 times in a row', 'container': {'requested_at': at(1)}}
+        out = launch.classify_stops(143, None, unavailable, None, False)
+        self.assertIsNone(out['cap_stop'])
+        self.assertEqual(len(out['other_stops']), 1)
+        self.assertIsNone(launch.classify_stops(124, None, None, timeout, False)['cap_stop'])
+        self.assertEqual(launch.container_finished_at(json.dumps([{'State': {'FinishedAt': '2026-11-18T03:00:05.123456789Z'}}])),
+                         t0 + timedelta(seconds=5, microseconds=123456))
+
+    def test_a_turn_that_ended_before_the_token_stop_is_a_normal_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, tokens_per_turn=1000)
+            finished = launch.datetime.now(launch.timezone.utc)
+            class LateStop(threading.Thread):                                  # the monitor decides only after the end
+                def __init__(self, *a, **kw):
+                    super().__init__(daemon=True)
+                    self.done, self.crash, self.interval, self.failures = threading.Event(), None, 30, 0
+                    self.heartbeat, self.last = time.monotonic(), None
+                    self.stop = {'cap_reached': True, 'tokens': 10 ** 9,
+                                 'container': {'requested_at': (finished + timedelta(seconds=30)).isoformat(), 'stopped_by': 'stop'}}
+                def run(self):
+                    pass
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    kw['stdout'].write(json.dumps({'type': 'result', 'session_id': manifest()['session_id'],
+                                                   'usage': {k: USAGE[k] for k in launch.USAGE_KEYS}}).encode() + b'\n')
+                    return SimpleNamespace(returncode=0)
+                if cmd[:2] == ['docker', 'inspect']:
+                    return SimpleNamespace(returncode=0, stdout=json.dumps([{'State': {'FinishedAt': finished.isoformat().replace('+00:00', 'Z')}}]).encode(), stderr=b'')
+                if cmd[:2] == ['docker', 'cp'] and cmd[2].endswith('/.claude/projects'):
+                    target = Path(cmd[-1]) / '-workspace'
+                    target.mkdir(parents=True)
+                    (target / 's.jsonl').write_text(json.dumps({'type': 'assistant', 'requestId': 'req-x', 'sessionId': manifest()['session_id'],
+                                                                'message': {'model': 'm', 'usage': USAGE}}) + '\n')
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=28800, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), patch.object(launch, 'TurnBudgetMonitor', LateStop), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                launch.turn(args)
+            result = json.loads((dest / 'turns/0002/result.json').read_text())
+            self.assertEqual(result['status'], 'ok')
+            self.assertIsNone(result['stopped_at_token_cap_estimate'])
+            self.assertEqual(result['runner_stops']['stop_requests_after_normal_end'][0]['cap'], 'token_limit')
+            self.assertFalse((dest / 'censored.json').exists())                # the cap is left to the ledger
 
     def test_a_turn_stopped_on_the_token_estimate_is_collected_and_the_run_censored(self):
         with tempfile.TemporaryDirectory() as tmp:

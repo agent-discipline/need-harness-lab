@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import uuid
 
@@ -1416,6 +1417,10 @@ def call_timeout(requested, state):
 
 BUDGET_CHECK_SECONDS = 30                             # how often a running turn's token estimate is recomputed
 BUDGET_ESTIMATE_FAILURES = 3                          # consecutive failed estimates that stop the turn (never unlimited)
+STREAM_GRACE_SECONDS = 120                            # a missing stdout.jsonl is normal only this long after the start
+MONITOR_COMMAND_SECONDS = 60                          # time limit of every docker command the monitor runs
+HEARTBEAT_FACTOR = 6                                  # no monitor heartbeat for this many check intervals: stop the turn
+STOP_SECONDS = 60                                     # time limit of docker stop / docker kill
 ESTIMATE_METHOD = ('confirmed run ledger before the turn (request-level, all roles) + the turn\'s stream-json so far '
                    '(assistant messages of the PM and its subagents, deduplicated by message id, the four counters) + '
                    'arm 3: results of reviewer calls finished this turn (reviewer volume raw/<session>.json usage). Not '
@@ -1425,9 +1430,10 @@ ESTIMATE_METHOD = ('confirmed run ledger before the turn (request-level, all rol
 class StreamEstimate:
     """Incremental token count of a turn's stream-json while it is being written: every assistant message (the PM's
     and its subagents') once, by message id, with its four usage counters. Lines not yet complete are left for the
-    next read."""
-    def __init__(self, path):
+    next read. A file still missing STREAM_GRACE_SECONDS after the start is an error, not a zero."""
+    def __init__(self, path, grace=None):
         self.path, self.offset, self.messages = Path(path), 0, {}
+        self.started, self.grace = time.monotonic(), STREAM_GRACE_SECONDS if grace is None else grace
 
     def update(self):
         try:
@@ -1435,6 +1441,8 @@ class StreamEstimate:
                 stream.seek(self.offset)
                 data = stream.read()
         except FileNotFoundError:
+            if time.monotonic() - self.started > self.grace:
+                raise
             return self.total()
         end = data.rfind(b'\n') + 1
         for line in data[:end].splitlines():
@@ -1468,10 +1476,28 @@ def reviewer_estimate(raw_dir, known_sessions):
         sessions += 1
     return total, sessions
 
+def stop_container(name):
+    """docker stop, escalated to docker kill when it fails or hangs; the outcome is returned, never assumed."""
+    out = {'requested_at': utc()}
+    for step, command in (('stop', ['docker', 'stop', '--time', '5', name]), ('kill', ['docker', 'kill', name])):
+        try:
+            done = subprocess.run(command, capture_output=True, check=False, timeout=STOP_SECONDS)
+            out[step + '_rc'] = done.returncode
+        except subprocess.TimeoutExpired:
+            out[step + '_rc'] = None
+            out[step + '_timed_out'] = True
+        if out[step + '_rc'] == 0:
+            out['stopped_by'] = step
+            return out
+    out['failed'] = 'the container could not be stopped (docker stop rc %s, docker kill rc %s)' % (out.get('stop_rc'), out.get('kill_rc'))
+    return out
+
 class TurnBudgetMonitor(threading.Thread):
     """Runs beside a turn: every BUDGET_CHECK_SECONDS it estimates the run's tokens so far (ESTIMATE_METHOD) and stops
-    the container once the estimate reaches the token cap — or after BUDGET_ESTIMATE_FAILURES consecutive estimates
-    that could not be made (the cap never silently stops applying). The decision and its basis are kept in .stop."""
+    the container once the estimate reaches the token cap (.stop with cap_reached), or after BUDGET_ESTIMATE_FAILURES
+    consecutive estimates that could not be made (.stop without cap_reached: the turn is stopped, the run is not
+    capped). Each pass updates .heartbeat; the turn's caller stops the container when the heartbeat goes stale or the
+    thread dies (watch_turn) — a turn never runs on without this check."""
     def __init__(self, name, output, dest, base, arm3, limit=None, interval=None):
         super().__init__(daemon=True)
         self.name_, self.output, self.dest, self.base, self.arm3 = name, Path(output), Path(dest), base, arm3
@@ -1479,42 +1505,137 @@ class TurnBudgetMonitor(threading.Thread):
         self.interval = BUDGET_CHECK_SECONDS if interval is None else interval
         self.stream = StreamEstimate(self.output / 'stdout.jsonl')
         self.known = {p.stem for p in self.dest.glob('turns/*/reviewer-raw/*.json')}
-        self.done, self.stop, self.last, self.failures = threading.Event(), None, None, 0
+        self.done, self.stop, self.last, self.failures, self.crash = threading.Event(), None, None, 0, None
+        self.reviewer_failures = 0
+        self.heartbeat = time.monotonic()
 
     def estimate(self):
         stream = self.stream.update()
-        reviewer, sessions = 0, 0
+        reviewer, sessions, unobserved = 0, 0, False
         if self.arm3:
             probe = Path(tempfile.mkdtemp(prefix='.budget-reviewer-raw-', dir=self.output))
             try:
-                copied = subprocess.run(['docker', 'cp', self.name_ + ':' + REVIEWER_DST + '/raw/.', str(probe)],
-                                        capture_output=True, check=False)
-                if copied.returncode == 0:
+                try:
+                    copied = subprocess.run(['docker', 'cp', self.name_ + ':' + REVIEWER_DST + '/raw/.', str(probe)],
+                                            capture_output=True, check=False, timeout=MONITOR_COMMAND_SECONDS)
+                except subprocess.TimeoutExpired:       # a hung docker command is a failed estimate, not a zero
+                    self.reviewer_failures += 1
+                    raise RuntimeError('docker cp of the reviewer results exceeded %ss' % MONITOR_COMMAND_SECONDS)
+                ok = copied.returncode == 0
+                if ok:
                     reviewer, sessions = reviewer_estimate(probe, self.known)
+                    self.reviewer_failures = 0
+                else:                                   # the stream's lower bound still applies; the gap is recorded
+                    unobserved = True
+                    self.reviewer_failures += 1
             finally:
                 shutil.rmtree(probe, ignore_errors=True)
         return {'tokens': self.base + stream + reviewer, 'confirmed_before_turn': self.base, 'turn_stream': stream,
-                'stream_messages': len(self.stream.messages), 'reviewer_finished_calls': reviewer,
-                'reviewer_sessions': sessions, 'limit': self.limit, 'at': utc(), 'method': ESTIMATE_METHOD}
+                'stream_messages': len(self.stream.messages), 'reviewer_finished_calls': None if unobserved else reviewer,
+                'reviewer_sessions': sessions, 'reviewer_unobserved': unobserved,
+                'reviewer_copy_failures_in_a_row': self.reviewer_failures,
+                'limit': self.limit, 'at': utc(), 'method': ESTIMATE_METHOD}
 
     def run(self):
-        while not self.done.wait(self.interval):
-            try:
-                self.last = self.estimate()
-                self.failures = 0
-            except Exception as exc:                    # an estimate that cannot be made is counted, never ignored
-                self.failures += 1
-                self.last = {'error': str(exc)[:300], 'consecutive_failures': self.failures, 'at': utc()}
-                if self.failures < BUDGET_ESTIMATE_FAILURES:
-                    continue
-                self.stop = dict(self.last, reason='token estimate unavailable %d times in a row' % self.failures,
-                                 limit=self.limit, method=ESTIMATE_METHOD)
-            else:
-                if self.last['tokens'] < self.limit:
-                    continue
-                self.stop = dict(self.last, reason='estimated run tokens reached the token cap during the turn')
-            subprocess.run(['docker', 'stop', '--time', '5', self.name_], capture_output=True, check=False)
-            return
+        try:
+            while not self.done.wait(self.interval):
+                self.heartbeat = time.monotonic()
+                try:
+                    self.last = self.estimate()
+                    self.failures = 0
+                except Exception as exc:                # an estimate that cannot be made is counted, never ignored
+                    self.failures += 1
+                    self.last = {'error': str(exc)[:300], 'consecutive_failures': self.failures, 'at': utc()}
+                    if self.failures < BUDGET_ESTIMATE_FAILURES:
+                        continue
+                    self.stop = dict(self.last, cap_reached=False, limit=self.limit, method=ESTIMATE_METHOD,
+                                     reason='token estimate unavailable %d times in a row' % self.failures)
+                else:
+                    self.heartbeat = time.monotonic()
+                    if self.last['tokens'] < self.limit:
+                        continue
+                    self.stop = dict(self.last, cap_reached=True,
+                                     reason='estimated run tokens reached the token cap during the turn')
+                self.stop['container'] = stop_container(self.name_)
+                return
+        except BaseException as exc:                    # the watch on the caller's side sees the dead thread
+            self.crash = '%s: %s' % (type(exc).__name__, str(exc)[:300])
+
+def watch_turn(name, prompt, stdout, stderr, timeout, monitor, poll=1.0):
+    """Run the turn (docker start --attach) in a worker thread and watch it here: the budget monitor must stay alive
+    and keep its heartbeat (HEARTBEAT_FACTOR check intervals); otherwise this side stops the container and says why.
+    Returns (process result, timeout record or None, watchdog record or None)."""
+    box = {}
+    def work():
+        try:
+            box['proc'] = subprocess.run(['docker', 'start', '--attach', '--interactive', name], input=prompt,
+                                         stdout=stdout, stderr=stderr, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            box['timeout'] = {'at': utc(), 'container': stop_container(name)}
+            box['proc'] = SimpleNamespace(returncode=124)
+        except BaseException as exc:
+            box['error'] = exc
+    worker = threading.Thread(target=work, daemon=True)
+    monitor.start()
+    worker.start()
+    watchdog = None
+    while worker.is_alive():
+        worker.join(poll)
+        if not worker.is_alive() or watchdog is not None:
+            continue
+        dead = not monitor.is_alive() and monitor.stop is None
+        stale = time.monotonic() - monitor.heartbeat > HEARTBEAT_FACTOR * monitor.interval
+        if dead or stale:
+            watchdog = {'reason': 'token monitor %s; the turn is not run without it' % (
+                            'stopped (%s)' % (monitor.crash or 'exited') if dead else 'gave no heartbeat'),
+                        'at': utc(), 'container': stop_container(name)}
+    monitor.done.set()
+    monitor.join(timeout=MONITOR_COMMAND_SECONDS + 30)
+    if 'error' in box:
+        raise box['error']
+    return box['proc'], box.get('timeout'), watchdog
+
+def classify_stops(returncode, finished_at, monitor_stop, timed_out, at_run_cap):
+    """What stopped the turn, decided after the call. A stop request that came after the container had already ended
+    on its own (exit 0, finished before the request) is not a stop: the turn is a normal one and the cap is left to the
+    ledger between calls. A cap stop (token estimate reaching the cap, or the call reaching the run's remaining time)
+    counts only when the container was really stopped; when both happened the earlier one is the cap and the other is
+    an annotation. A stop for another reason (the estimate unavailable, the monitor gone) stops the turn but caps
+    nothing."""
+    def ended_before(request):
+        requested = parse_time(request.get('requested_at')) if request else None
+        return returncode == 0 and (finished_at is None or (requested is not None and finished_at <= requested))
+    caps, others, ignored = [], [], []
+    for kind, stop in (('token_limit', monitor_stop), ('time_limit_seconds', timed_out)):
+        if not stop:
+            continue
+        container = stop.get('container') or {}
+        if kind == 'token_limit' and not stop.get('cap_reached'):
+            others.append(dict(stop, kind='token monitor stopped the turn'))
+            continue
+        if kind == 'time_limit_seconds' and not at_run_cap:
+            others.append(dict(stop, kind='requested timeout (not the run cap)'))
+            continue
+        if ended_before(container):
+            ignored.append({'cap': kind, 'note': 'the container had ended on its own before the stop request', 'request': stop})
+            continue
+        caps.append({'cap': kind, 'at': container.get('requested_at') or stop.get('at'), 'basis': stop if kind == 'token_limit'
+                     else 'remaining run time elapsed', 'container': container,
+                     'stop_failed': container.get('failed')})
+    caps.sort(key=lambda c: c['at'] or '')
+    first = caps[0] if caps else None
+    if first and len(caps) > 1:
+        first = dict(first, also=caps[1:])
+    return {'cap_stop': first, 'other_stops': others, 'stop_requests_after_normal_end': ignored}
+
+def container_finished_at(inspect_stdout):
+    """State.FinishedAt of a docker inspect output as an aware datetime, or None."""
+    try:
+        value = json.loads(inspect_stdout)[0]['State']['FinishedAt']
+        stamp, _, frac = value.rstrip('Z').partition('.')
+        return datetime.fromisoformat(stamp + ('.' + frac[:6] if frac else '') + '+00:00')
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None
 
 def stops_at_run_cap(requested, state):
     """Whether the call's timeout is the run's remaining time (not a smaller requested limit)."""
@@ -1634,7 +1755,7 @@ def turn(args):
         'effective_timeout_seconds': timeout, 'limits_before_call': limits})
     result = None
     failure = None
-    cap_stop, budget_stop = False, None
+    stops = {'cap_stop': None}
     try:
         created = subprocess.run(command, capture_output=True, check=False)
         (output / 'create.stdout').write_bytes(created.stdout)
@@ -1643,20 +1764,11 @@ def turn(args):
             raise RuntimeError('docker create failed; see preserved stderr')
         monitor = TurnBudgetMonitor(name, output, dest, limits['used']['token_limit'], manifest.get('arm') == 3)
         with (output / 'stdout.jsonl').open('xb') as stdout, (output / 'stderr.txt').open('xb') as stderr:
-            monitor.start()
-            try:
-                proc = subprocess.run(['docker', 'start', '--attach', '--interactive', name], input=prompt,
-                                      stdout=stdout, stderr=stderr, check=False, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
-                proc = SimpleNamespace(returncode=124)
-                cap_stop = stops_at_run_cap(args.timeout_seconds, limits)
-            finally:
-                monitor.done.set()
-                monitor.join(timeout=BUDGET_CHECK_SECONDS + 60)
-                budget_stop = monitor.stop
+            proc, timed_out, watchdog = watch_turn(name, prompt, stdout, stderr, timeout, monitor)
         inspected = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False)
         (output / 'container-inspect.json').write_bytes(redact_inspect(inspected.stdout))
+        stops = classify_stops(proc.returncode, container_finished_at(inspected.stdout), monitor.stop, timed_out,
+                               stops_at_run_cap(args.timeout_seconds, limits) if timed_out else False)
         copied = subprocess.run(['docker', 'cp', name + ':' + CONFIG_DST + '/projects', str(output / 'projects')],
                                 capture_output=True, check=False)
         (output / 'projects-copy.stderr').write_bytes(copied.stderr)
@@ -1673,8 +1785,11 @@ def turn(args):
                 stream.write(json.dumps(event, ensure_ascii=False) + '\n')
         result.update({'finished_at': utc(), 'role_files': write_role_files(output, events),
                        'config_volume': volume_listing(manifest),
-                       'stopped_at_run_time_cap': cap_stop, 'timed_out': proc.returncode == 124,
-                       'stopped_at_token_cap_estimate': budget_stop, 'token_estimate_last': monitor.last})
+                       'stopped_at_run_time_cap': stops['cap_stop'] is not None and stops['cap_stop']['cap'] == 'time_limit_seconds',
+                       'timed_out': timed_out is not None, 'timeout_stop': timed_out,
+                       'stopped_at_token_cap_estimate': monitor.stop if stops['cap_stop'] and stops['cap_stop']['cap'] == 'token_limit' else None,
+                       'runner_stops': stops, 'token_monitor': {'last': monitor.last, 'crash': monitor.crash,
+                                                                'watchdog': watchdog, 'failures_in_a_row': monitor.failures}})
         result['cli_status'] = 'ok' if proc.returncode == 0 else 'failed'
         result['status'] = 'collected'                 # finalized in the finally block after the secret scan
         write_json(output / 'result.json', result)
@@ -1713,14 +1828,13 @@ def turn(args):
         try:
             finalize_result(output, result, final, error, hits)
             write_ledger(dest)
-            if (budget_stop or cap_stop) and not (dest / 'censored.json').exists():
-                # the turn was stopped by the runner during the call (token estimate or the 8-hour cap): the run is
-                # capped whatever the confirmed numbers say; the record names the stop and, for tokens, its estimate
+            if stops['cap_stop'] and not (dest / 'censored.json').exists():
+                # the runner stopped the turn at a cap during the call (token estimate or the 8-hour cap): the run is
+                # capped whatever the confirmed numbers say; the record names the stop, its basis and any other stop
                 state = limit_state(dest)
-                state['reached'] = ['CENSORED_BUDGET'] if budget_stop else ['CENSORED_TIME']
-                state['stopped_during_call'] = {'cap': 'token_limit' if budget_stop else 'time_limit_seconds',
-                                                'basis': budget_stop if budget_stop else 'remaining run time elapsed',
-                                                'confirmed_usage': 'from the ledger after the turn (used above)'}
+                first = stops['cap_stop']
+                state['reached'] = ['CENSORED_BUDGET' if first['cap'] == 'token_limit' else 'CENSORED_TIME']
+                state['stopped_during_call'] = dict(first, confirmed_usage='from the ledger after the turn (used above)')
                 censor(dest, state, 'after call', 'turn')
             else:
                 record_overshoot(dest, 'turn')
