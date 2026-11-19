@@ -116,6 +116,11 @@
 | 11-19 03:33 | **메인 판정** — `judging/r11/`의 원자료 JSON을 직접 읽고 `verdict.json` 작성(C03 응답 본문·k6 요약·전수 대조 건수 직접 확인) | C01~C19 PASS · **C20 FAIL**(normal 50RPS p95 367ms이나 동기 확정 14,947/15,001, spike_recovery p95 5991ms·dropped 676, sustainable 25RPS, 5xx·유실 0) |
 | 11-19 03:38 | 승인 ③ 전에 정할 것(파일럿 04 관측) | ①8시간 상한에 판정·대기 시간이 포함됨(절반 이상) ②진행자가 피드백 6·10에 재현 조건 문장을 덧붙임 — 허용 범위 ③10회째 soak가 측정 도구 `/proc` 경합만으로 미통과 기록(파일럿 03에 이어 2회째) ④1·2번 조건에 질문 응답 경로 없음 ⑤에이전트가 커밋하지 않아 작업 트리를 판정. 평가 비용 장부(`evaluation-cost.jsonl`) 기록은 아직 안 함 |
 | 11-19 03:38 | 관측: `alert-system-*` 컨테이너 11개가 11-18 20:35:51(KST)에 일괄 종료(exit 143/0, OOM 아님) | 이 세션과 진행자는 해당 컨테이너에 명령을 내리지 않음. 파일럿 04의 부하 판정 3회(r09~r11)는 모두 그 뒤에 돌아 '같은 머신에 다른 프로젝트 실행 중' 조건이 파일럿 03과 다름 — 사용자에게 알림 |
+| 11-19 09:50 | **사용자 결정 3건**(결정 질문) | ①8시간 상한은 에이전트 턴 시간만 ②판정 피드백은 항목과 관측 사실만 ③사이클 1은 Haiku 실행이 끝난 뒤 순서대로. 명세 §11 '파일럿 04 뒤 결정' 추가 |
+| 11-19 09:56~10:08 | 구현 워커(Opus, 171k 토큰) T-turn-time-cap, 기준 `de6eecc` | `call_time`(턴·상담의 시작~끝 합)으로 `limit_state` 교체, 상담에 시각 기록, `result_summary`에 `call_time` 추가. runner 307·scripts 108 OK. 파일럿 04 기록 대조 14,537.1초(옛 셈 29,837초) |
+| 11-19 10:10~10:20 | 듀얼 리뷰 1패스 — Opus 워커(150k) ∥ codex, packet `/tmp/claude-1000/rv-2ykB`, 미러 `/tmp/claude-1000/mr-g89G` → 메인 종합 → codex 종합 감사 | 채택 6·기각 1(아래 ledger). 감사가 메인의 수정 방향 3건(S1·S4·S5)을 더 엄격하게 고치게 하고 S2에 잠금을 요구 — 반영 |
+| 11-19 10:20~10:36 | 구현 워커 후속(누적 262k 토큰) FIX-1~6 | 미확정 호출은 컨테이너 종료 시각으로 확정하거나 censored 없이 거부 · run 단위 잠금(`.paid-call.lock`) · `stops_at_run_cap` 경계 · 호출 구간 단조 시계(`call_seconds`) · 고정 기록 정비. runner 314·scripts 111 OK(메인 재실행 exit 0, 0) |
+| 11-19 10:45 | post-fix 타깃 재점검(codex, 미러 `/tmp/claude-1000/mr2-csWZ`) | S1·S2·S3·S5·S6 반영 확인. 잔여 2건 기각: ①컨테이너로 끝을 복구하는 드문 경로에서 `docker create` 시간이 합산됨(과다 방향, 정상 경로는 `call_seconds`) ②`call_timeout`의 올림으로 1초 미만 초과 가능(종전부터의 의도 — 멈춘 호출이 상한에 닿았음을 보장) |
 
 ## 리뷰 ledger (中↑ — 듀얼 리뷰가 돈 작업 필수)
 
@@ -195,6 +200,19 @@
 | Z1 PM에게 넘긴 fd가 CLI가 읽은 뒤 닫히는지·자식에 남는지 · Z2 리뷰어의 Read가 cwd 밖을 읽는지 | 5(파일럿 뒤) | codex(OQ1)·opus(OQ1·OQ2) | runner/lab-arm3-start.sh:41 | open question → 실제 컨테이너 무과금 점검과 유료 스모크에서 확인 | — |  |
 | 재점검 보완: 동결 대체 롤백 · 도우미가 요청자가 읽을 수 있는 것만 복사 · 거부된 요청 기록 · 복사 중 연결 해제 · 도우미 준비 확인 | 5(파일럿 뒤) | codex 재점검 | scripts/freeze_readiness.py · runner/fable_review.py · runner/lab-arm3-start.sh | 채택 | fixed (`2979379`·`d94f086`) |  |
 | PM 프로세스가 토큰 파이프를 읽기 전의 시간 창 · 동결 대체와 본 실험 시작의 경합 | 5(파일럿 뒤) | codex 재점검 | runner/lab-arm3-start.sh:52 · scripts/freeze_readiness.py:457-510 | 한계로 기록(명세 §11 "토큰 불변식의 범위") — 사용자 보고 | — |  |
+
+### 2026-11-19 턴 시간 상한(T-turn-time-cap) — 듀얼 1패스
+
+| id | first_seen | source | 근거 | disposition | status |
+|---|---|---|---|---|---|
+| S1 | 1 | codex F1·opus F1·F4·감사 | launch.py 끝 기록 없는 호출의 추정 합산·즉시 censor | 채택(감사로 강화: 추정 금지, 확정 불가 시 거부) | fixed |
+| S2 | 1 | codex F2·감사 | 턴·상담 동시 게이트 통과 | 채택(run 잠금) | fixed |
+| S3 | 1 | codex F3·opus F6 | `stops_at_run_cap` 경계 | 채택 | fixed |
+| S4 | 1 | codex F4·opus F5·감사 | 실행기 처리 시간이 턴 시간에 섞임 | 채택(`docker start`~반환을 단조 시계로) | fixed — 복구 경로의 create 시간은 기각(재점검 ①) |
+| S5 | 1 | codex F5·opus F3·감사 | 시계 역행 시 0초 | 채택(미확정으로 취급) | fixed |
+| S6 | 1 | codex F6·opus F2 | 끝 시각 없는 고정 기록으로 통과하는 테스트 | 채택 | fixed |
+| S7 | 1 | opus F7 | 옛 run의 시각 없는 상담 기록 | 기각(범위 밖 — 새 run에는 없음) | — |
+| R1 | post-fix | codex | `call_timeout` 올림으로 1초 미만 초과 | 기각(의도된 경계) | — |
 
 ## 생략한 검증 (긴급 경로 빚 — DEBT=1인 동안 정본)
 
