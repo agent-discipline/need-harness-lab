@@ -1,0 +1,20 @@
+{
+  "run_id": "claude-arm3-core01",
+  "event_count": 8,
+  "input_tokens": 473708,
+  "output_tokens": 24466,
+  "total_tokens": 498174,
+  "cached_input_tokens": 394731,
+  "cache_write_input_tokens": 78961,
+  "reasoning_tokens": null,
+  "actual_cost_usd": null,
+  "cost_source": null,
+  "model_labels": [
+    "claude-fable-5-2"
+  ],
+  "actual_models": [
+    "claude-fable-5-2"
+  ],
+  "actual_model_missing_events": 0
+}
+

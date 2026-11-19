@@ -1,0 +1,2 @@
+[fable-review-helper] 2026-11-19T03:38:58.692854+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready

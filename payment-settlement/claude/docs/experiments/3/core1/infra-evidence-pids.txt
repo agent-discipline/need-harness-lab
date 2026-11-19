@@ -1,0 +1,13 @@
+# 턴 0003 컨테이너 종료(134)의 원인 근거 — 메인 세션이 호스트에서 수집 (2026-11-19T05:56:26Z)
+
+## 커널 로그 (journalctl -k, 로컬 시각 KST)
+11월 19 14:31:14 jun-Victus-by-HP-Gaming-Laptop-16-r0xxx kernel: cgroup: fork rejected by pids controller in /system.slice/docker-f095ee20c475e052605b2dcf517198450b436bca0c4136f1c6390f3acaa8fda2.scope
+
+## 컨테이너
+Id f095ee20c475e052605b2dcf517198450b436bca0c4136f1c6390f3acaa8fda2
+Name /payment-claude-call-ab62bc4117c74823b03547966d3f61e8
+State {"Status": "exited", "Running": false, "Paused": false, "Restarting": false, "OOMKilled": false, "Dead": false, "Pid": 0, "ExitCode": 134, "Error": "", "StartedAt": "2026-11-19T04:07:06.151203549Z", "FinishedAt": "2026-11-19T05:31:16.045941688Z"}
+PidsLimit 512 Memory 3221225472 NanoCpus 2000000000
+
+## 해석
+커널이 이 컨테이너의 cgroup에서 프로세스 생성을 거부한 시각(14:31:14 KST = 05:31:14Z)이 컨테이너 종료(05:31:16Z) 2초 전이다. OOMKilled=false, 실행기의 정지 요청 없음(result.json runner_stops 비어 있음).

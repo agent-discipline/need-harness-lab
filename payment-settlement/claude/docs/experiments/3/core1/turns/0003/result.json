@@ -1,0 +1,926 @@
+{
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+    "total_cost_usd": 30.4160222,
+    "usage": {
+      "input_tokens": 64,
+      "cache_creation_input_tokens": 108776,
+      "cache_read_input_tokens": 7847535,
+      "output_tokens": 54745,
+      "server_tool_use": {
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      }
+    },
+    "modelUsage": {
+      "claude-fable-5-2": {
+        "inputTokens": 116,
+        "outputTokens": 146409,
+        "thinkingTokens": 60062,
+        "cacheReadInputTokens": 10400338,
+        "cacheCreationInputTokens": 282649,
+        "cacheCreationEphemeral5mInputTokens": 0,
+        "cacheCreationEphemeral1hInputTokens": 282649,
+        "webSearchRequests": 0,
+        "costUSD": 12.459739599999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "canonicalModel": "claude-fable-5-2",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-opus-5-5": {
+        "inputTokens": 316,
+        "outputTokens": 430468,
+        "thinkingTokens": 197575,
+        "cacheReadInputTokens": 24808768,
+        "cacheCreationInputTokens": 876781,
+        "cacheCreationEphemeral5mInputTokens": 876781,
+        "cacheCreationEphemeral1hInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 17.956282600000005,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "canonicalModel": "claude-opus-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "num_turns": 14,
+    "duration_ms": 209837,
+    "duration_api_ms": 5163803,
+    "session_ids": [
+      "aa854beb-8d0f-4ae3-9dea-7e74fec765fa"
+    ],
+    "result_events": 5,
+    "subtypes": [
+      "success",
+      "success",
+      "success",
+      "success",
+      "success"
+    ],
+    "any_error": false
+  },
+  "results": [
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "total_cost_usd": 28.484816000000006,
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 16608,
+        "cache_read_input_tokens": 959127,
+        "output_tokens": 10076,
+        "output_tokens_details": {
+          "thinking_tokens": 2770
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 16608,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 169,
+            "cache_read_input_tokens": 200584,
+            "cache_creation_input_tokens": 440,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 440
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 88,
+          "outputTokens": 127793,
+          "thinkingTokens": 55251,
+          "cacheReadInputTokens": 6524547,
+          "cacheCreationInputTokens": 256950,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 256950,
+          "webSearchRequests": 0,
+          "costUSD": 10.528533399999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-opus-5-5": {
+          "inputTokens": 316,
+          "outputTokens": 430468,
+          "thinkingTokens": 197575,
+          "cacheReadInputTokens": 24808768,
+          "cacheCreationInputTokens": 876781,
+          "cacheCreationEphemeral5mInputTokens": 876781,
+          "cacheCreationEphemeral1hInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 17.956282600000005,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-opus-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 5,
+      "duration_ms": 103918,
+      "duration_api_ms": 4993419
+    },
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "total_cost_usd": 28.484816000000006,
+      "usage": {
+        "input_tokens": 12,
+        "cache_creation_input_tokens": 32306,
+        "cache_read_input_tokens": 1293551,
+        "output_tokens": 22116,
+        "output_tokens_details": {
+          "thinking_tokens": 6284
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 32306,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 752,
+            "cache_read_input_tokens": 232733,
+            "cache_creation_input_tokens": 597,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 597
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 88,
+          "outputTokens": 127793,
+          "thinkingTokens": 55251,
+          "cacheReadInputTokens": 6524547,
+          "cacheCreationInputTokens": 256950,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 256950,
+          "webSearchRequests": 0,
+          "costUSD": 10.528533399999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-opus-5-5": {
+          "inputTokens": 316,
+          "outputTokens": 430468,
+          "thinkingTokens": 197575,
+          "cacheReadInputTokens": 24808768,
+          "cacheCreationInputTokens": 876781,
+          "cacheCreationEphemeral5mInputTokens": 876781,
+          "cacheCreationEphemeral1hInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 17.956282600000005,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-opus-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 7,
+      "duration_ms": 305811,
+      "duration_api_ms": 4993419
+    },
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "total_cost_usd": 28.484816000000006,
+      "usage": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 8023,
+        "cache_read_input_tokens": 472116,
+        "output_tokens": 1398,
+        "output_tokens_details": {
+          "thinking_tokens": 235
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 8023,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 400,
+            "cache_read_input_tokens": 238786,
+            "cache_creation_input_tokens": 2567,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 2567
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 88,
+          "outputTokens": 127793,
+          "thinkingTokens": 55251,
+          "cacheReadInputTokens": 6524547,
+          "cacheCreationInputTokens": 256950,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 256950,
+          "webSearchRequests": 0,
+          "costUSD": 10.528533399999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-opus-5-5": {
+          "inputTokens": 316,
+          "outputTokens": 430468,
+          "thinkingTokens": 197575,
+          "cacheReadInputTokens": 24808768,
+          "cacheCreationInputTokens": 876781,
+          "cacheCreationEphemeral5mInputTokens": 876781,
+          "cacheCreationEphemeral1hInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 17.956282600000005,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-opus-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 2,
+      "duration_ms": 15205,
+      "duration_api_ms": 4993419
+    },
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "total_cost_usd": 28.484816000000006,
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 26140,
+        "cache_read_input_tokens": 1246950,
+        "output_tokens": 2539,
+        "output_tokens_details": {
+          "thinking_tokens": 608
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 26140,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 394,
+            "cache_read_input_tokens": 257405,
+            "cache_creation_input_tokens": 10088,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 10088
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 88,
+          "outputTokens": 127793,
+          "thinkingTokens": 55251,
+          "cacheReadInputTokens": 6524547,
+          "cacheCreationInputTokens": 256950,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 256950,
+          "webSearchRequests": 0,
+          "costUSD": 10.528533399999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-opus-5-5": {
+          "inputTokens": 316,
+          "outputTokens": 430468,
+          "thinkingTokens": 197575,
+          "cacheReadInputTokens": 24808768,
+          "cacheCreationInputTokens": 876781,
+          "cacheCreationEphemeral5mInputTokens": 876781,
+          "cacheCreationEphemeral1hInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 17.956282600000005,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-opus-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 5,
+      "duration_ms": 28201,
+      "duration_api_ms": 4993419
+    },
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "total_cost_usd": 30.4160222,
+      "usage": {
+        "input_tokens": 28,
+        "cache_creation_input_tokens": 25699,
+        "cache_read_input_tokens": 3875791,
+        "output_tokens": 18616,
+        "output_tokens_details": {
+          "thinking_tokens": 4811
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 25699,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 194,
+            "cache_read_input_tokens": 289716,
+            "cache_creation_input_tokens": 3476,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 3476
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 116,
+          "outputTokens": 146409,
+          "thinkingTokens": 60062,
+          "cacheReadInputTokens": 10400338,
+          "cacheCreationInputTokens": 282649,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 282649,
+          "webSearchRequests": 0,
+          "costUSD": 12.459739599999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-opus-5-5": {
+          "inputTokens": 316,
+          "outputTokens": 430468,
+          "thinkingTokens": 197575,
+          "cacheReadInputTokens": 24808768,
+          "cacheCreationInputTokens": 876781,
+          "cacheCreationEphemeral5mInputTokens": 876781,
+          "cacheCreationEphemeral1hInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 17.956282600000005,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "canonicalModel": "claude-opus-5-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 14,
+      "duration_ms": 209837,
+      "duration_api_ms": 5163803
+    }
+  ],
+  "assistant_messages": 461,
+  "stream_models": [
+    "claude-fable-5-2",
+    "claude-opus-5-5"
+  ],
+  "result_count": 5,
+  "unparsed_lines": 0,
+  "background_tasks_killed": [],
+  "exit_code": 134,
+  "session_id": "aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+  "session_id_confirmed": true,
+  "request_ids": [
+    "req_011ChBdN7511NoTXXFr53nom",
+    "req_011ChBdNWxSYNSbYuaztEnJ6",
+    "req_011ChBdPSCDhGbGwU3wwR5gP",
+    "req_011ChBdVCxQuAVp9ZCLgs1ZN",
+    "req_011ChBdVDaNAB2BfqZ3Paezf",
+    "req_011ChBdVRCcfeHiN8X2J6aVb",
+    "req_011ChBdVY4859f9KApdmUeev",
+    "req_011ChBdVnSo936D5kH5mzUvZ",
+    "req_011ChBdW74ErkELANfMr6pdr",
+    "req_011ChBdXG1GhLmjNkCU3dUrr",
+    "req_011ChBdYk5kMofWbp92zkw1j",
+    "req_011ChBdZDznNSib4HjCKWk1s",
+    "req_011ChBdaYLsAj8csfbBYtLV1",
+    "req_011ChBdoiQidZrxcuduJQUsW",
+    "req_011ChBdpfMgaiMHokCi5i8gd",
+    "req_011ChBdpwb17eNwc6MNTV6Hd",
+    "req_011ChBdqqo2c6c1uw4uMHpf7",
+    "req_011ChBdt5TbsUn25Ed4gYCoh",
+    "req_011ChBdttrebdK2RR5HY5YtS",
+    "req_011ChBdu5XbvcJ4GQD4t7jiL",
+    "req_011ChBducFJTEk3QMMREB3df",
+    "req_011ChBdy9DDUUcneNCQ53H6c",
+    "req_011ChBdykWF7E3s12HAysU71",
+    "req_011ChBe5CVaK7wXp4CwuncqN",
+    "req_011ChBe5t5aFfy4k2tYQY7wG",
+    "req_011ChBe76dQwDAzNswcEnifF",
+    "req_011ChBe8FPo2dk6kWPhqvdpa",
+    "req_011ChBe8XVQt741wEoKzCc6i",
+    "req_011ChBeAmWagiaXkWexdXZet",
+    "req_011ChBeFHB9V8rthkWGDtNCo",
+    "req_011ChBeGHwoJfezh2xEvTcFq",
+    "req_011ChBeJqTC9wv3o4ZTXBZiq",
+    "req_011ChBeNLnsgyUue9T5SCWcR",
+    "req_011ChBeRogi9AaxbNaEPAWxk",
+    "req_011ChBeVfPmBPmPc8HNRWpkF",
+    "req_011ChBeVuECKSqxYsovVaWoU",
+    "req_011ChBeZaSxo8KR7shwa6X2W",
+    "req_011ChBecRjfmkPxhREX2W5mz",
+    "req_011ChBefijD1GgKmbH5ot6Wv",
+    "req_011ChBegvoXAHB5ymebp5rgf",
+    "req_011ChBek4oZnjSNwpAtkw6x1",
+    "req_011ChBeqiRPJgYdagDUwH7bU",
+    "req_011ChBes3ab2swpPEmGngW5r",
+    "req_011ChBesM6nRNjsiC1AhbF2T",
+    "req_011ChBewEneGiWuTnqPXW4Bf",
+    "req_011ChBexfjLup9JfDXYtQSt3",
+    "req_011ChBexxgozN6U5puXHuHXL",
+    "req_011ChBf3YH2PtDt9CfjQ45Gc",
+    "req_011ChBf7fbAuo4YrPC4A37pE",
+    "req_011ChBf9gP6iXJy6deJy3Mf2",
+    "req_011ChBfDhzSRHFszhHMg5pLS",
+    "req_011ChBfJXdjmXs4ufCEoVoBJ",
+    "req_011ChBfJnHYfXctXo9nuD58m",
+    "req_011ChBfKGh6tByA5tSpTAKEh",
+    "req_011ChBfKTqKGKmjiubQWtTEe",
+    "req_011ChBfKqQMPxcvbDtcSxbZy",
+    "req_011ChBfPWMEgU2gheqfQ8ADL",
+    "req_011ChBfTVLLRzdsj5RsMstMd",
+    "req_011ChBfareg7DQUko2Bo7XoK",
+    "req_011ChBfe2CEfD5DjyYCj6VmY",
+    "req_011ChBfhe7JxkGHvhAcDwvpb",
+    "req_011ChBfhprETN54tMHe76ivX",
+    "req_011ChBfhw2Z7ki5Hh11tuTFo",
+    "req_011ChBfi7WqTHnw89RnWgw8f",
+    "req_011ChBfiHAX45E2farJD3NtY",
+    "req_011ChBfiRwbwX5NRAUmN3oc8",
+    "req_011ChBfibCyUTYx4CNtGM5G2",
+    "req_011ChBfm7QDgx9aqEjAGGigf",
+    "req_011ChBfm7xxgRz1FycT151St",
+    "req_011ChBfmML8HoR5acom1Utcq",
+    "req_011ChBfmUKoww3L9VHZe6jd8",
+    "req_011ChBfmW21iXdhqssEWDXm9",
+    "req_011ChBfmsmhbiVhr2pqMH2Da",
+    "req_011ChBg9dETQkVEED5fQijGZ",
+    "req_011ChBgAjD9VT6UjtbW6fLbX",
+    "req_011ChBgCHfob8qvSHUN49e2Q",
+    "req_011ChBgDK2SHeM7B7aZ7d6nG",
+    "req_011ChBgFAuqXUVPP992Kud42",
+    "req_011ChBgG4rz85hYL6dLNgbiS",
+    "req_011ChBgKTpw2indzzqQWn84V",
+    "req_011ChBgNbMDZYzt3kXvVRuiQ",
+    "req_011ChBgRT6xREux6o7t9jjVe",
+    "req_011ChBgSYGXN43p1NphnXCoi",
+    "req_011ChBgT4mq9VHtNrWEKCuk9",
+    "req_011ChBgT4w1KUL3T8NGwfh16",
+    "req_011ChBgUGTKaiLfgeNiVLRrN",
+    "req_011ChBgVLb979QkTw2N2Y6kU",
+    "req_011ChBgXJeNZhPQJZuptrfJ9",
+    "req_011ChBgY4Wb7tPKJaHanCXYq",
+    "req_011ChBgYZtvhdjoQEJNAqg5A",
+    "req_011ChBgZ6MzZitkjsjFUqLhi",
+    "req_011ChBgafULfmryjccmTag4h",
+    "req_011ChBgbwdU1rxYNJDGSj55a",
+    "req_011ChBgcZ5gVfsjiL8ex9bUS",
+    "req_011ChBgdE7Bios3LN7UYfiKZ",
+    "req_011ChBgdZN5CU9Ya3ahGYWjG",
+    "req_011ChBge66X5jmJfu6G7qJbe",
+    "req_011ChBgfRoTnVpVT6F9VLAmQ",
+    "req_011ChBgfX9g5WpkgJkrXFDdP",
+    "req_011ChBggPQsLSZp76CibUHub",
+    "req_011ChBggpUjpk7srGV4pqQQX",
+    "req_011ChBghahJ8KwKxc5t6T4k9",
+    "req_011ChBgiPFVf7Qk2TN34Zvrt",
+    "req_011ChBgiRUwYs6epXZ3xPW4X",
+    "req_011ChBgjjB62euwn7K92DkSV",
+    "req_011ChBgkP4eE5EiqBg9kjSxc",
+    "req_011ChBgkgWPDTr3Q6dnDzqov",
+    "req_011ChBgmdHRmNsssJv1mPiB6",
+    "req_011ChBgmvcEK2s15nrw7CX7Y",
+    "req_011ChBgoCVUrmfFqh5reS8EW",
+    "req_011ChBgoMSkHPwEAf89SEuYi",
+    "req_011ChBgpHtCyDUdYBca7GG1z",
+    "req_011ChBgpmF13To6VQRG3nmyK",
+    "req_011ChBgqpgu1hZqmAnQW1QJJ",
+    "req_011ChBgsgkTXQQZVrvfEvJYa",
+    "req_011ChBgt7to65c58R5mRdGU9",
+    "req_011ChBguVNQTF66s6kJab2ZT",
+    "req_011ChBgvcRr5QtHTpjz2D16z",
+    "req_011ChBgvrTSxg8mYAWG5Xtpx",
+    "req_011ChBgxQ9DXYBghKAtXM2iY",
+    "req_011ChBgzKGaM95Z5F8q5G2hK",
+    "req_011ChBh4EC6KfFokEq93f1ya",
+    "req_011ChBh5WTRWtoxTrdV2jCg7",
+    "req_011ChBh5q572FN1CsrVdvGPn",
+    "req_011ChBh64XVEAbDtwoDUevGZ",
+    "req_011ChBh6nCEh3dWHLudfLLeN",
+    "req_011ChBhCHheydhQJnc8V5dhA",
+    "req_011ChBhF2ddknE6JaqqKyy4C",
+    "req_011ChBhG23gbTs5sQ9Y3eZqG",
+    "req_011ChBhGDJMYmQwtnTpsKxLC",
+    "req_011ChBhKoPHyGb8vzMYvxi1n",
+    "req_011ChBhRVhaxfHsuomHXoCFX",
+    "req_011ChBhSBsZ8kvVSnBJzVrDb",
+    "req_011ChBhSdMEToZ3rdYnNtxxr",
+    "req_011ChBhY36soZTF3VXikt9w8",
+    "req_011ChBhcBtKhdjE3xqGmvVZW",
+    "req_011ChBhcZ9mGmFthjeUgTec5",
+    "req_011ChBhiGmgneuAK9EZNJxt9",
+    "req_011ChBhiZWkvBk7g1pGEbEDC",
+    "req_011ChBhiqoJCXsrn5FJnpWQe",
+    "req_011ChBhnUfAZdYmerrKtGzr3",
+    "req_011ChBhoPDmJ8sR8XNDiDzot",
+    "req_011ChBhoRvV7YMFo74hN6Q1H",
+    "req_011ChBhoipz1Eg4NHF4iu42d",
+    "req_011ChBhoswuXXNh558vW6g6X",
+    "req_011ChBhrjN4i8xuNxD3ero2Q",
+    "req_011ChBhru5xeaHkjCWMyTH1P",
+    "req_011ChBhsTcoGs7KkqSfEmKJt",
+    "req_011ChBhubU9ADdToRxnmv7JX",
+    "req_011ChBhypseasT7KUGTgSjFK",
+    "req_011ChBi3AYuS8UQWRSxxgquJ",
+    "req_011ChBi8J9waSZt58fBLGBDq",
+    "req_011ChBiBQ8D5QDEva7oLXrV6",
+    "req_011ChBiFhLuLmApBJ7gz5Q5Q",
+    "req_011ChBiPntFq953HVeZMfEzh",
+    "req_011ChBiRRhMPPgxigTSNqRwc",
+    "req_011ChBiS7oMrja1SR8pkzxHd",
+    "req_011ChBiWMyFm9b3Lsm5yjztv",
+    "req_011ChBigCSYnyrEgxc3EA6pt",
+    "req_011ChBigY7UFWYcZj4EzKcwH",
+    "req_011ChBigrfCUhqXbu7nE2acp",
+    "req_011ChBihe7QyjASwMraXr4M9",
+    "req_011ChBiiYS8mbCz9Sn2RtenQ",
+    "req_011ChBijDQupwuXcqaPkhT6h",
+    "req_011ChBikj1BdXBE4zQEe6nS2",
+    "req_011ChBikwEPcAdtBhuyT7k2T",
+    "req_011ChBimATcrSeYTJGnBLoCK",
+    "req_011ChBipDzXueFsmacx7ftsm",
+    "req_011ChBiq4Dw6GNA5irrFbcq9",
+    "req_011ChBiqKQFCxTLKh9wZSHKv",
+    "req_011ChBiqc7aUMhmykWKbNbUV",
+    "req_011ChBiqxb8v3bku2UTY8UYV",
+    "req_011ChBj8cwv8er4jAPXCsZru",
+    "req_011ChBj8vwtcDNV2Bf3uMakE",
+    "req_011ChBjB5XNowDMNHeuhBmHs",
+    "req_011ChBjBm3uZqj2ar7ANuv7y",
+    "req_011ChBjCXvuF2Drb28iMkfL6",
+    "req_011ChBjD6wGkMiLBb4d17sTn",
+    "req_011ChBjEdKuZ7MKnM7kZWcs1",
+    "req_011ChBjFCG3kqWu6RsC31nr5",
+    "req_011ChBjFqg5xWP6yWywE6yc6",
+    "req_011ChBjHqxkb35thxc7APWYW",
+    "req_011ChBjKTg6vZuUufCDaaRZ5",
+    "req_011ChBjKqciDnwuoQHtNhSuD",
+    "req_011ChBjMkSy6agLMWLBfFqdd",
+    "req_011ChBjPsAqSEvv18EFiHaDe",
+    "req_011ChBjTvda4XSvL59hTaWCA",
+    "req_011ChBjUH2fGtekCruGcEep7",
+    "req_011ChBje4piUKWaRdX92aaB2",
+    "req_011ChBjfMTc2KHMYmaHjKZVr",
+    "req_011ChBjhS7DUVBdUeMN6Qboh",
+    "req_011ChBjjCxzv9mwCSjDsHxXw",
+    "req_011ChBjjECAWCyFp86YRcRu4",
+    "req_011ChBjjLsFoo4GoAgZPWGLL",
+    "req_011ChBjjSVbD3rxCmMojZ5JH",
+    "req_011ChBjjTSQ1krJU6BegijBH",
+    "req_011ChBjjk61fLD9EdjRUp2cs",
+    "req_011ChBjjuv75yjRHXhWNcN2u",
+    "req_011ChBjk2MoLdUMkUVFTqaGg",
+    "req_011ChBjkDX28DGynNQ3zK7PT"
+  ],
+  "event_count": 200,
+  "incomplete": [
+    {
+      "reason": "reviewer call did not finish",
+      "call": "2026-11-19T05:30:45Z-12-2",
+      "session": "5267aeb8-c73c-41cd-9d48-0f73c5c7b9dd"
+    }
+  ],
+  "transcript_stats": {
+    "files": 6,
+    "unparsable_lines": 0,
+    "assistant_lines": 522,
+    "assistant_without_requestId": 0,
+    "session_ids": [
+      "aa854beb-8d0f-4ae3-9dea-7e74fec765fa"
+    ]
+  },
+  "reviewer": {
+    "log_rc": 0,
+    "log_absent": false,
+    "log_unknown": false,
+    "calls_total": 2,
+    "calls_this_turn": 1,
+    "calls_finished_total": 1,
+    "calls_succeeded_this_turn": 0,
+    "calls_failed_this_turn": 1,
+    "requests_refused_this_turn": [
+      {
+        "call": "2026-11-19T05:30:16Z-12-1",
+        "reason": "cwd /home/node/review/loop1-mirror is outside /tmp, /workspace"
+      }
+    ],
+    "calls_cancelled_this_turn": [],
+    "failed_attempts_without_requests": [],
+    "transcript_files": 2,
+    "projects_rc": 0,
+    "projects_absent": false,
+    "reviewer_dir_rc": null,
+    "reviewer_dir_names": null,
+    "reviewer_dir_leftover": null,
+    "transcript_stats": {
+      "files": 2,
+      "unparsable_lines": 0,
+      "assistant_lines": 20,
+      "assistant_without_requestId": 0,
+      "session_ids": [
+        "5267aeb8-c73c-41cd-9d48-0f73c5c7b9dd",
+        "c1468c09-a296-45b2-b35c-fc3e72b34dec"
+      ]
+    },
+    "event_count": 2,
+    "incomplete": 1,
+    "raw_rc": 0,
+    "call_costs_usd": {
+      "5267aeb8-c73c-41cd-9d48-0f73c5c7b9dd": null
+    },
+    "cost_unobserved": [
+      "5267aeb8-c73c-41cd-9d48-0f73c5c7b9dd"
+    ],
+    "cost_usd": null
+  },
+  "cost": {
+    "pinned_session_usd": 30.4160222,
+    "pinned_session_usd_semantics": "cumulative",
+    "reviewer_usd": null,
+    "reviewer_applicable": true,
+    "cost_complete": false
+  },
+  "reviewer_usage_pending": true,
+  "web_requests": {
+    "web_fetch_requests": 0,
+    "web_search_requests": 0
+  },
+  "observed_tools_and_effort": {
+    "by_role": {
+      "pm": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "reviewer": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      },
+      "worker": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    "web_tool_uses_complete": false,
+    "source": "transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort"
+  },
+  "usage_complete": false,
+  "usage_complete_note": "arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)",
+  "usage_cross_check": {
+    "reported": {
+      "input_tokens": 64,
+      "cache_creation_input_tokens": 108776,
+      "cache_read_input_tokens": 7847535,
+      "output_tokens": 54745,
+      "server_tool_use": {
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      }
+    },
+    "main_sum": {
+      "input_tokens": 80,
+      "cache_creation_input_tokens": 122500,
+      "cache_read_input_tokens": 10237709,
+      "output_tokens": 66286
+    },
+    "all_sum": {
+      "input_tokens": 396,
+      "cache_creation_input_tokens": 1021251,
+      "cache_read_input_tokens": 35063755,
+      "output_tokens": 460931
+    },
+    "main_delta": {
+      "input_tokens": -16,
+      "cache_creation_input_tokens": -13724,
+      "cache_read_input_tokens": -2390174,
+      "output_tokens": -11541
+    },
+    "all_delta": {
+      "input_tokens": -332,
+      "cache_creation_input_tokens": -912475,
+      "cache_read_input_tokens": -27216220,
+      "output_tokens": -406186
+    },
+    "reviewer_sum": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 33405,
+      "cache_read_input_tokens": 12142,
+      "output_tokens": 1103
+    },
+    "sums_are_lower_bounds": true,
+    "result_events": 5,
+    "note": "reported = the four counters added over every result event of the turn (a turn may emit several); result.usage does not include subagent requests (pilot 01), so main_delta is the expected match and the run caps use only the request-level ledger; reviewer_sum is outside reported (None in arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)"
+  },
+  "transcript_models": [
+    "claude-fable-5-2",
+    "claude-opus-5-5"
+  ],
+  "roles": [
+    "pm",
+    "reviewer",
+    "worker"
+  ],
+  "actual_model": null,
+  "actual_model_note": "transcript models/modelUsage are client-observed; requested model is not proof.",
+  "finished_at": "2026-11-19T05:31:17.732353+00:00",
+  "role_files": {
+    "pm": "events.role-pm.jsonl",
+    "worker": "events.role-worker.jsonl",
+    "reviewer": "events.role-reviewer.jsonl"
+  },
+  "config_volume": {
+    "rc": 0,
+    "entries": [
+      "d .",
+      "d ./agents",
+      "d ./backups",
+      "d ./hooks",
+      "d ./hooks/tests",
+      "d ./hooks/tests/cases",
+      "d ./playbooks",
+      "d ./plugins",
+      "d ./plugins/store",
+      "d ./projects",
+      "d ./session-env",
+      "d ./session-env/aa854beb-8d0f-4ae3-9dea-7e74fec765fa",
+      "d ./sessions",
+      "d ./shell-snapshots",
+      "d ./templates",
+      "f ./.claude.json",
+      "f ./.last-cleanup",
+      "f ./CLAUDE.md",
+      "f ./HISTORY.md",
+      "f ./agents/explorer.md",
+      "f ./backups/.claude.json.backup.1795059539073",
+      "f ./core.md",
+      "f ./hooks/capture-prompt.sh",
+      "f ./hooks/codex-scan.sh",
+      "f ./hooks/deploy.sh",
+      "f ./hooks/detect-layer.sh",
+      "f ./hooks/gate-guard.sh",
+      "f ./hooks/git-guard.sh",
+      "f ./hooks/reinject-mode.sh",
+      "f ./hooks/session-mode-guard.sh",
+      "f ./hooks/set-state.sh",
+      "f ./hooks/state-lib.sh",
+      "f ./hooks/task-mode-guard.sh",
+      "f ./hooks/tests/baseline.manifest",
+      "f ./hooks/tests/lib.sh",
+      "f ./hooks/tests/run.sh",
+      "f ./hooks/tests/tests.lock",
+      "f ./playbooks/design-taste.md",
+      "f ./playbooks/implementation-lazymode.md",
+      "f ./playbooks/issue-archive.md",
+      "f ./playbooks/open-source.md",
+      "f ./playbooks/refactoring.md",
+      "f ./playbooks/review.md",
+      "f ./plugins/store/cc-plugin-agents-md_builtin-b049b47b3618.json",
+      "f ./policy-limits.json",
+      "f ./policy-limits.json.signature.json",
+      "f ./policy-limits.json.stamp.json",
+      "f ./remote-settings.json",
+      "f ./remote-settings.json.synced-at",
+      "f ./sessions/7.f280bf5be7eef7582a8525e32f7175953bd61d40cff4cf996e3baeffe8ba0b54.key",
+      "f ./sessions/7.json",
+      "f ./settings.json",
+      "f ./shell-snapshots/snapshot-bash-1795061234206-24ux4y.sh",
+      "f ./templates/log.md",
+      "f ./templates/measurement-log.md",
+      "f ./templates/next.md",
+      "f ./templates/requirement-spec.md"
+    ],
+    "credentials_file_in_volume": false
+  },
+  "stopped_at_run_time_cap": false,
+  "timed_out": false,
+  "timeout_stop": null,
+  "stopped_at_token_cap_estimate": null,
+  "runner_stops": {
+    "cap_stop": null,
+    "other_stops": [],
+    "stop_requests_after_normal_end": []
+  },
+  "token_monitor": {
+    "last": {
+      "tokens": 39222146,
+      "confirmed_before_turn": 3134005,
+      "turn_stream": 36088141,
+      "stream_messages": 198,
+      "reviewer_finished_calls": 0,
+      "reviewer_sessions": 0,
+      "reviewer_unobserved": false,
+      "reviewer_copy_failures_in_a_row": 0,
+      "limit": 150000000,
+      "at": "2026-11-19T05:31:11.063537+00:00",
+      "method": "confirmed run ledger before the turn (request-level, all roles) + the turn's stream-json so far (assistant messages of the PM and its subagents, deduplicated by message id, the four counters) + arm 3: results of reviewer calls finished this turn (reviewer volume raw/<session>.json usage). Not seen: requests whose messages are not (yet) in the stream, reviewer calls still running. A lower bound; the confirmed numbers come from the ledger after the turn."
+    },
+    "crash": null,
+    "watchdog": null,
+    "failures_in_a_row": 0
+  },
+  "cli_status": "failed",
+  "status": "failed",
+  "secret_redactions": [],
+  "call_started_at": "2026-11-19T04:07:06.094429+00:00",
+  "call_seconds": 5050.238794644014,
+  "call_finished_at": "2026-11-19T05:31:16.333255+00:00",
+  "error": "Claude call failed or timed out; raw logs preserved",
+  "note": "turn did not complete; raw files preserved; the next turn gets a new number"
+}

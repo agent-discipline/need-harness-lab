@@ -1,0 +1,93 @@
+현재 상태: 스타터·fixture·하네스 playbook과 DB/은행 연결(읽기 전용)을 확인했고, 구현 전 인터뷰 질문을 정리했습니다. 게이트(SPEC=0)상 여기서 답을 받아야 명세서를 쓸 수 있습니다.
+
+## 사전 확인한 사실 (읽기 전용)
+
+- 저장소는 `GET /health`만 있는 스타터이고, `.gitignore`가 없습니다.
+- `db:5432/payment`는 fixture 원본 그대로입니다: users 1,000,000행(합 10^12), agencies 1,000행, 업무 테이블 없음. `lab` 계정은 superuser/createdb입니다.
+- `bank:8081`은 UP이고 오류 body는 `{"error": "..."}` 형태입니다.
+- docker·psql·k6는 이 컨테이너에 없습니다.
+- `Dockerfile`이 이미지 빌드 중 `gradlew clean test bootJar`를 실행하므로, `test`는 DB·은행 없이 통과해야 합니다.
+- 스타터 `HealthApi`는 컨트롤러가 `JdbcTemplate`을 직접 호출합니다(HTTP+SQL 한 클래스 — 계약의 레이어 규칙과 충돌).
+
+## 인터뷰 질문 (각 항목의 "제안"대로면 "제안대로"라고만 답하셔도 됩니다)
+
+### A. 잔액·상태 의미
+
+1. **PENDING 중 잔액 표현**: 은행 호출 전에 한도를 확보해야 초과 지출을 막을 수 있습니다.
+   - 제안: `users.balance_minor`는 성공 확정 트랜잭션에서만 차감하고, PENDING은 "보류액"으로만 가용 잔액 계산에 반영합니다. 그러면 항상 `balance_minor = 1,000,000 − Σ SUCCEEDED`가 성립합니다.
+   - 대안: 수락 시 선차감하고 실패 시 복원합니다. 더 단순하지만 PENDING·실패 건이 일시적으로 차감됩니다.
+2. **잔액 부족(409)의 영속 여부**
+   - 제안: FAILED 결제 행으로 저장하고, 같은 키 재전송에는 같은 409를 돌려줍니다.
+   - 400/403/404는 저장하지 않고 키도 소비하지 않습니다.
+3. **확정 실패 건의 재전송 응답 코드**: "재전송 확정 응답 200"이 SUCCEEDED에만 해당하는지 확인이 필요합니다.
+   - 제안: SUCCEEDED 재전송은 200, FAILED 재전송은 최초와 같은 오류(은행 거절 422, 잔액 부족 409)를 돌려줍니다.
+4. **오류 응답에서 paymentId 전달**: 422/409 body는 `{code,message}`만 두는 것이 계약입니다.
+   - 제안: body는 그대로 두고 응답 헤더 `X-Payment-Id`로 식별자를 추가 제공합니다.
+   - 추가 헤더도 금지라면 생략합니다.
+5. **일회성 5xx / timeout-before의 최초 응답**
+   - 제안: 인라인 재시도 없이 202 PENDING을 반환하고, 영속 복구 워커가 같은 은행 키로 재조회(GET) 후 재전송(fault 헤더 없음)해 SUCCEEDED로 수렴시킵니다.
+6. **지속 장애 시 종결 정책**
+   - 제안: 은행 확정 거절(422) 외에는 자동 FAILED 처리하지 않고 PENDING을 유지하며, 상한 있는 backoff(최대 약 5초 간격)로 계속 복구를 시도합니다.
+   - 은행 400(기록 없음 확정)은 FAILED로 종결합니다.
+   - 은행 409(같은 키·다른 본문, 비정상)는 PENDING 유지 + 오류 로그로 둡니다.
+
+### B. API 세부
+
+7. **헤더 검증**
+   - 제안: `X-Agency-Id` 또는 `Idempotency-Key`가 없거나 형식이 틀리면 400입니다.
+   - Idempotency-Key는 출력 가능한 ASCII(0x21–0x7E) 1..128자만 허용합니다.
+   - 검사 순서는 400 → 403(body agencyId 불일치) → 404(대행사/사용자 없음) → 멱등성 → 잔액입니다.
+8. **POST 응답 body와 식별자 형식**
+   - 제안: 201/200/202 모두 GET과 같은 리소스 형태입니다.
+   - `paymentId`/`settlementId`는 UUID 문자열이고, `bankTransferId`는 성공 전 `null`입니다.
+   - 알 수 없는 JSON 필드는 무시하고, 멱등성 payload 비교 대상은 `(userId, agencyId, amount, currency)`입니다.
+9. **정산 status 값과 응답 코드**
+   - 제안: 정산은 단일 DB 트랜잭션이라 status는 `SUCCEEDED` 하나입니다.
+   - 최초 201, 같은 키 재전송 200, 다른 payload 409입니다. 같은 키 동시 요청은 선행 트랜잭션 커밋을 기다렸다가 200을 받습니다(202 없음).
+   - 미래 날짜를 포함해 유효한 날짜는 모두 허용하고, 대상이 없으면 0원/0건 성공입니다.
+10. **성공 확정 시각의 기준**
+    - 제안: 우리 서버가 SUCCEEDED로 전이시킨 시각(`succeeded_at timestamptz`, 앱 Clock 주입)입니다.
+    - businessDate는 `(succeeded_at AT TIME ZONE 'Asia/Seoul')::date`로 판정하고, 조회는 KST 일 범위로 합니다.
+11. **`/health`의 DB 장애 시 응답**: "HTTP 200 + DB 접속 결과"의 해석이 필요합니다.
+    - 제안: DB가 죽어도 200 + `{"status":"DOWN","database":false}`입니다.
+    - 대안: 503을 반환합니다.
+    - 어느 쪽이든 스타터 `HealthApi`의 SQL을 인프라 레이어로 옮기는 리팩토링을 해도 되는지 확인 부탁드립니다.
+12. **실험 프로필 활성화 방식**: `X-Bank-Fault` 전달을 어떻게 켜는지 정해야 합니다.
+    - 제안: 설정 `bank.fault-injection-enabled`를 기본 true로 두고 환경변수로 끌 수 있게 합니다. 평가 compose를 바꿀 수 없어 별도 profile 지정이 없어도 동작해야 하기 때문입니다.
+    - 허용값 외의 `X-Bank-Fault`는 400입니다.
+
+### C. 원장·정산 스키마
+
+13. **원장 형태**
+    - 제안: append-only 복식 `ledger_entries`를 둡니다.
+    - 결제 성공 시 3행: 사용자 차감 = 대행사 미정산 채무(순액) + 수수료.
+    - 정산 시 2행: 미정산 채무 → 정산 완료.
+    - `settlement_items`는 payment_id를 유일키로 두어 중복 포함을 차단하고, 건별 금액·수수료·순액과 결제 시점 `fee_bps`를 저장합니다.
+    - 이 형태로 진행해도 되는지 확인 부탁드립니다.
+
+### D. 환경·검증·금지영역
+
+14. **DB 접속 정보**: `DB_URL` 환경변수 + `application.yml` 기본값(`lab` / 스타터 기본 비밀번호)을 써도 됩니까? (사전 조회에 이미 읽기 전용으로 사용했습니다.)
+15. **테스트·스모크용 DB**: 원본 `payment` DB는 변경하지 않으려 합니다.
+    - 제안: 같은 Postgres 인스턴스에 통합 테스트용 DB(`payment_it`, 동일 DDL의 소규모 users/agencies)를 만듭니다.
+    - 스모크·부하 확인용으로 `CREATE DATABASE payment_smoke TEMPLATE payment` 복제본을 만들고, 완료 시 제가 만든 DB는 DROP합니다.
+    - 반대로 평가자가 새 volume에서 시작하므로 `payment`를 직접 써도 된다면 알려주세요.
+16. **공용 은행 사용**: 통합 테스트·스모크에서 `bank:8081`을 호출해도 됩니까(journal 행이 남습니다)? 은행 중단/재시작 시나리오는 제가 컨테이너를 제어할 수 없어 테스트 소스 안의 fake bank(FIXTURE 계약 구현)로 검증하려 합니다.
+17. **Gradle 태스크 분리**
+    - 제안: `test`는 DB·은행 없이 도는 단위 테스트만 두어 Docker 빌드가 통과하게 합니다.
+    - DB/은행이 필요한 동시성·장애·재시작 회귀는 별도 `integrationTest` 태스크로 둡니다.
+    - `Dockerfile`은 수정하지 않습니다.
+    - `.gitignore`, `application.yml`(풀/스레드 한도 외 항목), `build.gradle.kts` 수정은 허용 범위로 봐도 됩니까?
+18. **성능 검증 범위**: k6가 없고 이 컨테이너는 24코어라 budget-v1과 다릅니다.
+    - 제안: 50RPS·5분 등의 SLO 판정은 외부 평가기 소관으로 두고, 저는 JDK 기반 단기 부하(예: 50RPS × 60초, 동시성 3종)를 참고 증거로만 남기며 한계를 명시합니다.
+19. **git**
+    - 제안: 로컬 브랜치 `feat/payment-settlement-v1`에서 code 커밋과 docs 커밋을 분리합니다.
+    - AI attribution은 넣지 않고, push/PR은 하지 않습니다.
+    - 완료 시 로컬 `main`에 fast-forward 병합할지, 브랜치에만 둘지 지정해 주세요.
+20. **CS 이슈 아카이브**: 대상 study-note 저장소가 이 환경에 없고 원격 발행이 금지입니다.
+    - 제안: "보류"로 log와 NEXT.md에 기록만 합니다.
+21. **stakes**: 결제 금액·멱등성·tenant 권한·공개 API 계약이므로 **높음**으로 판정합니다.
+    - 이에 따라 설계 선검증, blind 테스트 워커(Opus), 듀얼 리뷰 루프(Opus ∥ `fable-review`, 최대 3회)를 수행합니다. 이의 없으신지 확인 부탁드립니다.
+22. **자율성 모드**: auto로 진행하겠습니다(지시 원문 기준). 명세서 합의 때 함께 확정하면 됩니다.
+
+답변을 받으면 `docs/plans/2026-11-19/payment-settlement-v1/requirement-spec.md`(필수 6칸)를 작성해 합의를 요청하겠습니다.

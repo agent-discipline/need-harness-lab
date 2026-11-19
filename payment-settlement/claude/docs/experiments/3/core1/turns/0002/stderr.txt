@@ -1,0 +1,4 @@
+[fable-review-helper] 2026-11-19T03:46:08.088444+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready
+[fable-review-helper] 2026-11-19T03:53:08.203278+00:00 snapshot c1468c09-a296-45b2-b35c-fc3e72b34dec files=19 bytes=103599 excluded=[]
+[fable-review-helper] 2026-11-19T04:02:41.714661+00:00 call in /tmp/dpv-mirror.xkLN0e exit=0

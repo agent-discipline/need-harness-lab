@@ -1,0 +1,13 @@
+{
+  "run_id": "claude-arm3-core01",
+  "turn": "0003",
+  "files": {
+    "analysis.md": "29938006fa90cc98a9de095f7d66feac9a1c3aeeab7a4d527f95a727de3de495",
+    "invocation.json": "ca8d83fa23b0281966e33cfae0cb9341c11227519b177087e883c925b747a658",
+    "prompt.txt": "24750a5df1790a9c2a7754c11b1c980dbf2abcf5b7ce33ffb8b030ac01d892e9",
+    "response.txt": "fbd9051e99c6a67b345310129585e1ae2ca9a7613b6aad11ec071403dd573e04",
+    "result.json": "dd5dd5869d92dac4fa36370a05c433027e96a9dffa4c306a7006fab9b243eb9f",
+    "stderr.txt": "e8fea89b8ff9f12cec1367adeb315a337a6eccfb92a3d46bfa146bc6e4dc0d25",
+    "usage.jsonl": "681f44a6fccaf5663fbd2430d1e99702495ff33376e2fe9012c0898f8101da0b"
+  }
+}

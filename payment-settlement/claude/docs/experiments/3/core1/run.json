@@ -1,6 +1,6 @@
 {
   "protocol": "payment-settlement-v3-claude",
-  "status": "NOT_STARTED",
+  "status": "INVALID_INFRA",
   "run_id": "claude-arm3-core01",
   "arm": 3,
   "core": 1,
@@ -9,36 +9,215 @@
   "requested_model": "claude-fable-5-2",
   "requested_pm_model": "claude-fable-5-2",
   "requested_worker_model": "claude-opus-5-5",
-  "actual_model": null,
+  "actual_model": "claude-fable-5-2",
   "actual_role_models": {},
   "reasoning_effort": "high",
   "auth": "subscription-oauth-token",
   "billed_cost": null,
-  "baseline_sha": null,
-  "contract_sha256": null,
+  "baseline_sha": "900818001bc54b5308be4676576a9e31f1837767",
+  "contract_sha256": "5fa42cd78b698fb5fac8ba6228341470dff8c2ca47999ef3ecb4f67f5d3e6b26",
   "harness_sha": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
   "harness_enforcement": "native-hooks-unverified",
   "cache_policy": "observed-cache",
   "cache_control_verified": false,
-  "cache_observation_verified": false,
+  "cache_observation_verified": true,
   "usage_complete": false,
-  "isolation_verified": false,
-  "hook_enforcement_verified": false,
-  "role_models_verified": false,
-  "oauth_token_source_verified": false,
+  "isolation_verified": true,
+  "hook_enforcement_verified": true,
+  "role_models_verified": true,
+  "oauth_token_source_verified": true,
   "resource_profile": "budget-v1",
-  "image_digests": {},
+  "image_digests": {
+    "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
+    "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+    "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+    "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+    "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+    "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+    "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+  },
   "seed": 20260923,
   "token_limit": 150000000,
   "time_limit_seconds": 28800,
   "feedback_limit": 30,
   "controller": "external-print-resume",
   "second_reviewer": "fable-review claude-fable-5-2 (arm 3 only; replaces codex)",
-  "usage_collector_verified": false,
-  "harness_adapter_verified": false,
-  "acceptance_suite_verified": false,
+  "usage_collector_verified": true,
+  "harness_adapter_verified": true,
+  "acceptance_suite_verified": true,
   "pilot_passed": false,
   "observed_tools": null,
   "web_tools": "enabled-recorded (all arms, decided 2026-11-17)",
-  "estimated_cost_usd": null
+  "estimated_cost_usd": null,
+  "requested_models": {
+    "1": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "2": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "3": {
+      "model": "claude-fable-5-2",
+      "worker_model": "claude-opus-5-5"
+    }
+  },
+  "requested_reviewer_model": "claude-fable-5-2",
+  "user_proxy_model": "claude-opus-5-5",
+  "frozen_at": "2026-11-19T03:37:08.967210+00:00",
+  "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed",
+  "supersedes": {
+    "reason": "파일럿 검사를 사이클 1의 3번 조건 run에서 도출(사용자 결정 2026-11-19), 본 실험 init 개시 게이트",
+    "at": "2026-11-19T03:37:08.967210+00:00",
+    "previous_contract_sha256": "9cd2d5bf773591e3a98770ea4b398f6bb52c06217823375b8992b593dd3d68bc",
+    "previous_image_digests": {
+      "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
+      "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+      "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+      "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+      "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+      "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+      "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+    },
+    "previous_frozen_at": "2026-11-19T01:45:07.892793+00:00",
+    "archived": {
+      "readiness.json": {
+        "archived_as": "readiness.superseded-2026-11-19T03-37-08.967210+00-00.json",
+        "sha256": "7909c4cc670f2575e612c3034ce3331b05f3505d37f7c10a934368625205731e"
+      },
+      "frozen-inputs.json": {
+        "archived_as": "frozen-inputs.superseded-2026-11-19T03-37-08.967210+00-00.json",
+        "sha256": "597fcaba2a598eada7b37f3f63e6c1322904ea27b35f87149916acb362a7b66f"
+      }
+    },
+    "pilot_passed_reset": true,
+    "changed_inputs": [
+      "claude/runner/launch.py",
+      "claude/runner/test_spec_invariants.py",
+      "claude/scripts/freeze_readiness.py",
+      "claude/scripts/preflight.py",
+      "claude/scripts/start_cycle.py",
+      "claude/scripts/test_scripts.py",
+      "claude/scripts/test_spec_invariants.py"
+    ],
+    "rule": "replaced before any measured run started (freeze_readiness.experiment_started was empty); only inputs under claude/ changed"
+  },
+  "started_at": "2026-11-19T03:38:53.739075+00:00",
+  "project": "payment-claude-c01-a3",
+  "ports": {
+    "APP_PORT": "38013",
+    "DB_PORT": "39013",
+    "BANK_PORT": "40013"
+  },
+  "initial_turn_exit": 0,
+  "initial_turn_failed": false,
+  "verdict": null,
+  "invalid_infra": {
+    "reason": "턴 0003 컨테이너가 프로세스 수 제한(pids-limit 512)에 걸려 종료(exit 134) — 커널 로그 fork rejected by pids controller",
+    "evidence": {
+      "infra-evidence-pids.txt": "7a118a7ab582e4b631d7c44d8427f6f51e5fcc719a2bf16dfa3b9787e94ce57b",
+      "turns/0003/result.json": "dd5dd5869d92dac4fa36370a05c433027e96a9dffa4c306a7006fab9b243eb9f",
+      "turns/0003/stderr.txt": "e8fea89b8ff9f12cec1367adeb315a337a6eccfb92a3d46bfa146bc6e4dc0d25"
+    }
+  },
+  "cap_reached": false,
+  "cap": null,
+  "cap_status": null,
+  "cap_when": null,
+  "cap_call": null,
+  "cap_overshoot": null,
+  "finished_at": "2026-11-19T05:56:58.214854+00:00",
+  "evidence_derivation": {
+    "all_acceptance_passed": {
+      "source": "verdict.json",
+      "all_pass": false,
+      "evidence_missing": null
+    },
+    "usage_complete": {
+      "source": ".runs/<run> ledger computed at finish",
+      "incomplete_calls": [
+        "turn/0003"
+      ],
+      "conflicts": 0
+    },
+    "all_role_models_verified": {
+      "source": "manifest actual_role_models + request events (freeze_readiness.run_role_check)",
+      "checks": {
+        "pm": true,
+        "worker": true,
+        "reviewer": true,
+        "user-proxy": true
+      }
+    },
+    "isolation_verified": {
+      "source": "manifest self-tests + readiness evidence.smoke_runs tool surface (freeze_readiness.run_isolation_check)",
+      "readiness": "/home/jun/project/agent-discipline/need-harness-lab/payment-settlement/claude/docs/results/readiness.json",
+      "checks": {
+        "init_selftest_passed": true,
+        "call_selftests_passed": true,
+        "no_selftest_failed_before_a_turn": true,
+        "tools_equal_frozen": true
+      }
+    }
+  },
+  "turns_not_capturable": [],
+  "result_summary": {
+    "rule": "status unchanged: PASSED only when all of C01..C20 are PASS; these figures are reported beside it",
+    "correctness": null,
+    "c20": null,
+    "no_verdict": "no verdict.json (INVALID_INFRA without a verdict table)",
+    "tokens": {
+      "by_role": {
+        "pm": {
+          "requests": 63,
+          "total_tokens": 13244967,
+          "cache_read_input_tokens": 12790512,
+          "tokens_without_cache_reads": 454455
+        },
+        "reviewer": {
+          "requests": 4,
+          "total_tokens": 139107,
+          "cache_read_input_tokens": 23121,
+          "tokens_without_cache_reads": 115986
+        },
+        "user-proxy": {
+          "requests": 2,
+          "total_tokens": 47303,
+          "cache_read_input_tokens": 2952,
+          "tokens_without_cache_reads": 44351
+        },
+        "worker": {
+          "requests": 162,
+          "total_tokens": 26295615,
+          "cache_read_input_tokens": 24915542,
+          "tokens_without_cache_reads": 1380073
+        }
+      },
+      "total_tokens": 39726992,
+      "cache_read_input_tokens": 37732127,
+      "tokens_without_cache_reads": 1994865,
+      "usage_complete": false,
+      "tokens_are_lower_bound": true,
+      "counted": "input + cache creation + cache read + output, request-level, every role of the run",
+      "cost_usd": null
+    },
+    "elapsed": {
+      "first_turn_started_at": "2026-11-19T03:38:58.176876+00:00",
+      "last_turn_finished_at": "2026-11-19T05:31:17.732353+00:00",
+      "seconds": 6739.555477,
+      "turns": 3,
+      "measure": "wall clock, first turn start to last turn end; not what the time cap counts (call_time)"
+    },
+    "call_time": {
+      "seconds": 6633.725459893001,
+      "seconds_are_lower_bound": false,
+      "counted": "sum of paid call lengths (turns, user-proxy consultations): call_seconds, else finished_at - started_at; time between calls is not counted",
+      "unresolved": [],
+      "ends_from_container": []
+    },
+    "cap": null
+  },
+  "all_acceptance_passed": false,
+  "all_role_models_verified": true
 }

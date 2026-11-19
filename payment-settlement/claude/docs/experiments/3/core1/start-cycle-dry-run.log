@@ -1,0 +1,16 @@
+PASS: three core1 copies equal template (18 files)
+{
+  "cycle": 1,
+  "runs": [
+    {
+      "run_id": "claude-arm3-core01",
+      "project": "payment-claude-c01-a3",
+      "ports": {
+        "APP_PORT": "38013",
+        "DB_PORT": "39013",
+        "BANK_PORT": "40013"
+      }
+    }
+  ],
+  "image": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+}

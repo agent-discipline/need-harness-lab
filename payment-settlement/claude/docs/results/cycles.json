@@ -1,7 +1,7 @@
 [
   {
     "cycle": 1,
-    "status": "NOT_STARTED",
+    "status": "RUNNING",
     "runs": [
       "claude-arm1-core01",
       "claude-arm2-core01",
@@ -9,7 +9,22 @@
     ],
     "max_parallel_implementers": 3,
     "max_parallel_load_tests": 1,
-    "next_cycle_requires": "all three terminal, documented, committed"
+    "next_cycle_requires": "all three terminal, documented, committed",
+    "started_at": "2026-11-19T03:38:53.739075+00:00",
+    "launches": [
+      {
+        "arms": [
+          3
+        ],
+        "at": "2026-11-19T03:38:53.739075+00:00",
+        "pilot_passed": false,
+        "rule": "pilot-in-cycle: arm 3 first; its finished record is the pilot check"
+      }
+    ],
+    "initial_turns_finished": false,
+    "initial_turn_exits": {
+      "claude-arm3-core01": 0
+    }
   },
   {
     "cycle": 2,

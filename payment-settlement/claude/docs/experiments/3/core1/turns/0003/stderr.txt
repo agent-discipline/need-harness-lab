@@ -1,0 +1,4 @@
+[fable-review-helper] 2026-11-19T04:07:06.433217+00:00 ready model=claude-fable-5-2 config_dir=/home/node/.fable-review roots=/tmp,/workspace
+[lab-arm3-start] reviewer helper ready
+[fable-review-helper] 2026-11-19T05:30:16.432573+00:00 refused: cwd /home/node/review/loop1-mirror is outside /tmp, /workspace
+[fable-review-helper] 2026-11-19T05:30:45.782318+00:00 snapshot 5267aeb8-c73c-41cd-9d48-0f73c5c7b9dd files=95 bytes=975884 excluded=[]
