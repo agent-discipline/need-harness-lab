@@ -287,7 +287,7 @@ def load_metrics(folder, c20_evidence):
 def result_summary(run, folder, verdict, cap):
     """Result figures reported beside the status (decision 2026-11-18, approval 2): the verdict rule is unchanged
     (PASSED = all of C01..C20 PASS); correctness C01..C19, the C20 result and its load figures, tokens per role and in
-    total (cache reads apart), wall-clock time and the cap annotation."""
+    total (cache reads apart), wall-clock time, the paid call time the time cap counts and the cap annotation."""
     out = {'rule': 'status unchanged: PASSED only when all of C01..C20 are PASS; these figures are reported beside it'}
     if verdict:
         results = verdict['results']
@@ -329,7 +329,9 @@ def result_summary(run, folder, verdict, cap):
     out['elapsed'] = {'first_turn_started_at': min(starts).isoformat() if starts else None,
                       'last_turn_finished_at': max(ends).isoformat() if ends else None,
                       'seconds': (max(ends) - min(starts)).total_seconds() if starts and ends else None,
-                      'turns': len(launch.turn_records(run))}
+                      'turns': len(launch.turn_records(run)),
+                      'measure': 'wall clock, first turn start to last turn end; not what the time cap counts (call_time)'}
+    out['call_time'] = launch.call_time(run)        # what time_limit_seconds counts (decision 2026-11-19)
     out['cap'] = None if cap is None else {k: cap.get(k) for k in ('status', 'when', 'call', 'overshoot')}
     return out
 

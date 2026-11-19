@@ -325,7 +325,7 @@ class UserProxyAccounting(unittest.TestCase):
         for i, kind in enumerate(turns, 1):
             d = run / 'turns' / ('%04d' % i)
             write(d / 'invocation.json', {'started_at': datetime.now(timezone.utc).isoformat(), 'turn_kind': kind, 'counts_as': kind})
-            write(d / 'result.json', {'status': 'ok', 'usage_complete': True})
+            write(d / 'result.json', {'status': 'ok', 'usage_complete': True, 'finished_at': datetime.now(timezone.utc).isoformat()})
             (d / 'events.jsonl').write_text('')
         out = run / 'consults' / '0001'
         state = {'calls': []}

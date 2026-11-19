@@ -868,6 +868,13 @@ class ConsultContractTest(unittest.TestCase):
             ledger = json.loads((run_dir / 'ledger.json').read_text())
             self.assertEqual(ledger['roles']['user-proxy']['requests'], 1)
             self.assertEqual(ledger['cost_usd'], 0.07)
+            # decision 2026-11-19: the consultation's start..end is paid call time counted by the time cap
+            started = json.loads((run_dir / 'consults/0001/invocation.json').read_text())['started_at']
+            self.assertLessEqual(started, usage['call_started_at'])
+            self.assertLessEqual(usage['call_finished_at'], usage['finished_at'])
+            time_used = consult_contract.launch.call_time(run_dir)
+            self.assertEqual(time_used['unresolved'], [])
+            self.assertEqual(time_used['seconds'], usage['call_seconds'])
             code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake(copy_ok=False))
             usage = json.loads((run_dir / 'consults/0002/usage.json').read_text())
             self.assertIsNone(usage['usage'])
@@ -885,7 +892,8 @@ class ConsultContractTest(unittest.TestCase):
             t = run_dir / 'turns/0001'
             write(t / 'invocation.json', {'turn_kind': 'initial',
                                           'started_at': (datetime.now(timezone.utc) - timedelta(seconds=28800 - 100)).isoformat()})
-            write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'cost': {'pinned_session_usd': 0.0, 'reviewer_applicable': False}})
+            write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'finished_at': consult_contract.launch.utc(),
+                                      'cost': {'pinned_session_usd': 0.0, 'reviewer_applicable': False}})
             (t / 'events.jsonl').write_text('')
             timeouts = []
             inner = self.fake()
@@ -900,6 +908,54 @@ class ConsultContractTest(unittest.TestCase):
             invocation = json.loads((run_dir / 'consults/0001/invocation.json').read_text())
             self.assertEqual(invocation['timeout_seconds'], 1800)
             self.assertLessEqual(invocation['effective_timeout_seconds'], 100)
+
+    def test_after_28700_seconds_of_finished_turns_the_consultation_gets_100_seconds(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            day = datetime.now(timezone.utc) - timedelta(days=1)            # long ago: the gap since is not counted
+            t = run_dir / 'turns/0001'
+            write(t / 'invocation.json', {'turn_kind': 'initial', 'started_at': day.isoformat()})
+            write(t / 'result.json', {'status': 'ok', 'usage_complete': True, 'finished_at': (day + timedelta(seconds=28700)).isoformat(),
+                                      'cost': {'pinned_session_usd': 0.0, 'reviewer_applicable': False}})
+            (t / 'events.jsonl').write_text('')
+            timeouts, inner = [], self.fake()
+            def fake(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    timeouts.append(kw.get('timeout'))
+                return inner(cmd, **kw)
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], fake)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(timeouts, [100])
+            self.assertEqual(json.loads((run_dir / 'consults/0001/invocation.json').read_text())['effective_timeout_seconds'], 100)
+
+    def test_consultation_is_refused_while_another_paid_call_of_the_run_holds_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            with consult_contract.launch.run_lock(run_dir):
+                code, run, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake())
+            self.assertNotEqual(code, 0)
+            self.assertIn('another paid call of this run is in progress', out)
+            run.assert_not_called()
+            self.assertFalse((run_dir / 'consults').exists())
+            self.assertFalse((run_dir / 'censored.json').exists())
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], self.fake())   # the lock was released
+            self.assertEqual(code, 0, out)
+
+    def test_consultation_collection_time_is_not_counted(self):
+        import time as time_
+        with tempfile.TemporaryDirectory() as tmp:
+            argv, run_dir = self.setup_run(tmp)
+            inner = self.fake()
+            def fake(cmd, **kw):
+                if cmd[:2] == ['docker', 'cp']:
+                    time_.sleep(1.2)
+                return inner(cmd, **kw)
+            code, _, out = self.call(argv + ['--model', 'claude-opus-5-5'], fake)
+            self.assertEqual(code, 0, out)
+            usage = json.loads((run_dir / 'consults/0001/usage.json').read_text())
+            self.assertLess(usage['call_seconds'], 1.0)
+            self.assertLess(consult_contract.launch.call_time(run_dir)['seconds'], 1.0)
 
     def test_failed_or_empty_consultation_is_recorded_as_not_completed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1059,12 +1115,12 @@ def finish_fixture(tmp, arm=1, run_id='claude-arm1-core01', pilot=False, results
         t = run / 'turns' / ('%04d' % n)
         write(t / 'invocation.json', {'turn_kind': 'initial' if n == 1 else 'feedback', 'started_at': launch.utc(),
                                       'hook_selftest_before_call': {'passed': True} if arm == 3 else None})
-        write(t / 'result.json', {'status': 'ok', 'usage_complete': usage_complete,
+        write(t / 'result.json', {'status': 'ok', 'usage_complete': usage_complete, 'finished_at': launch.utc(),
                                   'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}})
         (t / 'events.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in (events if n == 1 else [])))
     if proxy_model:
         c = run / 'consults/0001'
-        write(c / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0})
+        write(c / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0, 'call_seconds': 0})
         (c / 'events.jsonl').write_text(json.dumps(dict(type='message', id='px', model=proxy_model, role='user-proxy',
                                                         turn='p', usage=dict(USAGE))) + '\n')
     if censored:
@@ -1193,6 +1249,18 @@ class FinishRunTest(unittest.TestCase):
             self.assertEqual((summary['tokens']['cache_read_input_tokens'], summary['tokens']['tokens_without_cache_reads']), (80, 20))
             self.assertEqual(summary['tokens']['by_role']['implementer']['tokens_without_cache_reads'], 20)
             self.assertEqual(summary['elapsed']['seconds'], 3600.0)
+            # decision 2026-11-19: the wall clock stays in the result apart from the paid call time the 8-hour cap counts
+            t2 = run / 'turns/0002'
+            write(t2 / 'invocation.json', {'turn_kind': 'feedback', 'started_at': '2026-11-18T05:00:00+00:00'})
+            write(t2 / 'result.json', {'status': 'ok', 'usage_complete': True, 'finished_at': '2026-11-18T05:30:00+00:00',
+                                       'cost': {'pinned_session_usd': 1.0, 'reviewer_applicable': False}})
+            write(run / 'consults/0001/invocation.json', {'role': 'user-proxy', 'started_at': '2026-11-18T03:00:00+00:00'})
+            write(run / 'consults/0001/usage.json', {'usage_complete': True, 'cost_usd': 0.0,
+                                                     'finished_at': '2026-11-18T03:10:00+00:00'})
+            timed = finish_run.result_summary(run, folder, verdict, None)
+            self.assertEqual(timed['elapsed']['seconds'], 5.5 * 3600)               # first turn start .. last turn end
+            self.assertEqual(timed['call_time']['seconds'], 3600 + 1800 + 600)      # turns + user proxy, gaps left out
+            self.assertEqual(timed['call_time']['unresolved'], [])
             # the C20 evidence cites no load summary, or it has another shape: the reason is kept, nothing invented
             write(folder / 'verdict.json', {'criteria': {'C20': {'evidence': ['judging/v3/load-check.stdout']}}})
             self.assertEqual(finish_run.result_summary(run, folder, verdict, None)['c20']['load']['available'], False)

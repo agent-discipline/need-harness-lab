@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Prepare an isolated Claude Code run; an explicit turn executes a paid subscription call."""
 import argparse
+import contextlib
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import math
@@ -76,6 +78,8 @@ def allowed_tools(manifest):
 # token_limit: safety cap against runaway use (decision 2026-11-18 after pilot 03, approval 2): tokens are compared
 # between arms as an outcome, the cap only stops a run that runs away. Enforced between calls (ledger) and during a
 # turn (estimate from the turn's stream: TurnBudgetMonitor).
+# time_limit_seconds: the sum of the paid calls' durations (turns, user-proxy consultations; decision 2026-11-19 after
+# pilot 04), not the wall clock since the first call: judging and waiting between calls are not counted (call_time).
 LIMITS = {'token_limit': 150000000, 'time_limit_seconds': 28800, 'feedback_limit': 30}
 # Every turn records its kind in invocation.json (turn_kind). The first turn is 'initial'; a --resume turn must declare
 # one of TURN_KINDS: 'feedback' (evaluator judging result, prompts/feedback.md), 'answer' (arm 3: proxy answers to the
@@ -843,11 +847,13 @@ def mask_text(text, secrets):
             text = text.replace(value, '<REDACTED-SECRET>')
     return text
 
-def finalize_result(output, result, status, error, hits):
-    """Overall turn status is decided last (after collection and the secret scan), written atomically."""
+def finalize_result(output, result, status, error, hits, timing=None):
+    """Overall turn status is decided last (after collection and the secret scan), written atomically. timing: the
+    call's measured length (call_seconds, call_started_at, call_finished_at — watch_turn), when the container started."""
     path = output / 'result.json'
     current = json.loads(path.read_text()) if path.exists() else {}
     current.update({'status': status, 'finished_at': utc(), 'secret_redactions': hits})
+    current.update(timing or {})
     if error:
         current['error'] = error
         current.setdefault('note', 'turn did not complete; raw files preserved; the next turn gets a new number')
@@ -1363,21 +1369,127 @@ def next_turn_kind(manifest, dest, records, resume, kind):
         return kind, effective
     return kind, kind
 
-def limit_state(dest, next_is_feedback=False, now=None):
-    """Where the run stands against its caps, from the run ledger (all roles) and the turn records."""
+def call_container(invocation):
+    """The container name of a paid call, from the docker create command its invocation.json records."""
+    create = invocation.get('create')
+    if isinstance(create, list) and '--name' in create[:-1]:
+        name = create[create.index('--name') + 1]
+        return name if isinstance(name, str) and name else None
+    return None
+
+def number_value(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0 else None
+
+def call_time(dest, container_ends=None):
+    """Time used against time_limit_seconds (decision 2026-11-19): the sum over the run's paid calls (turns and
+    user-proxy consultations) of each call's length. Time between calls (judging, waiting, reporting) is not counted.
+    A call's length is call_seconds of its end record (turn result.json / consultation usage.json: measured by the
+    runner from just before the container start to just after it returned, collection and scans excluded); records
+    without it use finished_at - started_at (invocation.json). A call whose length cannot be confirmed this way (no end
+    record, no start record, or an end before its start) is never estimated: it is listed in 'unresolved' and adds
+    nothing, so 'seconds' is then a lower bound (limit_gate refuses the next call). container_ends ({call: docker
+    State of its container}) supplies the end of such a call from its stopped container (recorded in
+    'ends_from_container')."""
+    total, unresolved, from_container = 0.0, [], []
+    for kind, folder, end_file in (('turn', 'turns', 'result.json'), ('user-proxy', 'consults', 'usage.json')):
+        base = Path(dest) / folder
+        for path in sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []:
+            call = '%s/%s' % (kind, path.name)
+            records = []
+            for name in ('invocation.json', end_file):
+                try:
+                    value = json.loads((path / name).read_text())
+                except (OSError, ValueError):
+                    value = None
+                records.append(value if isinstance(value, dict) else {})
+            invocation, ending = records
+            measured = number_value(ending.get('call_seconds'))
+            if measured is not None:
+                total += measured
+                continue
+            start, end = parse_time(invocation.get('started_at')), parse_time(ending.get('finished_at'))
+            if start is not None and end is not None and end >= start:
+                total += (end - start).total_seconds()
+                continue
+            reason = ('no start record' if start is None else 'no end record' if end is None
+                      else 'end before start (clock went back)')
+            container = call_container(invocation)
+            seen = (container_ends or {}).get(call)
+            if seen:
+                c_start = start or seen.get('started_at')
+                if c_start is not None and seen.get('finished_at') is not None and seen['finished_at'] >= c_start:
+                    total += (seen['finished_at'] - c_start).total_seconds()
+                    from_container.append({'call': call, 'container': container, 'reason': reason,
+                                           'started_at': c_start.isoformat(), 'finished_at': seen['finished_at'].isoformat(),
+                                           'source': 'docker inspect State.FinishedAt' + ('' if start else ' and State.StartedAt')})
+                    continue
+                reason += '; container end not usable (%s)' % seen.get('status')
+            unresolved.append({'call': call, 'reason': reason, 'container': container,
+                               'started_at': start.isoformat() if start else None})
+    return {'seconds': total, 'seconds_are_lower_bound': bool(unresolved),
+            'counted': 'sum of paid call lengths (turns, user-proxy consultations): call_seconds, else finished_at - '
+                       'started_at; time between calls is not counted',
+            'unresolved': unresolved, 'ends_from_container': from_container}
+
+def container_end(name):
+    """docker inspect State of a stopped call container: {'status', 'started_at', 'finished_at'}, or None when the
+    container is gone or cannot be inspected. Only an exited or dead container has an end."""
+    if not name:
+        return None
+    try:
+        done = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False, timeout=MONITOR_COMMAND_SECONDS)
+        state = json.loads(done.stdout)[0]['State'] if done.returncode == 0 else None
+    except (subprocess.TimeoutExpired, OSError, ValueError, TypeError, KeyError, IndexError):
+        return None
+    if not isinstance(state, dict):
+        return None
+    status = state.get('Status')
+    finished = container_finished_at(json.dumps([{'State': state}])) if status in ('exited', 'dead') else None
+    started = container_finished_at(json.dumps([{'State': {'FinishedAt': state.get('StartedAt')}}]))
+    return {'status': status, 'started_at': started, 'finished_at': finished}
+
+def limit_state(dest, next_is_feedback=False, container_ends=None):
+    """Where the run stands against its caps, from the run ledger (all roles), the turn records and the paid call
+    lengths (call_time). Read only: calls whose length is unconfirmed are listed in time.unresolved, never raised."""
     ledger = run_ledger(dest)
     records = turn_records(dest)
     counts = turn_counts(records)
-    starts = [start for _, _, _, start in records if start]
-    now = now or datetime.now(timezone.utc)
-    elapsed = (now - min(starts)).total_seconds() if starts else 0.0
-    used = {'token_limit': ledger['total_tokens'], 'time_limit_seconds': elapsed, 'feedback_limit': counts['delivered']['feedback']}
+    time_used = call_time(dest, container_ends)
+    used = {'token_limit': ledger['total_tokens'], 'time_limit_seconds': time_used['seconds'],
+            'feedback_limit': counts['delivered']['feedback']}
     # tokens/time: a run that has used its whole budget gets no further call; feedback: only a next feedback delivery counts
     reached = [status for key, status in CENSORED
                if used[key] >= LIMITS[key] and (key != 'feedback_limit' or next_is_feedback)]
     return {'used': used, 'limits': dict(LIMITS), 'tokens_are_lower_bound': ledger['tokens_are_lower_bound'],
-            'answer_turns': counts['delivered']['answer'], 'turn_kinds': counts,
+            'answer_turns': counts['delivered']['answer'], 'turn_kinds': counts, 'time': time_used,
             'overshoot': {k: used[k] - LIMITS[k] for k in LIMITS if used[k] > LIMITS[k]}, 'reached': reached, 'at': utc()}
+
+def resolved_state(dest, next_is_feedback=False):
+    """limit_state, with the end of any call whose length is not on record taken from its stopped container
+    (container_end) when there is one. Calls still unresolved stay listed in time.unresolved."""
+    state = limit_state(dest, next_is_feedback)
+    if state['time']['unresolved']:
+        ends = {u['call']: end for u in state['time']['unresolved'] for end in [container_end(u['container'])] if end}
+        if ends:
+            state = limit_state(dest, next_is_feedback, ends)
+    return state
+
+RUN_LOCK = '.paid-call.lock'                          # held from the gate until the call's end record is written
+
+@contextlib.contextmanager
+def run_lock(dest):
+    """One paid call per run at a time (turn or user-proxy consultation): flock on <run>/.paid-call.lock, never waited
+    for. Not getting it refuses the call; it is not a cap and censors nothing."""
+    fd = os.open(Path(dest) / RUN_LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('another paid call of this run is in progress (%s held); no call — the run is not '
+                               'censored' % RUN_LOCK)
+        yield
+    finally:
+        os.close(fd)
 
 CALL_KINDS = ('turn', 'user-proxy')                   # the kinds of paid call a cap record names (censored.json 'call')
 
@@ -1400,10 +1512,16 @@ def censor(dest, state, when, call):
 
 def limit_gate(dest, next_is_feedback, write=True, call='turn'):
     """Single gate before every paid call of a run (turns and user-proxy consultations). A censored run accepts no
-    further call; reaching a cap now censors the run. Artifacts are never removed."""
+    further call; reaching a cap now censors the run. A call whose length is unconfirmed (call_time 'unresolved') and
+    whose stopped container cannot supply its end refuses the call without censoring. Artifacts are never removed.
+    Callers hold run_lock around the gate and the call."""
     if (dest / 'censored.json').exists():
         raise RuntimeError('run is %s; no further paid call (see censored.json)' % json.loads((dest / 'censored.json').read_text())['status'])
-    state = limit_state(dest, next_is_feedback)
+    state = resolved_state(dest, next_is_feedback)
+    if state['time']['unresolved']:                   # an estimate never decides a cap: refuse without censoring
+        raise RuntimeError('paid call time cannot be confirmed for %s (no end in the records and no stopped '
+                           'container to read it from); no call, the run is not censored — report to the main agent'
+                           % json.dumps(state['time']['unresolved'], ensure_ascii=False))
     if state['reached']:
         if write:
             censor(dest, state, 'before call', call)
@@ -1411,8 +1529,8 @@ def limit_gate(dest, next_is_feedback, write=True, call='turn'):
     return state
 
 def call_timeout(requested, state):
-    """A single paid call never runs past the run's wall-clock cap: the requested timeout reduced to the remainder
-    (rounded up, so a call stopped at that point has reached the cap)."""
+    """A single paid call never runs past the run's time cap: the requested timeout reduced to the remaining paid call
+    time (call_time; rounded up, so a call stopped at that point has reached the cap)."""
     return max(1, min(requested, math.ceil(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'])))
 
 BUDGET_CHECK_SECONDS = 30                             # how often a running turn's token estimate is recomputed
@@ -1561,12 +1679,17 @@ class TurnBudgetMonitor(threading.Thread):
         except BaseException as exc:                    # the watch on the caller's side sees the dead thread
             self.crash = '%s: %s' % (type(exc).__name__, str(exc)[:300])
 
-def watch_turn(name, prompt, stdout, stderr, timeout, monitor, poll=1.0):
+def watch_turn(name, prompt, stdout, stderr, timeout, monitor, poll=1.0, timing=None):
     """Run the turn (docker start --attach) in a worker thread and watch it here: the budget monitor must stay alive
     and keep its heartbeat (HEARTBEAT_FACTOR check intervals); otherwise this side stops the container and says why.
+    timing (dict) receives the paid call's length: call_seconds (time.monotonic) from just before docker start to
+    just after it returned (on a timeout: after the container was stopped), with the wall-clock call_started_at and
+    call_finished_at. Collection afterwards is not part of it.
     Returns (process result, timeout record or None, watchdog record or None)."""
     box = {}
+    timing = {} if timing is None else timing
     def work():
+        timing['call_started_at'], began = utc(), time.monotonic()
         try:
             box['proc'] = subprocess.run(['docker', 'start', '--attach', '--interactive', name], input=prompt,
                                          stdout=stdout, stderr=stderr, check=False, timeout=timeout)
@@ -1575,6 +1698,8 @@ def watch_turn(name, prompt, stdout, stderr, timeout, monitor, poll=1.0):
             box['proc'] = SimpleNamespace(returncode=124)
         except BaseException as exc:
             box['error'] = exc
+        finally:
+            timing['call_seconds'], timing['call_finished_at'] = time.monotonic() - began, utc()
     worker = threading.Thread(target=work, daemon=True)
     monitor.start()
     worker.start()
@@ -1638,13 +1763,14 @@ def container_finished_at(inspect_stdout):
         return None
 
 def stops_at_run_cap(requested, state):
-    """Whether the call's timeout is the run's remaining time (not a smaller requested limit)."""
-    return call_timeout(requested, state) < requested
+    """Whether the call's timeout is the run's remaining time (not a smaller requested limit). A remainder equal to
+    the requested timeout is the cap too (a first turn given the default 28,800 s)."""
+    return math.ceil(LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds']) <= requested
 
 def record_overshoot(dest, call):
     """After a call of kind call ('turn' or 'user-proxy'): if the run went past a cap during it, censor the run and
     record by how much and in which kind of call."""
-    state = limit_state(dest)
+    state = resolved_state(dest)
     if state['overshoot']:
         state['reached'] = [status for key, status in CENSORED if key in state['overshoot']]
         return censor(dest, state, 'after call', call)
@@ -1687,6 +1813,14 @@ def precall_selftest_failures(dest):
     return found
 
 def turn(args):
+    """One paid turn; outside a dry run it holds the run's paid-call lock (run_lock) from the gate until its result
+    record is final."""
+    if args.dry_run:
+        return run_turn(args)
+    with run_lock(location(args)):
+        return run_turn(args)
+
+def run_turn(args):
     dest = location(args)
     manifest = json.loads((dest / 'manifest.json').read_text())
     if manifest['run_id'] != args.run_id or Path(manifest['workspace']).resolve() != dest / 'workspace':
@@ -1742,7 +1876,8 @@ def turn(args):
             record_precall_selftest_failure(dest, pre, kind, counts_as)
             raise RuntimeError('hook self-test failed before the call: ' + json.dumps(pre, ensure_ascii=False))
     if pre is not None:
-        # the self-test took wall-clock time: gate again and reduce the call to what remains after it
+        # gate again after the self-test (its own time is not a paid call and is not counted) and reduce the call to
+        # what remains; the run lock is held, so no other paid call of the run can have started meanwhile
         limits = limit_gate(dest, next_is_feedback=counts_as == 'feedback')
         timeout = call_timeout(args.timeout_seconds, limits)
     output = dest / 'turns' / turn_id
@@ -1756,6 +1891,7 @@ def turn(args):
     result = None
     failure = None
     stops = {'cap_stop': None}
+    timing = {}
     try:
         created = subprocess.run(command, capture_output=True, check=False)
         (output / 'create.stdout').write_bytes(created.stdout)
@@ -1764,7 +1900,7 @@ def turn(args):
             raise RuntimeError('docker create failed; see preserved stderr')
         monitor = TurnBudgetMonitor(name, output, dest, limits['used']['token_limit'], manifest.get('arm') == 3)
         with (output / 'stdout.jsonl').open('xb') as stdout, (output / 'stderr.txt').open('xb') as stderr:
-            proc, timed_out, watchdog = watch_turn(name, prompt, stdout, stderr, timeout, monitor)
+            proc, timed_out, watchdog = watch_turn(name, prompt, stdout, stderr, timeout, monitor, timing=timing)
         inspected = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False)
         (output / 'container-inspect.json').write_bytes(redact_inspect(inspected.stdout))
         stops = classify_stops(proc.returncode, container_finished_at(inspected.stdout), monitor.stop, timed_out,
@@ -1826,12 +1962,12 @@ def turn(args):
         if scan_error:
             error = (error + ' | ' if error else '') + 'secret scan failed: ' + scan_error
         try:
-            finalize_result(output, result, final, error, hits)
+            finalize_result(output, result, final, error, hits, timing)
             write_ledger(dest)
             if stops['cap_stop'] and not (dest / 'censored.json').exists():
                 # the runner stopped the turn at a cap during the call (token estimate or the 8-hour cap): the run is
                 # capped whatever the confirmed numbers say; the record names the stop, its basis and any other stop
-                state = limit_state(dest)
+                state = resolved_state(dest)
                 first = stops['cap_stop']
                 state['reached'] = ['CENSORED_BUDGET' if first['cap'] == 'token_limit' else 'CENSORED_TIME']
                 state['stopped_during_call'] = dict(first, confirmed_usage='from the ledger after the turn (used above)')

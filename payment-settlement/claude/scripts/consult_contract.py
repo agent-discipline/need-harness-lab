@@ -5,11 +5,13 @@ The proxy model is the agreed launch.USER_PROXY_MODEL; readiness must carry it a
 Output goes to <runs>/<run-id>/consults/NNNN so the run ledger counts the proxy with every other role.
 """
 import argparse
+import contextlib
 import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +85,11 @@ def main():
     p.add_argument('--timeout-seconds', type=int, default=1800)
     p.add_argument('--dry-run', action='store_true')
     a = p.parse_args()
+    with contextlib.ExitStack() as held:                  # the run's paid-call lock, released on every way out
+        return consult(a, p, held)
+
+
+def consult(a, p, held):
     ready = json.loads(a.readiness.read_text())
     if ready.get('user_proxy_model') != launch.USER_PROXY_MODEL:
         p.error('readiness does not carry the agreed user_proxy_model %s; freeze it before any proxy call' % launch.USER_PROXY_MODEL)
@@ -91,11 +98,13 @@ def main():
     try:
         run, out = consult_dir(a.runs, a.run_id)
         image = run_image(run)
+        if not a.dry_run:                                 # one paid call per run at a time (same lock as launch.py turn)
+            held.enter_context(launch.run_lock(run))
         # the run's caps cover the proxy too (same gate as the runner's turns; a censored run gets no consultation)
         limits = launch.limit_gate(run, next_is_feedback=False, write=not a.dry_run, call='user-proxy')
     except (OSError, ValueError, RuntimeError) as exc:
         p.error(str(exc))
-    timeout = launch.call_timeout(a.timeout_seconds, limits)      # never past the run's wall-clock cap
+    timeout = launch.call_timeout(a.timeout_seconds, limits)      # never past the run's remaining paid call time
     env_file = a.env_file.resolve()
     token = launch.read_token(env_file)
     prompt, packet = build_prompt(a.questions)
@@ -109,13 +118,14 @@ def main():
     if a.dry_run:
         print(json.dumps(dict(invocation, prompt_bytes=len(prompt.encode()), output=str(out)), indent=2, ensure_ascii=False))
         return 0
+    invocation['started_at'] = launch.utc()
     out.mkdir(parents=True, exist_ok=False)
     (out / 'packet').mkdir()
     for file, content in packet.items():
         (out / 'packet' / file).write_text(content)
     (out / 'prompt.txt').write_text(prompt)
     (out / 'invocation.json').write_text(json.dumps(invocation, indent=2, ensure_ascii=False) + '\n')
-    code, error, completed = None, None, False
+    code, error, completed, timing = None, None, False, {}
     # written first so an interrupted call is visible to the run ledger as an incomplete (not a zero) consultation
     usage = {'run_id': a.run_id, 'role': 'user-proxy', 'requested_model': a.model, 'session_id': session_id,
              'usage': None, 'usage_unobserved': True, 'usage_complete': False, 'cost_usd': None}
@@ -125,12 +135,17 @@ def main():
         if created.returncode:
             raise RuntimeError('docker create failed: ' + created.stderr.decode(errors='replace')[-500:])
         with (out / 'stdout.jsonl').open('xb') as stdout, (out / 'stderr.txt').open('xb') as stderr:
+            # the paid call's length (launch.call_time): from just before docker start to just after it returned (on a
+            # timeout: after the container was stopped); collection and the scan below are not part of it
+            timing['call_started_at'], began = launch.utc(), time.monotonic()
             try:
                 code = subprocess.run(invocation['start'], input=prompt.encode(), stdout=stdout, stderr=stderr,
                                       check=False, timeout=timeout).returncode
             except subprocess.TimeoutExpired:
                 subprocess.run(['docker', 'stop', '--time', '5', name], capture_output=True, check=False)
                 code = 124
+            finally:
+                timing['call_seconds'], timing['call_finished_at'] = time.monotonic() - began, launch.utc()
         copied = subprocess.run(['docker', 'cp', name + ':' + launch.CONFIG_DST + '/projects', str(out / 'projects')],
                                 capture_output=True, check=False)
         events, ids, incomplete, stats = [], [], [{'reason': 'transcript copy failed (docker cp rc=%s)' % copied.returncode}], {}
@@ -164,6 +179,8 @@ def main():
             (out / 'SECRET-LEAK.txt').write_text('credential found and redacted in: ' + ', '.join(hits) + '\nrotate the token now\n')
         # the call's outcome is part of the record: only a completed consultation permits an answer turn
         final = json.loads((out / 'usage.json').read_text())       # re-read after the scan (already redacted)
+        final['finished_at'] = launch.utc()                         # end of the record (call_seconds absent: launch.call_time)
+        final.update(timing)
         if error:
             final['error'] = error
         (out / 'usage.json').write_text(json.dumps(final, indent=2, ensure_ascii=False) + '\n')

@@ -1127,7 +1127,7 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(result['role_files'], {'implementer': 'events.role-implementer.jsonl', 'worker': 'events.role-worker.jsonl'})
 
 class RunLimitTest(unittest.TestCase):
-    """One gate before every paid call: tokens of all roles, wall clock since the first call, evaluator feedback deliveries."""
+    """One gate before every paid call: tokens of all roles, paid call time (sum of call durations), evaluator feedback deliveries."""
 
     def make_run(self, root, ok_turns=1, tokens_per_turn=10, started=None, arm=1):
         dest = root / 'a'
@@ -1139,7 +1139,7 @@ class RunLimitTest(unittest.TestCase):
             t = dest / 'turns' / ('%04d' % n)
             t.mkdir()
             (t / 'invocation.json').write_text(json.dumps({'started_at': start.isoformat(), 'turn_kind': 'initial' if n == 1 else 'feedback'}))
-            (t / 'result.json').write_text(json.dumps({'status': 'ok', 'usage_complete': True,
+            (t / 'result.json').write_text(json.dumps({'status': 'ok', 'usage_complete': True, 'finished_at': launch.utc(),
                                                        'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}}))
             usage = {'input_tokens': tokens_per_turn, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}
             (t / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'r%d' % n, 'model': 'm', 'role': 'implementer',
@@ -1167,7 +1167,7 @@ class RunLimitTest(unittest.TestCase):
             consult.mkdir(parents=True)
             (consult / 'events.jsonl').write_text(json.dumps({'type': 'message', 'id': 'px', 'model': 'x', 'role': 'user-proxy', 'turn': 'p',
                 'usage': {'input_tokens': 5_000_000, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0}}) + '\n')
-            (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0}))
+            (consult / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0, 'call_seconds': 0}))
             error, run = self.call(root, dry_run=True)                 # dry run reports, never writes
             self.assertIsNotNone(error)
             self.assertFalse((dest / 'censored.json').exists())
@@ -1195,6 +1195,215 @@ class RunLimitTest(unittest.TestCase):
             state = launch.limit_state(dest)
             self.assertEqual(state['reached'], [])
             self.assertLessEqual(launch.LIMITS['time_limit_seconds'] - state['used']['time_limit_seconds'], 11)
+
+    # Decision 2026-11-19 (after pilot 04): the 8-hour cap counts only the paid calls (turns, user-proxy
+    # consultations), each from its start to its end; judging, waiting and reporting between calls are not counted.
+    def make_spans(self, root, turns, consults=()):
+        """turns/consults: [(start, end or None)]; end None = the call left no end record."""
+        dest = self.make_run(root, ok_turns=len(turns))
+        for n, (start, end) in enumerate(turns, 1):
+            t = dest / 'turns' / ('%04d' % n)
+            inv = json.loads((t / 'invocation.json').read_text())
+            (t / 'invocation.json').write_text(json.dumps(dict(inv, started_at=start.isoformat(),
+                                                               create=['docker', 'create', '--name', 'c-%04d' % n, 'img'])))
+            if end is None:
+                (t / 'result.json').unlink()
+            else:
+                res = json.loads((t / 'result.json').read_text())
+                (t / 'result.json').write_text(json.dumps(dict(res, finished_at=end.isoformat())))
+        for n, (start, end) in enumerate(consults, 1):
+            c = dest / 'consults' / ('%04d' % n)
+            c.mkdir(parents=True)
+            (c / 'invocation.json').write_text(json.dumps({'role': 'user-proxy', 'started_at': start.isoformat(),
+                                                           'create': ['docker', 'create', '--name', 'p-%04d' % n, 'img']}))
+            usage = {'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0}
+            if end is not None:
+                usage['finished_at'] = end.isoformat()
+            (c / 'usage.json').write_text(json.dumps(usage))
+        return dest
+
+    def test_long_gaps_between_calls_do_not_count_toward_the_time_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            # five one-hour turns, three hours apart: 17 hours of wall clock, 5 hours of turns
+            turns = [(now - timedelta(hours=17 - 4 * i), now - timedelta(hours=16 - 4 * i)) for i in range(5)]
+            dest = self.make_spans(Path(tmp), turns)
+            state = launch.limit_gate(dest, next_is_feedback=True)
+            self.assertEqual(state['reached'], [])
+            self.assertAlmostEqual(state['used']['time_limit_seconds'], 5 * 3600, delta=1)
+            self.assertFalse((dest / 'censored.json').exists())
+
+    def test_turn_and_user_proxy_time_reaching_the_cap_refuses_the_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            day = now - timedelta(days=2)
+            # 7h59m of turns + a one-minute user-proxy consultation = exactly 8 hours of paid calls, days ago
+            dest = self.make_spans(Path(tmp), [(day, day + timedelta(hours=7, minutes=59))],
+                                   consults=[(day + timedelta(hours=9), day + timedelta(hours=9, minutes=1))])
+            state = launch.limit_state(dest)
+            self.assertEqual(state['used']['time_limit_seconds'], 28800)
+            error, run = self.call(Path(tmp))
+            self.assertIn('CENSORED_TIME', str(error))
+            run.assert_not_called()
+            record = json.loads((dest / 'censored.json').read_text())
+            self.assertEqual((record['status'], record['first']['when']), ('CENSORED_TIME', 'before call'))
+
+    def test_the_call_timeout_is_the_remaining_turn_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            day = now - timedelta(days=1)
+            dest = self.make_spans(Path(tmp), [(day, day + timedelta(seconds=28800 - 100))])   # 100 s of turn time left
+            root, seen = Path(tmp), []
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    seen.append(kw.get('timeout'))
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=7200, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.suppress(RuntimeError):
+                launch.turn(args)
+            self.assertEqual(seen, [100])                                       # requested 7200, reduced to the remainder
+            inv = json.loads((dest / 'turns/0002/invocation.json').read_text())
+            self.assertEqual(inv['effective_timeout_seconds'], 100)
+
+    @staticmethod
+    def inspect(states):
+        """A fake docker: `docker inspect <name>` answers with states[name] (a docker State dict), or fails (gone)."""
+        calls = []
+        def run(cmd, **kw):
+            calls.append(list(cmd))
+            if cmd[:2] == ['docker', 'inspect'] and cmd[2] in states:
+                return SimpleNamespace(returncode=0, stdout=json.dumps([{'State': states[cmd[2]]}]).encode(), stderr=b'')
+            return SimpleNamespace(returncode=1, stdout=b'', stderr=b'Error: No such object')
+        return run, calls
+
+    def test_limit_state_lists_a_call_without_an_end_record_and_never_estimates_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            dest = self.make_spans(Path(tmp), [(now - timedelta(hours=9), now - timedelta(hours=8)), (now - timedelta(hours=2), None)])
+            state = launch.limit_state(dest)                                    # read only: never raises
+            self.assertEqual(state['used']['time_limit_seconds'], 3600)        # the confirmed turn only, nothing estimated
+            self.assertTrue(state['time']['seconds_are_lower_bound'])
+            self.assertEqual([(u['call'], u['reason'], u['container']) for u in state['time']['unresolved']],
+                             [('turn/0002', 'no end record', 'c-0002')])
+
+    def test_gate_refuses_without_censoring_when_the_call_container_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            dest = self.make_spans(Path(tmp), [(now - timedelta(hours=9), now - timedelta(hours=8))],
+                                   consults=[(now - timedelta(minutes=10), None)])
+            run, calls = self.inspect({})
+            with patch.object(launch.subprocess, 'run', side_effect=run), self.assertRaises(RuntimeError) as ctx:
+                launch.limit_gate(dest, next_is_feedback=False, call='user-proxy')
+            self.assertIn('user-proxy/0001', str(ctx.exception))
+            self.assertIn('report to the main agent', str(ctx.exception))
+            self.assertIn(['docker', 'inspect', 'p-0001'], calls)
+            self.assertFalse((dest / 'censored.json').exists())                # an unconfirmed length never caps the run
+
+    def test_gate_refuses_while_the_call_container_is_still_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            dest = self.make_spans(Path(tmp), [(now - timedelta(hours=1), None)])
+            run, _ = self.inspect({'c-0001': {'Status': 'running', 'Running': True, 'StartedAt': '2026-11-19T00:00:00Z',
+                                              'FinishedAt': '0001-01-01T00:00:00Z'}})
+            with patch.object(launch.subprocess, 'run', side_effect=run), self.assertRaises(RuntimeError) as ctx:
+                launch.limit_gate(dest, next_is_feedback=False)
+            self.assertIn('turn/0001', str(ctx.exception))
+            self.assertFalse((dest / 'censored.json').exists())
+
+    def test_gate_takes_the_end_of_a_stopped_call_container(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            start = now - timedelta(hours=3)
+            dest = self.make_spans(Path(tmp), [(start, None)])
+            ended = (start + timedelta(minutes=50)).astimezone(launch.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            run, _ = self.inspect({'c-0001': {'Status': 'exited', 'Running': False, 'StartedAt': '2026-11-19T00:00:00Z',
+                                              'FinishedAt': ended}})
+            with patch.object(launch.subprocess, 'run', side_effect=run):
+                state = launch.limit_gate(dest, next_is_feedback=False)
+            self.assertAlmostEqual(state['used']['time_limit_seconds'], 50 * 60, delta=0.01)
+            self.assertEqual(state['time']['unresolved'], [])
+            [source] = state['time']['ends_from_container']
+            self.assertEqual((source['call'], source['container'], source['source']),
+                             ('turn/0001', 'c-0001', 'docker inspect State.FinishedAt'))
+
+    def test_an_end_before_the_start_is_unresolved_not_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = launch.datetime.now(launch.timezone.utc)
+            dest = self.make_spans(Path(tmp), [(now - timedelta(hours=1), now - timedelta(hours=2))])   # the clock went back
+            state = launch.limit_state(dest)
+            self.assertEqual([u['reason'] for u in state['time']['unresolved']], ['end before start (clock went back)'])
+            run, _ = self.inspect({})
+            with patch.object(launch.subprocess, 'run', side_effect=run), self.assertRaises(RuntimeError):
+                launch.limit_gate(dest, next_is_feedback=False)
+            self.assertFalse((dest / 'censored.json').exists())
+            # the measured call_seconds is the length when present, whatever the wall-clock stamps say
+            res = dest / 'turns/0001/result.json'
+            res.write_text(json.dumps(dict(json.loads(res.read_text()), call_seconds=42.5)))
+            state = launch.limit_state(dest)
+            self.assertEqual((state['used']['time_limit_seconds'], state['time']['unresolved']), (42.5, []))
+
+    def test_a_second_paid_call_of_the_run_is_refused_while_one_holds_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root)
+            with launch.run_lock(dest):
+                error, run = self.call(root)
+                self.assertIn('another paid call of this run is in progress', str(error))
+                run.assert_not_called()
+                self.assertFalse((dest / 'censored.json').exists())
+                self.assertEqual(sorted(p.name for p in (dest / 'turns').iterdir()), ['0001'])
+            with launch.run_lock(dest):                                         # released again after the holder ends
+                pass
+
+    def test_a_first_turn_stopped_at_the_default_28800_seconds_is_a_run_cap_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root, ok_turns=0)
+            seen = {}
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'start']:
+                    seen['timeout'] = kw.get('timeout')
+                    raise subprocess.TimeoutExpired(cmd, kw.get('timeout'))
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=False, kind=None,
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=28800, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=False), \
+                 patch.object(launch, 'volume_listing', return_value={}), contextlib.redirect_stdout(io.StringIO()), \
+                 self.assertRaises(RuntimeError):
+                launch.turn(args)
+            self.assertEqual(seen['timeout'], 28800)                           # remainder == requested: the run cap
+            result = json.loads((dest / 'turns/0001/result.json').read_text())
+            self.assertTrue(result['stopped_at_run_time_cap'])
+            self.assertEqual((result['runner_stops']['cap_stop']['cap'], result['runner_stops']['cap_stop']['basis']),
+                             ('time_limit_seconds', 'remaining run time elapsed'))
+            censored = json.loads((dest / 'censored.json').read_text())
+            self.assertEqual((censored['status'], censored['first']['stopped_during_call']['cap']), ('CENSORED_TIME', 'time_limit_seconds'))
+
+    def test_collection_after_the_call_is_not_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = self.make_run(root)
+            def fake_run(cmd, **kw):
+                if cmd[:2] == ['docker', 'cp']:
+                    time.sleep(1.5)                                             # slow collection after the call
+                return SimpleNamespace(returncode=0, stdout=b'[]', stderr=b'')
+            args = SimpleNamespace(runs=root, run_id='a', env_file=env_file(root), prompt=root / 'prompt', resume=True, kind='feedback',
+                                   dry_run=False, cache_policy='observed-cache', timeout_seconds=7200, max_turns=None, max_budget_usd=None)
+            with patch.object(launch.subprocess, 'run', side_effect=fake_run), patch.object(launch, 'session_exists', return_value=True), \
+                 patch.object(launch, 'volume_listing', return_value={}), contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.suppress(RuntimeError):
+                launch.turn(args)
+            result = json.loads((dest / 'turns/0002/result.json').read_text())
+            invocation = json.loads((dest / 'turns/0002/invocation.json').read_text())
+            record_span = (launch.parse_time(result['finished_at']) - launch.parse_time(invocation['started_at'])).total_seconds()
+            self.assertGreaterEqual(record_span, 1.5)
+            self.assertLess(result['call_seconds'], 1.0)
+            self.assertLessEqual(launch.parse_time(result['call_started_at']), launch.parse_time(result['call_finished_at']))
+            used = launch.limit_state(dest)['used']['time_limit_seconds']
+            self.assertLess(used, 1.0 + 0.01)                                  # turn 1 (instant) + the call itself
 
     def test_a_turn_still_running_at_the_run_cap_is_stopped_and_the_run_censored(self):
         # no per-turn limit (decision 2026-11-18): only the 8-hour run cap ends a turn, and it does end it
@@ -1586,12 +1795,12 @@ class TurnKindTest(unittest.TestCase):
                 invocation['turn_kind'] = kind
             (t / 'invocation.json').write_text(json.dumps(invocation))
             if status:
-                (t / 'result.json').write_text(json.dumps({'status': status, 'usage_complete': True,
+                (t / 'result.json').write_text(json.dumps({'status': status, 'usage_complete': True, 'finished_at': launch.utc(),
                                                            'cost': {'pinned_session_usd': 0.1, 'reviewer_applicable': False}}))
         for n in range(1, consults + 1):
             c = dest / 'consults' / ('%04d' % n)
             c.mkdir(parents=True)
-            (c / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0}))
+            (c / 'usage.json').write_text(json.dumps({'usage_complete': True, 'cost_usd': 0.0, 'exit_code': 0, 'call_seconds': 0}))
             (c / 'response.txt').write_text('답변 %d' % n)
         (root / 'prompt').write_text('next')
         return dest
@@ -1700,7 +1909,9 @@ class TurnKindTest(unittest.TestCase):
             counts = launch.limit_state(dest)['turn_kinds']
             self.assertEqual(counts['delivered'], {'initial': 1, 'feedback': 28, 'answer': 0})
             self.assertEqual(counts['declared'], {'initial': 1, 'feedback': 29, 'answer': 0, 'recovery': 2})
-            error, _, _, printed = self.call(root, 'recovery')           # the 29th feedback delivery is still open
+            # the cut-short turn left no end record: its stopped container gives the end (FIX-1; without it the gate refuses)
+            with patch.object(launch, 'container_end', return_value=self.STOPPED()):
+                error, _, _, printed = self.call(root, 'recovery')       # the 29th feedback delivery is still open
             self.assertIsNone(error)
             self.assertEqual(json.loads(printed)['counts_as'], 'feedback')
         with tempfile.TemporaryDirectory() as tmp:
@@ -1712,6 +1923,11 @@ class TurnKindTest(unittest.TestCase):
             run.assert_not_called()
             self.assertIn('CENSORED_TURNS', str(self.call(root, 'feedback', dry_run=False)[0]))
 
+    @staticmethod
+    def STOPPED():
+        """docker State of a call container that has exited (just now)."""
+        return {'status': 'exited', 'started_at': None, 'finished_at': launch.datetime.now(launch.timezone.utc)}
+
     def test_after_a_turn_that_did_not_end_ok_only_recovery_is_accepted(self):
         for last in ('failed', None):                                    # None: cut short, no result.json
             with tempfile.TemporaryDirectory() as tmp:
@@ -1721,7 +1937,12 @@ class TurnKindTest(unittest.TestCase):
                     error, run, _, _ = self.call(root, kind, dry_run=False)
                     self.assertIn('must be --kind recovery', str(error), (last, kind))
                     run.assert_not_called()
-                error, _, _, printed = self.call(root, 'recovery')
+                # a cut-short turn (no result.json): its stopped container gives the end; without one the gate refuses
+                if last is None:
+                    refused = self.call(root, 'recovery')[0]
+                    self.assertIn('report to the main agent', str(refused))
+                with patch.object(launch, 'container_end', return_value=self.STOPPED()):
+                    error, _, _, printed = self.call(root, 'recovery')
                 self.assertIsNone(error)
                 self.assertEqual(json.loads(printed)['counts_as'], 'feedback')   # the failed feedback is counted once recovered
                 self.assertFalse((dest / 'censored.json').exists())

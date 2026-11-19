@@ -958,7 +958,9 @@ def write_turn(dest, i, started, status, events, kind, counts_as, prompt=None):
     if kind is not None:
         invocation.update(turn_kind=kind, counts_as=counts_as)
     (d / 'invocation.json').write_text(json.dumps(invocation))
-    (d / 'result.json').write_text(json.dumps({'status': status, 'usage_complete': True}))
+    # finished when written: a turn record as the runner leaves it (started_at .. finished_at is its length)
+    (d / 'result.json').write_text(json.dumps({'status': status, 'usage_complete': True,
+                                               'finished_at': datetime.now(timezone.utc).isoformat()}))
     (d / 'events.jsonl').write_text(''.join(json.dumps({'id': rid, 'role': role, 'usage': u, 'model': OPUS, 'turn': '%04d' % i}) + '\n'
                                             for rid, role, u in events))
     return d
@@ -1556,11 +1558,17 @@ def numbers_in(value):
 
 
 def age_first_turn(dest, started):
-    """Wall-clock time passes: the run's first call now lies at `started`."""
+    """Paid call time passes: the run's first call started at `started` and lasted until now (decision 2026-11-19: the
+    time cap counts the calls' lengths — its measured call_seconds and its start..end stamps both say so)."""
     inv = dest / 'turns' / '0001' / 'invocation.json'
     data = json.loads(inv.read_text())
     data['started_at'] = started.isoformat()
     inv.write_text(json.dumps(data))
+    res = dest / 'turns' / '0001' / 'result.json'
+    if res.exists():
+        now = datetime.now(timezone.utc)
+        res.write_text(json.dumps(dict(json.loads(res.read_text()), finished_at=now.isoformat(),
+                                       call_seconds=(now - started).total_seconds())))
 
 
 class FailedFeedbackIsNotSkipped(unittest.TestCase):
@@ -1679,7 +1687,7 @@ class AnswerNeedsCompletedConsultation(unittest.TestCase):
         d = dest / 'consults' / '0001'
         d.mkdir(parents=True)
         (d / 'response.txt').write_text('답변')
-        (d / 'usage.json').write_text(json.dumps({'role': 'user-proxy', 'usage_complete': True}))
+        (d / 'usage.json').write_text(json.dumps({'role': 'user-proxy', 'usage_complete': True, 'call_seconds': 0}))
         error, paid = attempt_turn(root, 'hand', resume=True, kind='answer')
         self.assertIsNotNone(error)
         self.assertEqual(paid, [])
@@ -3879,7 +3887,13 @@ class TurnTimeoutIsTheRunCap(unittest.TestCase):
         init_run(self.root, 'late', 1)
         drive_turn(self.root, 'late', timeout=None, via_cli=True, reported=U1,
                    projects={'-workspace/s.jsonl': [assistant('t1', OPUS, U1)]})
-        age_first_turn(self.root / '.runs/late', datetime.now(timezone.utc) - timedelta(hours=2))
+        # decision 2026-11-19: the time left is 8 hours minus the paid call time; the first turn lasted exactly 2 hours,
+        # three hours ago (the hour since then is not counted)
+        start = datetime.now(timezone.utc) - timedelta(hours=3)
+        age_first_turn(self.root / '.runs/late', start)
+        result = self.root / '.runs/late/turns/0001/result.json'
+        result.write_text(json.dumps(dict(json.loads(result.read_text()), finished_at=(start + timedelta(hours=2)).isoformat(),
+                                          call_seconds=7200)))
         record = []
         _, _, error, console = drive_turn(self.root, 'late', resume=True, kind='feedback', timeout=None, via_cli=True,
                                           record=record, reported=U2,
