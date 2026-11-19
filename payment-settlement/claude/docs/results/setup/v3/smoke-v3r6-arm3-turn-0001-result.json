@@ -1,0 +1,324 @@
+{
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade",
+    "total_cost_usd": 0.40914860000000003,
+    "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 24606,
+      "cache_read_input_tokens": 23903,
+      "output_tokens": 266,
+      "server_tool_use": {
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      }
+    },
+    "modelUsage": {
+      "claude-fable-5-2": {
+        "inputTokens": 4,
+        "outputTokens": 266,
+        "cacheReadInputTokens": 23903,
+        "cacheCreationInputTokens": 24606,
+        "webSearchRequests": 0,
+        "costUSD": 0.40914860000000003,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 109,
+        "cacheCreationEphemeral5mInputTokens": 0,
+        "cacheCreationEphemeral1hInputTokens": 24606,
+        "canonicalModel": "claude-fable-5-2",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "num_turns": 2,
+    "duration_ms": 4362,
+    "duration_api_ms": 3561,
+    "session_ids": [
+      "009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade"
+    ],
+    "result_events": 1,
+    "subtypes": [
+      "success"
+    ],
+    "any_error": false
+  },
+  "results": [
+    {
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade",
+      "total_cost_usd": 0.40914860000000003,
+      "usage": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 24606,
+        "cache_read_input_tokens": 23903,
+        "output_tokens": 266,
+        "output_tokens_details": {
+          "thinking_tokens": 109
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 24606,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "global",
+        "iterations": [
+          {
+            "input_tokens": 2,
+            "output_tokens": 59,
+            "cache_read_input_tokens": 23903,
+            "cache_creation_input_tokens": 703,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 703
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "claude-fable-5-2": {
+          "inputTokens": 4,
+          "outputTokens": 266,
+          "cacheReadInputTokens": 23903,
+          "cacheCreationInputTokens": 24606,
+          "webSearchRequests": 0,
+          "costUSD": 0.40914860000000003,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "thinkingTokens": 109,
+          "cacheCreationEphemeral5mInputTokens": 0,
+          "cacheCreationEphemeral1hInputTokens": 24606,
+          "canonicalModel": "claude-fable-5-2",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "num_turns": 2,
+      "duration_ms": 4362,
+      "duration_api_ms": 3561
+    }
+  ],
+  "assistant_messages": 3,
+  "stream_models": [
+    "claude-fable-5-2"
+  ],
+  "result_count": 1,
+  "unparsed_lines": 0,
+  "background_tasks_killed": [],
+  "exit_code": 0,
+  "session_id": "009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade",
+  "session_id_confirmed": true,
+  "request_ids": [
+    "req_011ChBSMPHWUM5r6Z5qrLWsy",
+    "req_011ChBSMbAdipzZCkm4SUnzg"
+  ],
+  "event_count": 2,
+  "incomplete": [],
+  "transcript_stats": {
+    "files": 1,
+    "unparsable_lines": 0,
+    "assistant_lines": 3,
+    "assistant_without_requestId": 0,
+    "session_ids": [
+      "009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade"
+    ]
+  },
+  "reviewer": {
+    "log_rc": 1,
+    "log_absent": true,
+    "log_unknown": false,
+    "calls_total": 0,
+    "calls_this_turn": 0,
+    "calls_finished_total": 0,
+    "calls_succeeded_this_turn": 0,
+    "calls_failed_this_turn": 0,
+    "requests_refused_this_turn": [],
+    "calls_cancelled_this_turn": [],
+    "failed_attempts_without_requests": [],
+    "transcript_files": 0,
+    "projects_rc": 1,
+    "projects_absent": true,
+    "reviewer_dir_rc": 0,
+    "reviewer_dir_names": [],
+    "reviewer_dir_leftover": null,
+    "transcript_stats": {},
+    "event_count": 0,
+    "incomplete": 0,
+    "raw_rc": 1,
+    "call_costs_usd": {},
+    "cost_unobserved": [],
+    "cost_usd": 0
+  },
+  "cost": {
+    "pinned_session_usd": 0.40914860000000003,
+    "pinned_session_usd_semantics": "cumulative",
+    "reviewer_usd": 0,
+    "reviewer_applicable": true,
+    "cost_complete": true
+  },
+  "reviewer_usage_pending": false,
+  "web_requests": {
+    "web_fetch_requests": 0,
+    "web_search_requests": 0
+  },
+  "observed_tools_and_effort": {
+    "by_role": {
+      "pm": {
+        "web_tool_uses": 0,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    "web_tool_uses_complete": true,
+    "source": "transcript tool_use blocks (WebSearch/WebFetch) and assistant perTurnEffort"
+  },
+  "usage_complete": true,
+  "usage_complete_note": "arm 3: every reviewer attempt this turn must have finished and left a transcript whose requests all carry usage (see reviewer / incomplete)",
+  "usage_cross_check": {
+    "reported": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 24606,
+      "cache_read_input_tokens": 23903,
+      "output_tokens": 266,
+      "server_tool_use": {
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      }
+    },
+    "main_sum": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 24606,
+      "cache_read_input_tokens": 23903,
+      "output_tokens": 266
+    },
+    "all_sum": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 24606,
+      "cache_read_input_tokens": 23903,
+      "output_tokens": 266
+    },
+    "main_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "all_delta": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "reviewer_sum": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    },
+    "sums_are_lower_bounds": false,
+    "result_events": 1,
+    "note": "reported = the four counters added over every result event of the turn (a turn may emit several); result.usage does not include subagent requests (pilot 01), so main_delta is the expected match and the run caps use only the request-level ledger; reviewer_sum is outside reported (None in arms 1/2: no reviewer; None in arm 3: reviewer log/transcripts unreadable)"
+  },
+  "transcript_models": [
+    "claude-fable-5-2"
+  ],
+  "roles": [
+    "pm"
+  ],
+  "actual_model": null,
+  "actual_model_note": "transcript models/modelUsage are client-observed; requested model is not proof.",
+  "finished_at": "2026-11-19T01:42:49.768847+00:00",
+  "role_files": {
+    "pm": "events.role-pm.jsonl"
+  },
+  "config_volume": {
+    "rc": 0,
+    "entries": [
+      "d .",
+      "d ./agents",
+      "d ./backups",
+      "d ./hooks",
+      "d ./hooks/tests",
+      "d ./hooks/tests/cases",
+      "d ./playbooks",
+      "d ./plugins",
+      "d ./plugins/store",
+      "d ./projects",
+      "d ./session-env",
+      "d ./session-env/009cbf1b-319c-4b0a-bd3b-ce32a5fe1ade",
+      "d ./sessions",
+      "d ./templates",
+      "f ./.claude.json",
+      "f ./.last-cleanup",
+      "f ./CLAUDE.md",
+      "f ./HISTORY.md",
+      "f ./agents/explorer.md",
+      "f ./backups/.claude.json.backup.1795052562354",
+      "f ./core.md",
+      "f ./hooks/capture-prompt.sh",
+      "f ./hooks/codex-scan.sh",
+      "f ./hooks/deploy.sh",
+      "f ./hooks/detect-layer.sh",
+      "f ./hooks/gate-guard.sh",
+      "f ./hooks/git-guard.sh",
+      "f ./hooks/reinject-mode.sh",
+      "f ./hooks/session-mode-guard.sh",
+      "f ./hooks/set-state.sh",
+      "f ./hooks/state-lib.sh",
+      "f ./hooks/task-mode-guard.sh",
+      "f ./hooks/tests/baseline.manifest",
+      "f ./hooks/tests/lib.sh",
+      "f ./hooks/tests/run.sh",
+      "f ./hooks/tests/tests.lock",
+      "f ./playbooks/design-taste.md",
+      "f ./playbooks/implementation-lazymode.md",
+      "f ./playbooks/issue-archive.md",
+      "f ./playbooks/open-source.md",
+      "f ./playbooks/refactoring.md",
+      "f ./playbooks/review.md",
+      "f ./plugins/store/cc-plugin-agents-md_builtin-b049b47b3618.json",
+      "f ./policy-limits.json",
+      "f ./policy-limits.json.signature.json",
+      "f ./policy-limits.json.stamp.json",
+      "f ./remote-settings.json",
+      "f ./remote-settings.json.synced-at",
+      "f ./settings.json",
+      "f ./templates/log.md",
+      "f ./templates/measurement-log.md",
+      "f ./templates/next.md",
+      "f ./templates/requirement-spec.md"
+    ],
+    "credentials_file_in_volume": false
+  },
+  "stopped_at_run_time_cap": false,
+  "timed_out": false,
+  "timeout_stop": null,
+  "stopped_at_token_cap_estimate": null,
+  "runner_stops": {
+    "cap_stop": null,
+    "other_stops": [],
+    "stop_requests_after_normal_end": []
+  },
+  "token_monitor": {
+    "last": null,
+    "crash": null,
+    "watchdog": null,
+    "failures_in_a_row": 0
+  },
+  "cli_status": "ok",
+  "status": "ok",
+  "secret_redactions": [],
+  "call_started_at": "2026-11-19T01:42:41.666495+00:00",
+  "call_seconds": 7.340589308005292,
+  "call_finished_at": "2026-11-19T01:42:49.007116+00:00"
+}
