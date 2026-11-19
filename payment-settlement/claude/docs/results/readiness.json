@@ -27,9 +27,9 @@
   "reasoning_effort": "high",
   "cache_policy": "observed-cache",
   "billed_cost": null,
-  "baseline_sha": "3198538b620df934c40b81ff3ae9d9e5eaf32006",
+  "baseline_sha": "900818001bc54b5308be4676576a9e31f1837767",
   "harness_sha": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
-  "contract_sha256": "9cd2d5bf773591e3a98770ea4b398f6bb52c06217823375b8992b593dd3d68bc",
+  "contract_sha256": "5fa42cd78b698fb5fac8ba6228341470dff8c2ca47999ef3ecb4f67f5d3e6b26",
   "image_digests": {
     "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
     "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
@@ -53,9 +53,9 @@
   "pilot_passed": false,
   "evidence": {
     "smoke_runs": {
-      "smoke-v3r6-arm1": {
+      "smoke-v3r7-arm1": {
         "arm": 1,
-        "manifest_sha256": "b95c0f12bcfac99a97b3395446ef267c8a7dfcf46ae5b3d13f96cafb89a59dec",
+        "manifest_sha256": "01a53d5bd60183b444a0a8f6f471be875a3f4dfdb6dee5e2812fec09842a2010",
         "ok_turns": 1,
         "turns": 1,
         "all_turns_ok_and_complete": true,
@@ -86,9 +86,9 @@
         "image_matches_runner": true,
         "reviewer_smoke_turns": []
       },
-      "smoke-v3r6-arm2": {
+      "smoke-v3r7-arm2": {
         "arm": 2,
-        "manifest_sha256": "51a7c43ba9d0c3e171b59b6a4f283d9e495f01ac64548769db7e73277499b38c",
+        "manifest_sha256": "e7a7b521e0d26ee158dd8e0e168b920bb6589959c075ca83849d02083233efb7",
         "ok_turns": 1,
         "turns": 1,
         "all_turns_ok_and_complete": true,
@@ -119,9 +119,9 @@
         "image_matches_runner": true,
         "reviewer_smoke_turns": []
       },
-      "smoke-v3r6-arm3": {
+      "smoke-v3r7-arm3": {
         "arm": 3,
-        "manifest_sha256": "5115094397908d01332b8343b09f2f0031e1d31610d6a2095ae39b3d8f2acd26",
+        "manifest_sha256": "a951d3c22f4ef130677bf6afe8ad4796165372c519bf4a87938a812946ad7781",
         "ok_turns": 1,
         "turns": 1,
         "all_turns_ok_and_complete": true,
@@ -153,9 +153,9 @@
         "image_matches_runner": true,
         "reviewer_smoke_turns": []
       },
-      "smoke-v3r6-arm3-reviewer": {
+      "smoke-v3r7-arm3-reviewer": {
         "arm": 3,
-        "manifest_sha256": "1b980167333cd5b37251b26d5bf8c35658f369a87a2952fc7e735188fae9154b",
+        "manifest_sha256": "dbfc27af273132c2eaab973966d398146d3cdd41971b0562879d2ac29edde2ef",
         "ok_turns": 1,
         "turns": 1,
         "all_turns_ok_and_complete": true,
@@ -190,16 +190,16 @@
         ],
         "image_matches_runner": true,
         "reviewer_smoke_turns": [
-          "smoke-v3r6-arm3-reviewer/0001"
+          "smoke-v3r7-arm3-reviewer/0001"
         ]
       }
     },
     "attested": {
       "harness_adapter_verified": {
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-manifest.json": "5115094397908d01332b8343b09f2f0031e1d31610d6a2095ae39b3d8f2acd26",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-invocation.json": "74f2bb6e8a7b8b137de5b471761bc9843992190b48b1a177cbfb21c0d1f770ac",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-result.json": "08a595c989708934963341f9a794f890f6c3271ccce2360a0642e983502c0269",
-        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-stdout.jsonl": "75fc48a00913b52767b17baf07113d954b6a7754ac959109cb5e519bc60fbcfe"
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r7-arm3-manifest.json": "a951d3c22f4ef130677bf6afe8ad4796165372c519bf4a87938a812946ad7781",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r7-arm3-turn-0001-invocation.json": "311a334e0464995baf4ad50c923b4a9d65d08778e131e20a43fec97c647f48c7",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r7-arm3-turn-0001-result.json": "fdceabaa5beb40d421c45d8d0fb11b5b212691747d0a8f5f97b96209adc16b3c",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r7-arm3-turn-0001-stdout.jsonl": "03b54e74d1ac97a1016b4e345e2cd66bc97db7f0d97e78bd1f3389bb7f42e4a6"
       },
       "acceptance_suite_verified": {
         "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt": "843c136ffa5d39bfcd37e6fa4cb7214e22bf99d42244e32e7060718ba1a71c46",
@@ -208,12 +208,12 @@
     },
     "pilot": null
   },
-  "frozen_at": "2026-11-19T01:45:07.892793+00:00",
+  "frozen_at": "2026-11-19T03:37:08.967210+00:00",
   "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed",
   "supersedes": {
-    "reason": "run 시간 상한을 유료 호출 시간의 합으로 계산(파일럿 04 뒤 사용자 결정 2026-11-19), run 단위 잠금, call_seconds 기록",
-    "at": "2026-11-19T01:45:07.892793+00:00",
-    "previous_contract_sha256": "8c3d66b252a11d7ee35522f69ecd873f36d493d6cb1c183befdcaa9521f93ef2",
+    "reason": "파일럿 검사를 사이클 1의 3번 조건 run에서 도출(사용자 결정 2026-11-19), 본 실험 init 개시 게이트",
+    "at": "2026-11-19T03:37:08.967210+00:00",
+    "previous_contract_sha256": "9cd2d5bf773591e3a98770ea4b398f6bb52c06217823375b8992b593dd3d68bc",
     "previous_image_digests": {
       "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
       "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
@@ -223,24 +223,24 @@
       "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
       "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
     },
-    "previous_frozen_at": "2026-11-18T10:16:09.043126+00:00",
+    "previous_frozen_at": "2026-11-19T01:45:07.892793+00:00",
     "archived": {
       "readiness.json": {
-        "archived_as": "readiness.superseded-2026-11-19T01-45-07.892793+00-00.json",
-        "sha256": "58e4da5f5f19ccd8ca1e0fc70b5092443e7ed6292e960a59e812a9295092a67c"
+        "archived_as": "readiness.superseded-2026-11-19T03-37-08.967210+00-00.json",
+        "sha256": "7909c4cc670f2575e612c3034ce3331b05f3505d37f7c10a934368625205731e"
       },
       "frozen-inputs.json": {
-        "archived_as": "frozen-inputs.superseded-2026-11-19T01-45-07.892793+00-00.json",
-        "sha256": "b8b1192bded9943b1e8d67ee75361eedeb5b4e759d0da21faebcf7ae55ac5dd4"
+        "archived_as": "frozen-inputs.superseded-2026-11-19T03-37-08.967210+00-00.json",
+        "sha256": "597fcaba2a598eada7b37f3f63e6c1322904ea27b35f87149916acb362a7b66f"
       }
     },
     "pilot_passed_reset": true,
     "changed_inputs": [
       "claude/runner/launch.py",
-      "claude/runner/test_launch.py",
       "claude/runner/test_spec_invariants.py",
-      "claude/scripts/consult_contract.py",
-      "claude/scripts/finish_run.py",
+      "claude/scripts/freeze_readiness.py",
+      "claude/scripts/preflight.py",
+      "claude/scripts/start_cycle.py",
       "claude/scripts/test_scripts.py",
       "claude/scripts/test_spec_invariants.py"
     ],

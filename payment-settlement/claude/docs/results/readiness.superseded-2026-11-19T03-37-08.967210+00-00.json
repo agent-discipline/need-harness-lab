@@ -1,0 +1,249 @@
+{
+  "protocol": "payment-settlement-v3-claude",
+  "provider": "claude-code",
+  "auth": "subscription-oauth-token",
+  "cli_version": "2.1.326",
+  "requested_models": {
+    "1": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "2": {
+      "model": "claude-opus-5-5",
+      "worker_model": null
+    },
+    "3": {
+      "model": "claude-fable-5-2",
+      "worker_model": "claude-opus-5-5"
+    }
+  },
+  "requested_reviewer_model": "claude-fable-5-2",
+  "user_proxy_model": "claude-opus-5-5",
+  "actual_models": {
+    "1": "claude-opus-5-5",
+    "2": "claude-opus-5-5",
+    "3": "claude-fable-5-2"
+  },
+  "reasoning_effort": "high",
+  "cache_policy": "observed-cache",
+  "billed_cost": null,
+  "baseline_sha": "3198538b620df934c40b81ff3ae9d9e5eaf32006",
+  "harness_sha": "7b0ef7b45aa88bab7d529f1ea1f61a69bbad6ce3",
+  "contract_sha256": "9cd2d5bf773591e3a98770ea4b398f6bb52c06217823375b8992b593dd3d68bc",
+  "image_digests": {
+    "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
+    "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+    "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+    "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+    "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+    "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+    "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+  },
+  "token_limit": 150000000,
+  "time_limit_seconds": 28800,
+  "feedback_limit": 30,
+  "isolation_verified": true,
+  "hook_enforcement_verified": true,
+  "oauth_token_source_verified": true,
+  "cache_observation_verified": true,
+  "usage_collector_verified": true,
+  "role_models_verified": true,
+  "acceptance_suite_verified": true,
+  "harness_adapter_verified": true,
+  "pilot_passed": false,
+  "evidence": {
+    "smoke_runs": {
+      "smoke-v3r6-arm1": {
+        "arm": 1,
+        "manifest_sha256": "b95c0f12bcfac99a97b3395446ef267c8a7dfcf46ae5b3d13f96cafb89a59dec",
+        "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
+        "observed_role_models": {
+          "implementer": [
+            "claude-opus-5-5"
+          ]
+        },
+        "role_model_check": {
+          "implementer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
+      },
+      "smoke-v3r6-arm2": {
+        "arm": 2,
+        "manifest_sha256": "51a7c43ba9d0c3e171b59b6a4f283d9e495f01ac64548769db7e73277499b38c",
+        "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
+        "observed_role_models": {
+          "implementer": [
+            "claude-opus-5-5"
+          ]
+        },
+        "role_model_check": {
+          "implementer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
+      },
+      "smoke-v3r6-arm3": {
+        "arm": 3,
+        "manifest_sha256": "5115094397908d01332b8343b09f2f0031e1d31610d6a2095ae39b3d8f2acd26",
+        "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
+        "observed_role_models": {
+          "pm": [
+            "claude-fable-5-2"
+          ]
+        },
+        "role_model_check": {
+          "pm": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "Task",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": []
+      },
+      "smoke-v3r6-arm3-reviewer": {
+        "arm": 3,
+        "manifest_sha256": "1b980167333cd5b37251b26d5bf8c35658f369a87a2952fc7e735188fae9154b",
+        "ok_turns": 1,
+        "turns": 1,
+        "all_turns_ok_and_complete": true,
+        "observed_role_models": {
+          "pm": [
+            "claude-fable-5-2"
+          ],
+          "reviewer": [
+            "claude-fable-5-2"
+          ]
+        },
+        "role_model_check": {
+          "pm": true,
+          "reviewer": true
+        },
+        "observed_tools": [
+          "Bash",
+          "Edit",
+          "Glob",
+          "Grep",
+          "NotebookEdit",
+          "Read",
+          "Task",
+          "ToolSearch",
+          "WebFetch",
+          "WebSearch",
+          "Write"
+        ],
+        "tools_equal_arm_allow_list": true,
+        "image_ids": [
+          "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+        ],
+        "image_matches_runner": true,
+        "reviewer_smoke_turns": [
+          "smoke-v3r6-arm3-reviewer/0001"
+        ]
+      }
+    },
+    "attested": {
+      "harness_adapter_verified": {
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-manifest.json": "5115094397908d01332b8343b09f2f0031e1d31610d6a2095ae39b3d8f2acd26",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-invocation.json": "74f2bb6e8a7b8b137de5b471761bc9843992190b48b1a177cbfb21c0d1f770ac",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-result.json": "08a595c989708934963341f9a794f890f6c3271ccce2360a0642e983502c0269",
+        "payment-settlement/claude/docs/results/setup/v3/smoke-v3r6-arm3-turn-0001-stdout.jsonl": "75fc48a00913b52767b17baf07113d954b6a7754ac959109cb5e519bc60fbcfe"
+      },
+      "acceptance_suite_verified": {
+        "payment-settlement/claude/docs/results/setup/v3/evaluation-unittest.txt": "843c136ffa5d39bfcd37e6fa4cb7214e22bf99d42244e32e7060718ba1a71c46",
+        "payment-settlement/codex/docs/pilots/detailed-01/acceptance-issues.md": "5cad7b1b0f78b80101f2da36a636d773550c858266b430ddb30b1fc4a93cf88b"
+      }
+    },
+    "pilot": null
+  },
+  "frozen_at": "2026-11-19T01:45:07.892793+00:00",
+  "note": "flags derive from smoke-run artifacts or hashed attestations; false means not yet shown, never assumed",
+  "supersedes": {
+    "reason": "run 시간 상한을 유료 호출 시간의 합으로 계산(파일럿 04 뒤 사용자 결정 2026-11-19), run 단위 잠금, call_seconds 기록",
+    "at": "2026-11-19T01:45:07.892793+00:00",
+    "previous_contract_sha256": "8c3d66b252a11d7ee35522f69ecd873f36d493d6cb1c183befdcaa9521f93ef2",
+    "previous_image_digests": {
+      "payment-claude-runner:2.1.326": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c",
+      "postgres:16": "sha256:74d436cb49d3398cf7b5d7b33635d43623d9e4da4b93c22db453f7d5d81181b1",
+      "grafana/k6:1.2.3": "sha256:2f78b262fed33c4159fe41dfcc80cb29a514f1919a5f2e26b5599f631983f99b",
+      "eclipse-temurin:21-jdk": "sha256:088eb3b451a7f21a36c85e16eaf3944d3e68d47eab1e0eddb28254d1e50a59d1",
+      "eclipse-temurin:21-jre": "sha256:f6bf6c12534ae63d6caa28b7725219567c103336971c1a84d969ab0f61f1e80a",
+      "python:3.12-slim": "sha256:78976a69c067520ef8be34cde307ef9f6fea6dcefa50edb57039773d241ca0db",
+      "runner": "sha256:cc5707011ff26a7bbcca859bf32c575ba615c6c047e5d4f09dce1565be09361c"
+    },
+    "previous_frozen_at": "2026-11-18T10:16:09.043126+00:00",
+    "archived": {
+      "readiness.json": {
+        "archived_as": "readiness.superseded-2026-11-19T01-45-07.892793+00-00.json",
+        "sha256": "58e4da5f5f19ccd8ca1e0fc70b5092443e7ed6292e960a59e812a9295092a67c"
+      },
+      "frozen-inputs.json": {
+        "archived_as": "frozen-inputs.superseded-2026-11-19T01-45-07.892793+00-00.json",
+        "sha256": "b8b1192bded9943b1e8d67ee75361eedeb5b4e759d0da21faebcf7ae55ac5dd4"
+      }
+    },
+    "pilot_passed_reset": true,
+    "changed_inputs": [
+      "claude/runner/launch.py",
+      "claude/runner/test_launch.py",
+      "claude/runner/test_spec_invariants.py",
+      "claude/scripts/consult_contract.py",
+      "claude/scripts/finish_run.py",
+      "claude/scripts/test_scripts.py",
+      "claude/scripts/test_spec_invariants.py"
+    ],
+    "rule": "replaced before any measured run started (freeze_readiness.experiment_started was empty); only inputs under claude/ changed"
+  }
+}
