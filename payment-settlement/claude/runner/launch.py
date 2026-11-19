@@ -379,6 +379,29 @@ def runner_image(args):
     return digest, dict(ready, path=path.resolve())
 
 PILOT_RUN = re.compile(r'claude-pilot-\d{2}')
+MEASURED_RUN = re.compile(r'claude-arm\d-core\d{2}')
+
+def measured_start_check(args, frozen):
+    """init of a measured run (claude-armA-coreNN) under a freeze passes the same start gate as start_cycle.py: the arm's
+    record of that core merged with the readiness (scripts/preflight.readiness_blockers, cycle stage — pilot_passed is
+    waived only for preflight.PILOT_IN_CYCLE), and the id names that arm and core. A run before any freeze (no default
+    readiness file) is not gated here: it records no contract and cannot stand for a measured result under a freeze.
+    Raises ValueError."""
+    if not MEASURED_RUN.fullmatch(args.run_id) or frozen is None:
+        return
+    if args.run_id != 'claude-arm%d-core%02d' % (args.arm, args.core):
+        raise ValueError('run id %s does not name arm %s core %s' % (args.run_id, args.arm, args.core))
+    scripts = str(Path(__file__).resolve().parents[1] / 'scripts')
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import preflight                                     # imported here: preflight imports this module
+    ready = {k: v for k, v in frozen.items() if k != 'path'}
+    try:
+        failed = preflight.readiness_blockers(ready, args.core, 'cycle', (args.arm,), root=ROOT)
+    except (OSError, ValueError) as exc:                 # no readable record of this run: never a pass
+        raise ValueError('start gate for %s cannot be checked: %s' % (args.run_id, exc))
+    if failed:
+        raise ValueError('start gate refuses %s: %s' % (args.run_id, '; '.join(failed)))
 
 def pilot_run_id(run_id, pilot):
     """A pilot (init --pilot) is named claude-pilot-NN; no other run may carry that prefix."""
@@ -443,6 +466,7 @@ def initialize(args):
     if any(p.is_symlink() for p in source.rglob('*')):
         raise ValueError('starter symlinks are not allowed')
     image, frozen = runner_image(args)
+    measured_start_check(args, frozen)
     dest.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.staging-', dir=dest.parent))   # same filesystem: final rename is atomic
     try:

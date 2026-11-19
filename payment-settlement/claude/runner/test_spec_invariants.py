@@ -1698,9 +1698,9 @@ def turn_dir_hint(root, run_id):
     return str(len(list(turns.iterdir())) if turns.exists() else 0)
 
 
-def init_frozen(root, run_id, arm, readiness, image=None):
+def init_frozen(root, run_id, arm, readiness, image=None, pilot=False):
     args = SimpleNamespace(runs=root / '.runs', run_id=run_id, arm=arm, core=1, image=image,
-                           harness=root / 'harness-source' if arm == 3 else None, network=None, readiness=readiness)
+                           harness=root / 'harness-source' if arm == 3 else None, network=None, readiness=readiness, pilot=pilot)
     with patch.object(launch, 'ROOT', root), patch.object(launch, 'EXPECTED_UID', os.getuid()), \
          patch.object(launch, 'selftest', return_value=SELFTEST_OK), patch.object(launch, 'seed_harness', return_value='listing'), \
          contextlib.redirect_stdout(io.StringIO()):
@@ -1755,9 +1755,9 @@ class PilotEvidenceNeedsTheFrozenContractAndImage(unittest.TestCase):
 
     def pilot(self, root, run_id, readiness=None):
         if readiness is None:
-            init_run(root, run_id, 3)
+            init_run(root, run_id, 3, pilot=True)
         else:
-            init_frozen(root, run_id, 3, readiness)
+            init_frozen(root, run_id, 3, readiness, pilot=True)
         sid = 'aaaaaaaa-0000-4000-8000-0000000000%02d' % len(run_id)
         projects = {'-workspace/s.jsonl': [assistant('pm-' + run_id, FABLE, U1), assistant('w-' + run_id, OPUS, U2, sidechain=True)],
                     '-workspace/s/subagents/agent-a1.jsonl': [assistant('w-' + run_id, OPUS, U2, sidechain=True)]}
@@ -1773,17 +1773,17 @@ class PilotEvidenceNeedsTheFrozenContractAndImage(unittest.TestCase):
     def test_pilot_counts_only_under_the_same_contract_and_frozen_image(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_root(tmp)
-            self.pilot(root, 'pilot', write_readiness(tmp))
-            self.assertTrue(self.passed(root, 'pilot', FROZEN_CONTRACT, FROZEN_IMAGE), 'control: the frozen pilot does not count')
-            self.assertFalse(self.passed(root, 'pilot', 'd' * 64, FROZEN_IMAGE), 'pilot under another contract counted')
-            self.assertFalse(self.passed(root, 'pilot', FROZEN_CONTRACT, 'sha256:' + '0' * 64), 'pilot on another image counted')
+            self.pilot(root, 'claude-pilot-01', write_readiness(tmp))
+            self.assertTrue(self.passed(root, 'claude-pilot-01', FROZEN_CONTRACT, FROZEN_IMAGE), 'control: the frozen pilot does not count')
+            self.assertFalse(self.passed(root, 'claude-pilot-01', 'd' * 64, FROZEN_IMAGE), 'pilot under another contract counted')
+            self.assertFalse(self.passed(root, 'claude-pilot-01', FROZEN_CONTRACT, 'sha256:' + '0' * 64), 'pilot on another image counted')
 
     def test_pilot_made_before_the_freeze_does_not_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_root(tmp)
-            self.pilot(root, 'early')                                       # initialised without readiness, image 'img'
-            self.assertFalse(self.passed(root, 'early', FROZEN_CONTRACT, 'img'))
-            self.assertFalse(self.passed(root, 'early', FROZEN_CONTRACT, FROZEN_IMAGE))
+            self.pilot(root, 'claude-pilot-02')                             # initialised without readiness, image 'img'
+            self.assertFalse(self.passed(root, 'claude-pilot-02', FROZEN_CONTRACT, 'img'))
+            self.assertFalse(self.passed(root, 'claude-pilot-02', FROZEN_CONTRACT, FROZEN_IMAGE))
 
 
 REAL_EVALUATION_LEDGER = HERE.parent / 'docs' / 'results' / 'evaluation-cost.jsonl'
@@ -2808,7 +2808,10 @@ class EvidenceFieldsComeOnlyFromTheirSources(FinishFixture):
     def frozen_run(self, run_id, arm, tools):
         root = self.base / 'world'
         shutil.copytree(frozen_world(), root, symlinks=True)
-        init_run(root, run_id, arm, image=None, tools=tools, readiness=root / 'docs/results/readiness.json')
+        # this fixture's freeze carries no attested flags and no pilot: the start gate of a measured init would refuse it.
+        # These tests are about the finish evidence; the start gate itself is MeasuredInitPassesTheStartGate.
+        with patch.object(launch, 'measured_start_check'):
+            init_run(root, run_id, arm, image=None, tools=tools, readiness=root / 'docs/results/readiness.json')
         return root
 
     def fields(self, root, run_id, folder, preset=None, **verdict):
@@ -3169,17 +3172,78 @@ class InitRefusesANamedReadinessThatDoesNotExist(unittest.TestCase):
             default = root / 'docs' / 'results'
             default.mkdir(parents=True)
             write_readiness(default).rename(default / 'readiness.json')
-            m = init_run(root, 'claude-arm1-core01', 1, image=None)
+            # (not a measured run id: a measured init under a freeze also passes the start gate — MeasuredInitPassesTheStartGate)
+            m = init_run(root, 'frozen-arm1', 1, image=None)
             self.assertEqual(m['image'], FROZEN_IMAGE)
             self.assertIs(m['image_frozen'], True)
             with self.assertRaises(Exception):
-                init_run(root, 'claude-arm2-core01', 2, image='img')            # no pre-freeze run once the freeze exists
+                init_run(root, 'frozen-arm2', 2, image='img')                   # no pre-freeze run once the freeze exists
 
     def test_pre_freeze_run_only_without_the_default_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             m = init_run(make_root(tmp), 'claude-arm1-core01', 1)
             self.assertIs(m['image_frozen'], False)
             self.assertIsNone(m['readiness'])
+
+
+class MeasuredInitPassesTheStartGate(unittest.TestCase):
+    """requirement-spec "파일럿 게이트 결정" 메인 정리: 본 실험 run의 init도 같은 개시 게이트를 본다 — pilot_passed가 false인
+    동결에서는 사이클 1의 3번 조건 run만, true면 모두. 파일럿·재동결 스모크 경로는 그대로."""
+
+    FLAGS = ('isolation_verified', 'usage_collector_verified', 'harness_adapter_verified', 'acceptance_suite_verified',
+             'oauth_token_source_verified', 'role_models_verified', 'cache_observation_verified', 'hook_enforcement_verified')
+
+    def world(self, tmp, pilot_passed, **flags):
+        root = make_root(tmp)
+        (root / '3/core2').mkdir(parents=True)
+        (root / '3/core2/Main.kt').write_text('starter')
+        for core in (1, 2):
+            for arm in (1, 2, 3):
+                path = root / 'docs/experiments' / str(arm) / ('core%d' % core) / 'run.json'
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({'run_id': 'claude-arm%d-core%02d' % (arm, core), 'arm': arm, 'core': core,
+                                            'status': 'NOT_STARTED', 'requested_worker_model': OPUS if arm == 3 else None}))
+        ready = {'protocol': 'payment-settlement-v3-claude', 'provider': 'claude-code', 'auth': 'subscription-oauth-token',
+                 'reasoning_effort': 'high', 'cache_policy': 'observed-cache', 'billed_cost': None, 'baseline_sha': 'abc',
+                 'contract_sha256': FROZEN_CONTRACT, 'image_digests': {'runner': FROZEN_IMAGE}, 'token_limit': 150000000,
+                 'time_limit_seconds': 28800, 'feedback_limit': 30, 'user_proxy_model': OPUS,
+                 'actual_models': {'1': OPUS, '2': OPUS, '3': FABLE}, 'pilot_passed': pilot_passed,
+                 **{f: True for f in self.FLAGS}}
+        ready.update(flags)
+        (root / 'docs/results').mkdir(parents=True)
+        (root / 'docs/results/readiness.json').write_text(json.dumps(ready))
+        return root
+
+    def init(self, root, run_id, arm, core=1, **options):
+        return init_run(root, run_id, arm, image=None, core=core, **options)
+
+    def test_false_freeze_inits_only_arm3_of_cycle1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.world(tmp, False)
+            self.assertEqual(self.init(root, 'claude-arm3-core01', 3)['image'], FROZEN_IMAGE)
+            for run_id, arm, core in (('claude-arm1-core01', 1, 1), ('claude-arm2-core01', 2, 1), ('claude-arm3-core02', 3, 2)):
+                with self.subTest(run_id), self.assertRaisesRegex(ValueError, 'start gate refuses .*pilot_passed'):
+                    self.init(root, run_id, arm, core)
+                self.assertFalse((root / '.runs' / run_id).exists())
+
+    def test_passed_freeze_inits_every_arm_and_other_flags_still_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.world(tmp, True)
+            self.init(root, 'claude-arm1-core01', 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.world(tmp, False, isolation_verified=False)
+            with self.assertRaisesRegex(ValueError, 'isolation_verified'):
+                self.init(root, 'claude-arm3-core01', 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.world(tmp, True)
+            with self.assertRaisesRegex(ValueError, 'does not name arm'):
+                self.init(root, 'claude-arm1-core01', 2)                         # the id must name its arm and core
+
+    def test_pilot_and_other_runs_are_not_gated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.world(tmp, False, isolation_verified=False)
+            self.assertIs(self.init(root, 'claude-pilot-07', 3, pilot=True)['pilot'], True)
+            self.init(root, 'probe-1', 1)
 
 
 class RecoveryResendsTheSamePrompt(unittest.TestCase):

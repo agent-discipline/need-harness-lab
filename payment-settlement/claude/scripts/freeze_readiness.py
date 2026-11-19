@@ -3,7 +3,8 @@
 
 Every verification flag is derived from evidence files with the criterion written below, or stays false.
 Flags that no runner artifact can prove (acceptance suite, harness adapter) come only from an explicit --attest file
-whose evidence paths are hashed into readiness.json. pilot_passed is derived from the pilot run (--pilot-run).
+whose evidence paths are hashed into readiness.json. pilot_passed is derived from the pilot run (--pilot-run): a pilot
+claude-pilot-NN, or (decision 2026-11-19) the finished measured run of arm 3 in cycle 1 (preflight.PILOT_IN_CYCLE).
 """
 import argparse
 from datetime import datetime, timezone
@@ -22,6 +23,8 @@ sys.path.insert(0, str(ROOT / 'runner'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 import launch
 import prepare
+import commit_run
+import preflight
 
 PROTOCOL = 'payment-settlement-v3-claude'
 LIMITS = dict(token_limit=150000000, time_limit_seconds=28800, feedback_limit=30)
@@ -255,14 +258,64 @@ def turn_image_ids(run):
     return sorted(ids, key=str)
 
 
-def pilot_evidence(runs, run_id, contract_sha256, runner_image):
+IN_CYCLE_RUN = 'claude-arm%d-core%02d' % preflight.PILOT_IN_CYCLE    # the measured run that stands in for the pilot
+CAP_STATUS = {'token_limit': 'CENSORED_BUDGET', 'time_limit_seconds': 'CENSORED_TIME'}
+
+
+def cap_stopped_turn(run):
+    """The one turn the runner stopped during the call at a run cap (launch.turn: the turn's result.json
+    runner_stops.cap_stop, and censored.json written 'after call' for a 'turn' whose stopped_during_call is that stop),
+    provided it is the run's last turn folder. (turn name, detail) or (None, None)."""
+    try:
+        censored = json.loads((Path(run) / 'censored.json').read_text())
+    except FileNotFoundError:
+        return None, None
+    first = censored.get('first') or {}
+    stop = first.get('stopped_during_call')
+    if first.get('when') != 'after call' or first.get('call') != 'turn' or not isinstance(stop, dict) \
+            or CAP_STATUS.get(stop.get('cap')) != censored.get('status'):
+        return None, None
+    turns = sorted(p for p in (Path(run) / 'turns').iterdir() if p.is_dir()) if (Path(run) / 'turns').is_dir() else []
+    matched = []
+    for turn in turns:
+        try:
+            cap = ((json.loads((turn / 'result.json').read_text()).get('runner_stops') or {}).get('cap_stop'))
+        except (OSError, ValueError, AttributeError):
+            continue
+        # only a turn the runner really stopped (launch.stop_container: stopped_by stop|kill, no 'failed'); a stop
+        # that failed (cap_stop.stop_failed) is not excepted
+        container = cap.get('container') if isinstance(cap, dict) else None
+        stopped = isinstance(container, dict) and container.get('stopped_by') in ('stop', 'kill') \
+            and not container.get('failed') and not cap.get('stop_failed')
+        if stopped and (cap.get('cap'), cap.get('at')) == (stop.get('cap'), stop.get('at')):
+            matched.append(turn.name)
+    if len(matched) != 1 or matched[0] != turns[-1].name:
+        return None, None
+    return matched[0], {'turn': matched[0], 'cap': stop.get('cap'), 'at': stop.get('at'), 'censored_status': censored.get('status'),
+                        'reason': 'the runner stopped this turn at the run cap during the call (runner_stops.cap_stop = '
+                                  'censored.json stopped_during_call); its usage is a lower bound (decision 2026-11-19)'}
+
+
+def pilot_evidence(runs, run_id, contract_sha256, runner_image, root=None):
     """Pilot (spec section 5): one arm 3 run carried to its end, whose subagent usage is separated from the parent's
     without double counting and whose second reviewer's usage was observed. Derived from the run's own artifacts.
     It counts only for the freeze it ran under: the contract hash and runner image its manifest recorded at init must
-    be the ones of the readiness being written."""
-    run = Path(runs) / run_id
+    be the ones of the readiness being written.
+    Two rules, chosen by the run id; any other id is refused (ValueError).
+    'pilot' (claude-pilot-NN, read under `runs`): carried to its end (not censored, last turn ok), all usage observed.
+    'cycle-1-arm-3' (IN_CYCLE_RUN, decision 2026-11-19): the measured run of arm 3 in cycle 1 stands in for the pilot.
+    Read only from the measured runs' fixed folder <root>/.runs (never `runs`) and its record folder. Reaching a cap is a
+    result, not an environment fault: instead of 'completed' it needs the finish record (terminal status, finished_at,
+    not INVALID_INFRA, every turn captured as finished and the ledger as the finish computed it) and one ok turn; the one
+    turn the runner stopped at the run cap (cap_stopped_turn) may lack complete usage, every other call may not."""
+    root = Path(root or ROOT)
+    in_cycle = run_id == IN_CYCLE_RUN
+    if not in_cycle and not launch.PILOT_RUN.fullmatch(run_id or ''):
+        raise ValueError('pilot evidence comes from a pilot run claude-pilot-NN or from %s, not %s' % (IN_CYCLE_RUN, run_id))
+    run = (root / '.runs' if in_cycle else Path(runs)) / run_id
     manifest = json.loads((run / 'manifest.json').read_text())
-    results = [json.loads(p.read_text()) for p in sorted(run.glob('turns/*/result.json'))]
+    named = sorted(run.glob('turns/*/result.json'))
+    results = [json.loads(p.read_text()) for p in named]
     ok = [r for r in results if r.get('status') == 'ok']
     ledger = launch.run_ledger(run)
     roles = ledger['roles']
@@ -271,17 +324,50 @@ def pilot_evidence(runs, run_id, contract_sha256, runner_image):
         'arm_3': manifest.get('arm') == 3,
         'same_contract': bool(contract_sha256) and manifest.get('contract_sha256') == contract_sha256,
         'frozen_image': bool(runner_image) and manifest.get('image') == runner_image,
+    }
+    extra, stopped = {}, None
+    if in_cycle:
+        import finish_run                               # imported here: finish_run imports this module
+        folder = root / 'docs/experiments' / str(preflight.PILOT_IN_CYCLE[0]) / ('core%d' % preflight.PILOT_IN_CYCLE[1])
+        record = json.loads((folder / 'run.json').read_text())
+        stopped, excepted = cap_stopped_turn(run)
+        derivation = ((record.get('evidence_derivation') or {}).get('usage_complete') or {})
+        uncaptured, not_capturable = finish_run.capture_state(run, folder)
+        checks.update({
+            'this_run': manifest.get('run_id') == IN_CYCLE_RUN and record.get('run_id') == IN_CYCLE_RUN,
+            'core_1': manifest.get('core') == preflight.PILOT_IN_CYCLE[1],
+            'not_pilot': manifest.get('pilot') is not True,
+            'finish_recorded': record.get('status') in commit_run.TERMINAL and bool(record.get('finished_at')),
+            'not_invalid_infra': record.get('status') != 'INVALID_INFRA',
+            # the run directory is the one the finish recorded: every turn captured byte-identical, none cut short, and
+            # the ledger's incomplete calls and conflicts as the finish computed them
+            'matches_finish_record': not uncaptured and not not_capturable
+                                     and derivation.get('incomplete_calls') == ledger['incomplete_calls']
+                                     and derivation.get('conflicts') == len(ledger['conflicts']),
+            'ok_turn': bool(ok),
+            'all_usage_observed': not ledger['conflicts']
+                                  and set(ledger['incomplete_calls']) <= ({'turn/' + stopped} if stopped else set()),
+        })
+        extra = {'record_status': record.get('status'), 'record_finished_at': record.get('finished_at'),
+                 'cap_stopped_turn_excepted': excepted if stopped and 'turn/' + stopped in ledger['incomplete_calls'] else None,
+                 'incomplete_calls': ledger['incomplete_calls'], 'uncaptured_turns': uncaptured,
+                 'turns_not_finalized': not_capturable}
+    else:
         # carried to its end: not censored and the last turn finished ok (quality acceptance is not part of the pilot gate)
-        'completed': bool(results) and not (run / 'censored.json').exists() and results[-1].get('status') == 'ok',
-        'all_usage_observed': ledger['usage_complete'] and not ledger['conflicts'],
+        checks['completed'] = bool(results) and not (run / 'censored.json').exists() and results[-1].get('status') == 'ok'
+        checks['all_usage_observed'] = ledger['usage_complete'] and not ledger['conflicts']
+    # the cap-stopped turn (cycle rule only) is not an ok turn and its cut-off reviewer call may stay pending
+    others = [r for p, r in zip(named, results) if p.parent.name != stopped]
+    checks.update({
         # every ok turn's CLI total matches the parent-only or parent+subagent request sum, each request counted once
         'worker_usage_separated': roles.get('worker', {}).get('requests', 0) > 0 and bool(ok)
                                   and all(r.get('usage_complete') is True for r in ok),
         'reviewer_usage_observed': roles.get('reviewer', {}).get('requests', 0) > 0
-                                   and not any(r.get('reviewer_usage_pending') for r in results),
+                                   and not any(r.get('reviewer_usage_pending') for r in others),
         'role_models_agreed': all(models.values()),
-    }
-    return all(checks.values()), {'run_id': run_id, 'checks': checks, 'role_model_check': models,
+    })
+    return all(checks.values()), {'run_id': run_id, 'rule': 'cycle-1-arm-3' if in_cycle else 'pilot', 'checks': checks,
+                                  **extra, 'role_model_check': models,
                                   'ledger': {k: ledger[k] for k in ('roles', 'total_tokens', 'usage_complete', 'cost_usd')},
                                   'manifest_sha256': sha(run / 'manifest.json')}
 
@@ -451,7 +537,8 @@ def main():
     p.add_argument('--smoke-run', action='append', default=[], help='launch.py run id of a paid smoke (repeat; arms 1|2 and 3)')
     p.add_argument('--runs', type=Path, default=ROOT / '.runs')
     p.add_argument('--attest', type=Path, help='JSON attestation for ' + ', '.join(ATTESTABLE))
-    p.add_argument('--pilot-run', help='launch.py run id of the finished arm 3 pilot; pilot_passed is derived from it')
+    p.add_argument('--pilot-run', help='launch.py run id of the finished arm 3 pilot (claude-pilot-NN), or of the finished '
+                   'claude-arm3-core01 that stands in for it (decision 2026-11-19); pilot_passed is derived from it')
 
     p.add_argument('--output', type=Path, default=ROOT / 'docs/results/readiness.json')
     p.add_argument('--replace', action='store_true', help='supersede an existing readiness.json (kept with a timestamp) '
@@ -503,15 +590,20 @@ def main():
         if changed:
             p.error('; '.join(changed) + ' — nothing changes after the freeze: a change requires a protocol version change '
                     '(new protocol, new freeze) and a re-run of every arm, not --replace')
+    # --replace re-derives flags of the same freeze: its baseline commit stays the one recorded at the freeze
+    previous_baseline = json.loads(a.output.read_text()).get('baseline_sha') if a.output.exists() and a.replace else None
     attest_flags, attest_evidence = attested(a.attest) if a.attest else ({}, {})
-    pilot_passed, pilot_detail = pilot_evidence(a.runs, a.pilot_run, digest, runner) if a.pilot_run else (False, None)
+    try:
+        pilot_passed, pilot_detail = pilot_evidence(a.runs, a.pilot_run, digest, runner) if a.pilot_run else (False, None)
+    except ValueError as exc:
+        p.error(str(exc))
     now = datetime.now(timezone.utc).isoformat()
     readiness = dict(
         protocol=PROTOCOL, provider='claude-code', auth='subscription-oauth-token', cli_version=launch.CLI_VERSION,
         requested_models={str(arm): dict(zip(('model', 'worker_model'), m)) for arm, m in launch.MODELS.items()},
         requested_reviewer_model=launch.REVIEWER_MODEL, user_proxy_model=launch.USER_PROXY_MODEL,
         actual_models=actual, reasoning_effort='high', cache_policy='observed-cache', billed_cost=None,
-        baseline_sha=head, harness_sha=prepare.HARNESS_SHA,
+        baseline_sha=previous_baseline or head, harness_sha=prepare.HARNESS_SHA,
         contract_sha256=digest, image_digests=dict(found, runner=runner),
         **LIMITS, **flags, **{k: attest_flags.get(k, False) for k in ATTESTABLE}, pilot_passed=pilot_passed,
         evidence=dict(smoke_runs=detail, attested=attest_evidence, pilot=pilot_detail), frozen_at=now,

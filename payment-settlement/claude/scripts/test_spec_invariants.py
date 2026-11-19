@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import itertools
+import shutil
 import json
 import os
 from pathlib import Path
@@ -1085,6 +1086,324 @@ class SmokeEvidenceIsPerRun(unittest.TestCase):
         for name, runs in cases.items():
             with self.subTest(name):
                 self.assertFalse(self.isolation(runs), name)
+
+
+class PilotInCycle(unittest.TestCase):
+    """requirement-spec "파일럿 게이트 결정(2026-11-19)": ① pilot_passed가 false인 동결에서 개시 게이트는 사이클 1의 3번
+    조건 run 하나만 통과시킨다(1·2번과 다른 사이클은 거부) ② 그 run의 종료 기록 뒤 그 기록에서 파일럿 검사를 도출한다 —
+    상한 도달은 요구하지 않고, ok 턴 1개 이상·INVALID_INFRA 아님; "사용량 전부 관측"은 실행기가 run 상한 때문에 멈춘 턴
+    하나만 예외(결과 기록 없이 남은 턴은 예외 아님) ③ 통과해야 1·2번과 이후 사이클이 열린다 ④ 근거는 readiness에, 계약
+    해시는 그대로 ⑤ 사이클 1에 한해 3번을 먼저 돌리고 그 사실을 기록한다. 메인 정리: 도출은 고정 위치만 읽는다, --replace는
+    baseline_sha를 유지한다, 다른 조건이 도는 중의 준비 실패에도 사이클은 RUNNING."""
+    IMAGES = {'payment-claude-runner:2.1.326': 'sha256:' + 'a' * 64, 'postgres:16': 'sha256:' + 'b' * 64}
+    IMAGE = IMAGES['payment-claude-runner:2.1.326']
+    INVENTORY = {'docs/acceptance.md': '1' * 64}
+    CONTRACT = hashlib.sha256(json.dumps(INVENTORY, sort_keys=True).encode()).hexdigest()
+    RUN = 'claude-arm3-core01'
+    STOP_AT = '2026-11-19T11:00:00+00:00'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / 'claude'
+        for core in (1, 2):
+            for arm in (1, 2, 3):
+                write(self.root / 'docs/experiments' / str(arm) / ('core%d' % core) / 'run.json',
+                      dict(ledger(arm), run_id=start_cycle.run_plan(core, arm)[0], core=core, status='NOT_STARTED'))
+        write(self.root / 'docs/results/cycles.json', [dict(cycle=c, status='NOT_STARTED') for c in range(1, 11)])
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    # -- the measured arm 3 run of cycle 1, in the shape launch.turn and finish_run write --------------------------------
+    def turn(self, run, n, status, roles, usage_complete=True, pending=False, cap_stop=None, worker=OPUS):
+        t = run / 'turns' / ('%04d' % n)
+        stops = {'cap_stop': cap_stop, 'other_stops': [], 'stop_requests_after_normal_end': []}
+        result = dict(status=status, cli_status=status, exit_code=0 if status == 'ok' else 137, usage_complete=usage_complete,
+                      reviewer_usage_pending=pending, session_id_confirmed=True, runner_stops=stops,
+                      stopped_at_run_time_cap=bool(cap_stop) and cap_stop['cap'] == 'time_limit_seconds',
+                      stopped_at_token_cap_estimate=({'cap_reached': True, 'estimate': 150000001}
+                                                     if cap_stop and cap_stop['cap'] == 'token_limit' else None),
+                      cost={'pinned_session_usd': 0.1 * n if usage_complete else None, 'reviewer_usd': 0.0,
+                            'reviewer_applicable': True})
+        if status != 'ok':
+            result['error'] = 'Claude call failed or timed out; raw logs preserved'
+        write(t / 'result.json', result)
+        models = {'pm': FABLE, 'worker': worker, 'reviewer': FABLE}
+        (t / 'events.jsonl').write_text(''.join(json.dumps(dict(type='message', id='%s-%d' % (r, n), model=models[r], role=r,
+                                                                turn=t.name, usage=U1)) + '\n' for r in roles))
+
+    def finished_arm3(self, status='CENSORED_BUDGET', cap='token_limit', finished=True, manifest=None, roles=('pm', 'worker', 'reviewer'),
+                      worker=OPUS, incomplete_ok_turn=False, after_finish=None, before_call_cap=False, stop_failed=False):
+        """By default the run reached the token cap: the runner stopped turn 0003 during the call (result 'failed', usage
+        incomplete, a reviewer call cut off) and wrote censored.json 'after call'. Then normalize/capture/finish."""
+        run = self.root / '.runs' / self.RUN
+        shutil.rmtree(run, ignore_errors=True)
+        write(run / 'manifest.json', dict(dict(run_id=self.RUN, arm=3, core=1, pilot=False, contract_sha256=self.CONTRACT,
+                                               image=self.IMAGE, actual_role_models={'pm': [FABLE], 'worker': [worker],
+                                                                                     'reviewer': [FABLE]}), **(manifest or {})))
+        self.turn(run, 1, 'ok', roles, usage_complete=not incomplete_ok_turn, worker=worker)
+        self.turn(run, 2, 'ok', tuple(r for r in roles if r != 'reviewer'), worker=worker)
+        capped = status.startswith('CENSORED')
+        if capped and not before_call_cap:
+            stop = {'cap': cap, 'at': self.STOP_AT, 'basis': 'remaining run time elapsed' if cap == 'time_limit_seconds' else {},
+                    'container': {'requested_at': self.STOP_AT, 'stop_rc': 0, 'stopped_by': 'stop'}, 'stop_failed': None}
+            if stop_failed:                             # launch.stop_container when docker stop and kill both failed
+                stop['container'] = {'requested_at': self.STOP_AT, 'stop_rc': 1, 'kill_rc': 1, 'failed':
+                                     'the container could not be stopped (docker stop rc 1, docker kill rc 1)'}
+                stop['stop_failed'] = stop['container']['failed']
+            self.turn(run, 3, 'failed', ('pm',), usage_complete=False, pending=True, cap_stop=stop, worker=worker)
+            write(run / 'censored.json', {'status': status, 'first': {
+                'reached': [status], 'used': {}, 'when': 'after call', 'call': 'turn',
+                'stopped_during_call': dict(stop, confirmed_usage='from the ledger after the turn (used above)')}})
+        elif capped:                                    # the cap was found between calls: no turn was stopped
+            write(run / 'censored.json', {'status': status, 'first': {'reached': [status], 'when': 'before call', 'call': 'turn'}})
+        else:
+            self.turn(run, 3, 'ok', ('pm',), worker=worker)
+        folder = self.root / 'docs/experiments/3/core1'
+        shutil.rmtree(folder / 'turns', ignore_errors=True)
+        for t in sorted((run / 'turns').iterdir()):             # capture_turn: byte-identical copy + marker written last
+            (folder / 'turns' / t.name).mkdir(parents=True)
+            shutil.copy(t / 'result.json', folder / 'turns' / t.name / 'result.json')
+            digest = hashlib.sha256((t / 'result.json').read_bytes()).hexdigest()
+            write(folder / 'turns' / t.name / 'captured.json', {'files': {'result.json': digest}})
+        book = launch.run_ledger(run)
+        record = json.loads((folder / 'run.json').read_text())
+        record.pop('finished_at', None)
+        record.update(status=status, evidence_derivation={'usage_complete': {
+            'source': '.runs/<run> ledger computed at finish', 'incomplete_calls': book['incomplete_calls'],
+            'conflicts': len(book['conflicts'])}}, **({'finished_at': '2026-11-19T12:00:00+00:00'} if finished else {}))
+        write(folder / 'run.json', record)
+        if after_finish:
+            after_finish(run)
+
+    def derive(self, run_id=RUN, runs=None):
+        with patch.object(freeze_readiness, 'ROOT', self.root):
+            return freeze_readiness.pilot_evidence(runs or Path(self.tmp.name) / 'elsewhere', run_id, self.CONTRACT, self.IMAGE)
+
+    # -- the freeze and the cycle start, through their command lines ----------------------------------------------------
+    def freeze(self, *argv):
+        out = Path(self.tmp.name) / 'results/readiness.json'
+        out.parent.mkdir(exist_ok=True)
+        flags = {k: True for k in ('isolation_verified', 'hook_enforcement_verified', 'oauth_token_source_verified',
+                                   'cache_observation_verified', 'usage_collector_verified', 'role_models_verified')}
+        smoke = (flags, {'1': OPUS, '2': OPUS, '3': FABLE}, {'s%d' % a: {'arm': a} for a in (1, 2, 3)})
+        attest = ({'acceptance_suite_verified': True, 'harness_adapter_verified': True}, {})
+        with patch.object(freeze_readiness, 'ROOT', self.root), patch.object(freeze_readiness, 'smoke_evidence', return_value=smoke), \
+             patch.object(freeze_readiness, 'attested', return_value=attest):
+            code, text = readiness_cli(['--output', str(out), '--attest', 'a.json', *argv], self.IMAGES, self.INVENTORY)
+        return code, text, out
+
+    def launch(self, readiness, *argv, real=False):
+        """start_cycle.py on this root: --dry-run unless real (then init/compose/turn are faked). (code, stdout, stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        args = ['start_cycle.py', '--readiness', str(readiness), '--env-file', '/x.env', *argv] + ([] if real else ['--dry-run'])
+        with patch.object(start_cycle, 'ROOT', self.root), patch.object(sys, 'argv', args), \
+             patch.object(start_cycle, 'contract_drift', return_value=[]), patch.object(start_cycle.lab, 'verify'), \
+             patch.object(start_cycle.lab, 'prompt', side_effect=lambda arm: 'p'), \
+             patch.object(start_cycle.subprocess, 'run', side_effect=getattr(self, 'fake_run', None)
+                          or (lambda cmd, **kw: SimpleNamespace(returncode=0))) as run, \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = start_cycle.main()
+            except SystemExit as exc:
+                code = exc.code
+            if not real:
+                run.assert_not_called()
+        return code, out.getvalue(), err.getvalue()
+
+    def readiness(self, pilot_passed):
+        path = Path(self.tmp.name) / ('readiness-%s.json' % pilot_passed)
+        write(path, ready(pilot_passed=pilot_passed))
+        return path
+
+    def planned(self, out):
+        return [r['run_id'] for r in json.loads(out[out.index('{'):])['runs']]
+
+    # -- ① ------------------------------------------------------------------------------------------------------------
+    def test_1_false_freeze_passes_only_arm3_of_cycle1(self):
+        self.assertEqual(preflight.blockers(ledger(3, core=1, pilot_passed=False), 'cycle'), [])
+        for core in range(2, 11):
+            self.assertIn('pilot_passed: must be boolean true (got False)',
+                          preflight.blockers(ledger(3, core=core, pilot_passed=False), 'cycle'), core)
+        self.assertTrue(preflight.blockers(ledger(3, core=True, pilot_passed=False), 'cycle'))    # not the integer 1
+        for flag in FLAGS:                              # the waiver is pilot_passed alone
+            if flag != 'pilot_passed':
+                self.assertTrue(preflight.blockers(ledger(3, core=1, pilot_passed=False, **{flag: False}), 'cycle'), flag)
+        code, out, err = self.launch(self.readiness(False), '--cycle', '1', '--arm', '3')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.planned(out), [self.RUN])
+        self.assertNotEqual(self.launch(self.readiness(False), '--cycle', '2', '--arm', '3')[0], 0)
+
+    # -- ① ------------------------------------------------------------------------------------------------------------
+    def test_2_false_freeze_refuses_arms_1_and_2(self):
+        for arm in (1, 2):
+            self.assertIn('pilot_passed: must be boolean true (got False)',
+                          preflight.blockers(ledger(arm, core=1, pilot_passed=False), 'cycle'), arm)
+        for argv in (('--cycle', '1'), ('--cycle', '1', '--arm', '1', '--arm', '2'), ('--cycle', '1', '--arm', '1')):
+            self.assertNotEqual(self.launch(self.readiness(False), *argv)[0], 0, argv)
+        self.finished_arm3()                            # even after arm 3 finished, not before pilot_passed
+        code, _, err = self.launch(self.readiness(False), '--cycle', '1', '--arm', '1', '--arm', '2')
+        self.assertNotEqual(code, 0)
+        self.assertIn('pilot_passed', err)
+
+    # -- ②③④: the derivation written by freeze_readiness.main opens arms 1 and 2 through the start gate ----------------
+    def test_3_derivation_through_the_written_readiness_opens_arms_1_and_2(self):
+        code, text, out = self.freeze()                 # the freeze: pilot_passed false
+        self.assertEqual(code, 0, text)
+        first = json.loads(out.read_text())
+        self.assertIs(first['pilot_passed'], False)
+        code, _, err = self.launch(out, '--cycle', '1', '--arm', '3', real=True)
+        self.assertEqual(code, 0, err)
+        self.finished_arm3()                            # ... turns, cap, finish_run
+        self.assertNotEqual(self.freeze('--replace', '--pilot-run', 'claude-arm3-core02')[0], 0)   # no other measured run
+        with patch.object(freeze_readiness, 'clean_baseline', return_value=('e' * 40, [])):
+            code, text, _ = self.freeze('--replace', '--pilot-run', self.RUN)
+        self.assertEqual(code, 0, text)
+        second = json.loads(out.read_text())
+        self.assertIs(second['pilot_passed'], True, second['evidence']['pilot'])
+        pilot = second['evidence']['pilot']
+        self.assertEqual((pilot['run_id'], pilot['rule'], pilot['record_status']), (self.RUN, 'cycle-1-arm-3', 'CENSORED_BUDGET'))
+        self.assertTrue(all(pilot['checks'].values()))
+        self.assertEqual(pilot['cap_stopped_turn_excepted']['turn'], '0003')
+        self.assertEqual(second['contract_sha256'], first['contract_sha256'])
+        self.assertEqual(second['baseline_sha'], first['baseline_sha'])         # --replace keeps the freeze's baseline
+        code, out_text, err = self.launch(out, '--cycle', '1', '--arm', '1', '--arm', '2')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.planned(out_text), ['claude-arm1-core01', 'claude-arm2-core01'])
+        with patch.object(start_cycle, 'ROOT', self.root):
+            self.assertEqual(start_cycle.gate(json.loads(out.read_text()), 2), [])
+        self.assertNotEqual(self.launch(out, '--cycle', '1', '--arm', '3')[0], 0)  # arm 3 does not start twice
+        self.assertNotEqual(self.launch(out, '--cycle', '1')[0], 0)                 # nor cycle 1 whole once split
+
+    # -- ③: every check, one at a time ---------------------------------------------------------------------------------
+    def test_4_any_failed_check_keeps_the_gate_closed(self):
+        def cut_short(run):                             # a turn folder with no result (runner died) after the finish
+            (run / 'turns/0004').mkdir()
+            (run / 'turns/0004/prompt.txt').write_text('p')
+        cases = {
+            'other image': (dict(manifest={'image': 'sha256:' + '0' * 64}), 'frozen_image'),
+            'other contract': (dict(manifest={'contract_sha256': 'd' * 64}), 'same_contract'),
+            'arm 1': (dict(manifest={'arm': 1}), 'arm_3'),
+            'core 2': (dict(manifest={'core': 2}), 'core_1'),
+            'pilot true': (dict(manifest={'pilot': True}), 'not_pilot'),
+            'other run id in the manifest': (dict(manifest={'run_id': 'claude-arm3-core02'}), 'this_run'),
+            'usage of an ok turn unobserved': (dict(incomplete_ok_turn=True), 'all_usage_observed'),
+            'cap found between calls, a turn incomplete': (dict(before_call_cap=True, incomplete_ok_turn=True), 'all_usage_observed'),
+            'turn left without a result': (dict(after_finish=cut_short), 'all_usage_observed'),
+            'worker usage not separated': (dict(roles=('pm', 'reviewer')), 'worker_usage_separated'),
+            'no reviewer usage': (dict(roles=('pm', 'worker')), 'reviewer_usage_observed'),
+            'worker on another model': (dict(worker='claude-sonnet-5'), 'role_models_agreed'),
+            'no finish record': (dict(status='RUNNING', finished=False), 'finish_recorded'),
+            'finished_at missing': (dict(finished=False), 'finish_recorded'),
+            'run directory changed after the finish': (dict(after_finish=cut_short), 'matches_finish_record'),
+        }
+        closed = self.readiness(False)
+        for name, (kw, check) in cases.items():
+            with self.subTest(name):
+                self.finished_arm3(**kw)
+                passed, detail = self.derive()
+                self.assertFalse(passed, (name, detail['checks']))
+                self.assertFalse(detail['checks'][check], (name, detail['checks']))
+                self.assertNotEqual(self.launch(closed, '--cycle', '1', '--arm', '1', '--arm', '2')[0], 0)
+        for other in ('claude-arm3-core02', 'claude-arm1-core01', 'smoke-v3r6-arm3', 'pilot'):
+            with self.subTest(other), self.assertRaises(ValueError):
+                self.derive(other)
+
+    # -- ② -------------------------------------------------------------------------------------------------------------
+    def test_5_invalid_infra_run_cannot_derive(self):
+        self.finished_arm3(status='INVALID_INFRA')
+        passed, detail = self.derive()
+        self.assertFalse(passed)
+        self.assertFalse(detail['checks']['not_invalid_infra'])
+
+    # -- ②: a capped run derives; only the one turn the runner stopped at the cap is excepted -----------------------------
+    def test_6_capped_run_can_derive(self):
+        for status, cap in (('CENSORED_BUDGET', 'token_limit'), ('CENSORED_TIME', 'time_limit_seconds')):
+            with self.subTest(status):
+                self.finished_arm3(status=status, cap=cap)
+                passed, detail = self.derive()
+                self.assertTrue(passed, detail['checks'])
+                excepted = detail['cap_stopped_turn_excepted']
+                self.assertEqual((excepted['turn'], excepted['cap']), ('0003', cap))
+                self.assertIn('run cap', excepted['reason'])
+        for status in ('FAILED', 'PASSED'):             # finished without a cap: nothing excepted
+            with self.subTest(status):
+                self.finished_arm3(status=status)
+                passed, detail = self.derive()
+                self.assertTrue(passed, detail['checks'])
+                self.assertIsNone(detail['cap_stopped_turn_excepted'])
+        # censored.json names another stop than the turn's: no exception
+        self.finished_arm3()
+        path = self.root / '.runs' / self.RUN / 'censored.json'
+        data = json.loads(path.read_text())
+        data['first']['stopped_during_call']['at'] = '2026-11-19T10:00:00+00:00'
+        write(path, data)
+        self.assertFalse(self.derive()[1]['checks']['all_usage_observed'])
+        # the runner's stop of the container failed: not a stopped turn, no exception
+        self.finished_arm3(stop_failed=True)
+        passed, detail = self.derive()
+        self.assertFalse(passed)
+        self.assertFalse(detail['checks']['all_usage_observed'])
+        self.assertIsNone(detail['cap_stopped_turn_excepted'])
+        # the cap names the other limit than censored.json's status: no exception
+        self.finished_arm3(status='CENSORED_TIME', cap='token_limit')
+        self.assertFalse(self.derive()[1]['checks']['all_usage_observed'])
+        self.finished_arm3()                            # no ok turn at all
+        for p in (self.root / '.runs' / self.RUN / 'turns').glob('*/result.json'):
+            write(p, dict(json.loads(p.read_text()), status='failed'))
+        passed, detail = self.derive()
+        self.assertFalse(passed)
+        self.assertFalse(detail['checks']['ok_turn'])
+
+    def test_derivation_reads_only_the_fixed_measured_run_folder(self):
+        self.finished_arm3()
+        decoy = Path(self.tmp.name) / 'decoy'
+        shutil.copytree(self.root / '.runs' / self.RUN, decoy / self.RUN)
+        shutil.rmtree(self.root / '.runs' / self.RUN)
+        with self.assertRaises(FileNotFoundError):      # the run given under --runs is never read
+            self.derive(runs=decoy)
+
+    def test_pilot_rule_is_unchanged_for_pilot_runs(self):
+        self.finished_arm3()
+        runs = Path(self.tmp.name) / 'pilots'
+        shutil.copytree(self.root / '.runs' / self.RUN, runs / 'claude-pilot-05')
+        manifest = json.loads((runs / 'claude-pilot-05/manifest.json').read_text())
+        write(runs / 'claude-pilot-05/manifest.json', dict(manifest, run_id='claude-pilot-05', pilot=True))
+        passed, detail = self.derive('claude-pilot-05', runs=runs)     # capped pilot: 'completed' still required
+        self.assertEqual(detail['rule'], 'pilot')
+        self.assertFalse(passed)
+        self.assertFalse(detail['checks']['completed'])
+        self.assertFalse(detail['checks']['all_usage_observed'])        # and no turn is excepted
+
+    # -- ⑤ + 메인 정리 ---------------------------------------------------------------------------------------------------
+    def test_split_launch_is_recorded_and_a_later_setup_failure_keeps_the_cycle_running(self):
+        cycles = self.root / 'docs/results/cycles.json'
+        self.assertEqual(self.launch(self.readiness(False), '--cycle', '1', '--arm', '3', real=True)[0], 0)
+        first = json.loads(cycles.read_text())[0]
+        self.assertEqual((first['status'], first['initial_turns_finished']), ('RUNNING', False))
+        self.assertEqual([(l['arms'], l['pilot_passed']) for l in first['launches']], [([3], False)])
+        self.assertIn('pilot-in-cycle', first['launches'][0]['rule'])
+        # arms 1 and 2: arm 2's compose fails while arm 3 runs
+        self.fake_run = lambda cmd, **kw: SimpleNamespace(returncode=1 if 'compose' in cmd and 'payment-claude-c01-a2' in cmd else 0)
+        self.assertEqual(self.launch(self.readiness(True), '--cycle', '1', '--arm', '1', '--arm', '2', real=True)[0], 1)
+        failed = json.loads(cycles.read_text())[0]
+        self.assertEqual(failed['status'], 'RUNNING')
+        self.assertNotIn('setup_failures', failed)
+        self.assertEqual(list(failed['launches'][-1]['setup_failures']), ['claude-arm2-core01'])
+        self.assertEqual(failed['launches'][-1]['running'], [self.RUN])
+        # recovery per the runbook (records back to NOT_STARTED), then a successful retry
+        for arm in (1, 2):
+            path = self.root / 'docs/experiments' / str(arm) / 'core1/run.json'
+            write(path, dict(json.loads(path.read_text()), status='NOT_STARTED'))
+        self.fake_run = None
+        self.assertEqual(self.launch(self.readiness(True), '--cycle', '1', '--arm', '1', '--arm', '2', real=True)[0], 0)
+        second = json.loads(cycles.read_text())[0]
+        self.assertEqual(second['started_at'], first['started_at'])
+        self.assertEqual([l['arms'] for l in second['launches']], [[3], [1, 2], [1, 2]])
+        for stale in ('setup_failures', 'setup_failed_at', 'prepared_runs'):
+            self.assertNotIn(stale, second)
+        self.assertEqual(sorted(second['initial_turn_exits']), ['claude-arm%d-core01' % a for a in (1, 2, 3)])
+        self.assertTrue(second['initial_turns_finished'])
 
 
 # ---------------------------------------------------------------------------------------------------------------------

@@ -251,7 +251,7 @@ class FreezeTest(unittest.TestCase):
 
     def pilot(self, runs, roles=('pm', 'worker', 'reviewer'), models=None, last='ok', pending=False, censored=False, arm=3,
               contract=CONTRACT, image=IMAGE):
-        run = runs / 'pilot'
+        run = runs / 'claude-pilot-01'
         models = models or {'pm': ['claude-fable-5-2'], 'worker': ['claude-opus-5-5'], 'reviewer': ['claude-fable-5-2']}
         write(run / 'manifest.json', dict(arm=arm, actual_role_models=models, contract_sha256=contract, image=image))
         for n, status in ((1, 'ok'), (2, last)):
@@ -263,7 +263,7 @@ class FreezeTest(unittest.TestCase):
                                                                     turn=t.name, usage=USAGE)) + '\n' for r in roles))
         if censored:
             write(run / 'censored.json', {'status': 'CENSORED_TIME'})
-        return 'pilot'
+        return 'claude-pilot-01'
 
     def test_pilot_pass_is_derived_from_the_pilot_run(self):
         cases = {'complete pilot': ({}, True), 'no worker usage': ({'roles': ('pm', 'reviewer')}, False),
@@ -291,7 +291,7 @@ class FreezeTest(unittest.TestCase):
         self.assertFalse(check(events(('claude-opus-5-5', 'explorer'))))           # explorer keeps the harness definition
         self.assertFalse(check([]))
         with tempfile.TemporaryDirectory() as tmp:
-            run = Path(tmp) / 'pilot'
+            run = Path(tmp) / 'claude-pilot-01'
             self.pilot(Path(tmp))
             t = run / 'turns/0003'
             write(t / 'result.json', dict(status='ok', usage_complete=True, cost={'pinned_session_usd': 0.1, 'reviewer_usd': 0.0, 'reviewer_applicable': True}))
@@ -300,18 +300,18 @@ class FreezeTest(unittest.TestCase):
             manifest = json.loads((run / 'manifest.json').read_text())
             manifest['actual_role_models']['worker'] = ['claude-opus-5-5', 'claude-sonnet-5']
             write(run / 'manifest.json', manifest)
-            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'claude-pilot-01', self.CONTRACT, self.IMAGE)
             self.assertTrue(passed, detail)
             (t / 'events.jsonl').write_text(json.dumps(dict(type='message', id='ex', model='claude-sonnet-5', role='worker',
                                                            agent_type=None, turn='0003', usage=USAGE)) + '\n')
-            self.assertFalse(freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)[0])
+            self.assertFalse(freeze_readiness.pilot_evidence(Path(tmp), 'claude-pilot-01', self.CONTRACT, self.IMAGE)[0])
             (t / 'events.jsonl').write_text('')
             consult = run / 'consults/0001'
             consult.mkdir(parents=True)
             write(consult / 'usage.json', {'usage_complete': True, 'cost_usd': 0.0})
             (consult / 'events.jsonl').write_text(json.dumps(dict(type='message', id='px', model='claude-fable-5-2',
                                                                  role='user-proxy', turn='p', usage=USAGE)) + '\n')
-            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'pilot', self.CONTRACT, self.IMAGE)
+            passed, detail = freeze_readiness.pilot_evidence(Path(tmp), 'claude-pilot-01', self.CONTRACT, self.IMAGE)
             self.assertFalse(passed)
             self.assertFalse(detail['role_model_check']['user-proxy'])
 
@@ -358,14 +358,14 @@ class FreezeReplaceTest(unittest.TestCase):
             self.assertFalse(first['pilot_passed'])
             # a pilot run initialized under this freeze carries its contract hash and frozen image
             FreezeTest.pilot(None, Path(tmp) / 'runs', contract=first['contract_sha256'], image='sha256:frozen')
-            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v1'}, pilot='pilot')
+            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v1'}, pilot='claude-pilot-01')
             self.assertEqual(code, 0, err)
             second = json.loads(out.read_text())
             self.assertTrue(second['pilot_passed'], second['evidence']['pilot'])
             self.assertEqual(second['contract_sha256'], first['contract_sha256'])
             self.assertEqual(len(list(Path(tmp).glob('readiness.superseded-*.json'))), 1)
             # the acceptance criteria changed after the freeze: --replace is refused, the freeze stays as it was
-            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v2'}, pilot='pilot')
+            code, err, _ = self.main(tmp, {'docs/acceptance.md': 'v2'}, pilot='claude-pilot-01')
             self.assertNotEqual(code, 0)
             self.assertIn('docs/acceptance.md', err)
             self.assertIn('protocol version change', err)

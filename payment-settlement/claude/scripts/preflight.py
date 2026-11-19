@@ -20,10 +20,22 @@ LIMITS = {"token_limit": 150000000, "time_limit_seconds": 28800, "feedback_limit
 # Two gates in protocol order (freeze -> pilot -> cycles): starting the pilot cannot require the pilot's own result;
 # starting a measured cycle requires everything. There is no other stage and no way to waive any other flag.
 STAGE_WAIVED = {"pilot": ("pilot_passed",), "cycle": ()}
+# Decision 2026-11-19 (requirement-spec "파일럿 게이트 결정"): no further pilot; the measured run of arm 3 in cycle 1 stands
+# in for it. While pilot_passed is false the cycle gate lets through that one run (arm, core) and no other; pilot_passed is
+# then derived from it (freeze_readiness.pilot_evidence) and opens arms 1 and 2 of cycle 1 and every later cycle.
+PILOT_IN_CYCLE = (3, 1)
 
-def blockers(manifest, stage="cycle"):
+def waived(manifest, stage):
+    """Flags the gate does not require for this merged ledger at this stage."""
     if stage not in STAGE_WAIVED:
         raise ValueError("stage must be pilot or cycle")
+    where = (manifest.get("arm"), manifest.get("core"))
+    if stage == "cycle" and all(type(v) is int for v in where) and where == PILOT_IN_CYCLE:
+        return ("pilot_passed",)
+    return STAGE_WAIVED[stage]
+
+def blockers(manifest, stage="cycle"):
+    skip = waived(manifest, stage)
     failures = [f"{key}: missing/unverified" for key in REQUIRED if not manifest.get(key)]
     if manifest.get("protocol") != PROTOCOL:
         failures.append(f"protocol must be {PROTOCOL}")
@@ -34,7 +46,7 @@ def blockers(manifest, stage="cycle"):
         failures.append("claude runner supports only observed-cache")
     # Verification flags must be the literal boolean true; strings such as "pending" never pass.
     failures += [f"{key}: must be boolean true (got {manifest.get(key)!r})" for key in FLAGS
-                 if key not in STAGE_WAIVED[stage] and manifest.get(key) is not True]
+                 if key not in skip and manifest.get(key) is not True]
     if manifest.get("auth") not in AUTH:
         failures.append("auth must be one of " + ", ".join(AUTH))
     if manifest.get("reasoning_effort") != "high":
@@ -82,7 +94,8 @@ def main():
     parser.add_argument("--arm", type=int, choices=(1, 2, 3), action="append",
                         help="with --readiness: arm to check (repeat; default all three)")
     parser.add_argument("--stage", choices=tuple(STAGE_WAIVED), default="cycle",
-                        help="pilot: before the pilot run (pilot_passed not yet possible); cycle: before measured cycles")
+                        help="pilot: before the pilot run (pilot_passed not yet possible); cycle: before measured cycles "
+                        "(pilot_passed not required only for arm 3 of core 1, PILOT_IN_CYCLE)")
     args = parser.parse_args()
     if (args.manifest is None) == (args.readiness is None):
         parser.error("give either a merged ledger or --readiness")

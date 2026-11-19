@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Launch exactly one cycle's three isolated initial Claude turns after readiness gates (paid unless --dry-run)."""
+"""Launch exactly one cycle's three isolated initial Claude turns after readiness gates (paid unless --dry-run).
+
+Cycle 1 alone may start in two launches (decision 2026-11-19, preflight.PILOT_IN_CYCLE): --arm 3 first, the run that
+stands in for the pilot, then --arm 1 --arm 2 once pilot_passed was derived from it. Every other launch is all three."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -17,6 +20,7 @@ import freeze_readiness
 import hashlib
 from preflight import readiness_blockers
 import commit_run
+import preflight
 
 
 def save(path, value):
@@ -31,9 +35,30 @@ def run_plan(cycle, arm):
     return run_id, project, ports
 
 
-def gate(ready, cycle):
+ARMS = (1, 2, 3)
+# the only partial launches: cycle 1 split around the run that stands in for the pilot, arm 3 first
+SPLIT = {(preflight.PILOT_IN_CYCLE[0],): 'pilot-in-cycle: arm 3 first; its finished record is the pilot check',
+         tuple(a for a in ARMS if a != preflight.PILOT_IN_CYCLE[0]): 'pilot-in-cycle: arms 1 and 2 after pilot_passed'}
+
+
+def gate(ready, cycle, arms=ARMS):
     """Per-arm preflight (cycle stage) on each arm's record merged with readiness (preflight.merge)."""
-    return readiness_blockers(ready, cycle, 'cycle', root=ROOT)
+    return readiness_blockers(ready, cycle, 'cycle', arms, root=ROOT)
+
+
+def split_blockers(cycle, arms):
+    """A launch of fewer than three arms is the cycle-1 split only: arm 3 alone, or arms 1 and 2 after arm 3 started."""
+    if arms == ARMS:
+        return []
+    if cycle != preflight.PILOT_IN_CYCLE[1] or arms not in SPLIT:
+        return ['a cycle starts all three arms together; only cycle %d may start arm %d alone and then arms 1 and 2'
+                % (preflight.PILOT_IN_CYCLE[1], preflight.PILOT_IN_CYCLE[0])]
+    if arms != (preflight.PILOT_IN_CYCLE[0],):
+        status = json.loads((ROOT / 'docs/experiments' / str(preflight.PILOT_IN_CYCLE[0]) / f'core{cycle}' / 'run.json')
+                            .read_text()).get('status')
+        if status in ('NOT_STARTED', 'SETUP_FAILED'):
+            return [f'arms 1 and 2 of cycle {cycle} start only after arm 3 of that cycle (status {status})']
+    return []
 
 
 def contract_drift(ready, frozen_list=None):
@@ -56,10 +81,10 @@ def git(*args):
     return subprocess.run(['git', '-C', str(REPO), *args], capture_output=True, text=True, check=True).stdout
 
 
-def cycle_order_blockers(cycle):
+def cycle_order_blockers(cycle, arms=ARMS):
     """Evidence, not cycles.json: every run of each earlier cycle is terminal, committed by commit_run (subject
     'experiment: <run_id> <status>'), has no uncommitted changes in its code or records, and had its volumes removed;
-    no run of this cycle exists yet."""
+    no run of this cycle among `arms` exists yet."""
     failures = []
     subjects = git('log', '--format=%s').splitlines() if cycle > 1 else []
     for c in range(1, cycle):
@@ -76,7 +101,7 @@ def cycle_order_blockers(cycle):
                 failures.append(f'{run_id}: uncommitted changes in its code or records')
             if not freeze_readiness.launch.discard_complete(ROOT / '.runs' / run_id):
                 failures.append(f'{run_id}: volumes not removed (launch.py discard incomplete or missing)')
-    for arm in (1, 2, 3):
+    for arm in arms:
         run_id = run_plan(cycle, arm)[0]
         status = json.loads((ROOT / 'docs/experiments' / str(arm) / f'core{cycle}' / 'run.json').read_text()).get('status')
         if status != 'NOT_STARTED' or (ROOT / '.runs' / run_id).exists():
@@ -91,10 +116,16 @@ def main():
     p.add_argument('--env-file', type=Path, required=True, help='0600 file outside the repo with only CLAUDE_CODE_OAUTH_TOKEN=...')
     p.add_argument('--timeout-seconds', type=int, default=freeze_readiness.LIMITS['time_limit_seconds'],
                    help='first turns: default the run cap (no per-turn limit); the runner reduces it to the run time left')
+    p.add_argument('--arm', type=int, choices=ARMS, action='append',
+                   help='cycle 1 only: --arm 3 first, then --arm 1 --arm 2 (default: all three together)')
     p.add_argument('--dry-run', action='store_true', help='check gates and print the plan; no init, compose or model call')
     args = p.parse_args()
+    arms = tuple(sorted(set(args.arm or ARMS)))
+    split = split_blockers(args.cycle, arms)
+    if split:
+        p.error('; '.join(split))
     ready = json.loads(args.readiness.read_text())
-    failed = gate(ready, args.cycle)
+    failed = gate(ready, args.cycle, arms)
     if failed:
         p.error('; '.join(failed))
     drift = contract_drift(ready, args.readiness.with_name('frozen-inputs.json'))
@@ -104,19 +135,19 @@ def main():
     cycles_path = ROOT / 'docs/results/cycles.json'
     cycles = json.loads(cycles_path.read_text())
     current = cycles[args.cycle - 1]
-    order = cycle_order_blockers(args.cycle)
+    order = cycle_order_blockers(args.cycle, arms)
     if order:
         p.error('; '.join(order))
     lab.verify(args.cycle)
     runner = ROOT / 'runner/launch.py'
-    plan = [run_plan(args.cycle, arm) for arm in (1, 2, 3)]
+    plan = [run_plan(args.cycle, arm) for arm in arms]
     if args.dry_run:
         print(json.dumps({'cycle': args.cycle, 'runs': [dict(run_id=r, project=pr, ports=po) for r, pr, po in plan],
                           'image': ready['image_digests']['runner']}, indent=2))
         return 0
-    # Set up all three arms first; a cycle's turns start together or not at all.
+    # Set up all arms of this launch first; their turns start together or not at all.
     launches, prepared, failures = [], [], {}
-    for arm, (run_id, project, ports) in zip((1, 2, 3), plan):
+    for arm, (run_id, project, ports) in zip(arms, plan):
         records = ROOT / 'docs/experiments' / str(arm) / f'core{args.cycle}'
         prompt = records / 'initial-prompt.txt'
         # models come from launch.MODELS (frozen in readiness.requested_models); the image is the frozen id
@@ -142,9 +173,19 @@ def main():
             continue
         prepared.append((arm, run_id, project, ports, records, prompt))
     now = datetime.now(timezone.utc).isoformat()
+    entry = dict(arms=list(arms), at=now, pilot_passed=ready.get('pilot_passed'),
+                 **({'rule': SPLIT[arms]} if arms != ARMS else {}))
     if failures:
-        current.update(status='SETUP_FAILED', setup_failures=failures, setup_failed_at=now,
-                       prepared_runs=[r for _, r, *_ in prepared])
+        # another arm of this cycle already runs (cycle 1 split): the cycle stays RUNNING, the failure is this launch's
+        running = [run_plan(args.cycle, a)[0] for a in ARMS if a not in arms and json.loads(
+            (ROOT / 'docs/experiments' / str(a) / f'core{args.cycle}' / 'run.json').read_text()).get('status')
+            not in ('NOT_STARTED', 'SETUP_FAILED')]
+        if running:
+            current.setdefault('launches', []).append(dict(entry, setup_failures=failures,
+                                                           prepared_runs=[r for _, r, *_ in prepared], running=running))
+        else:
+            current.update(status='SETUP_FAILED', setup_failures=failures, setup_failed_at=now,
+                           prepared_runs=[r for _, r, *_ in prepared])
         save(cycles_path, cycles)
         print(json.dumps({'cycle': args.cycle, 'setup_failed': failures, 'turns_started': 0,
                           'recovery': 'payment-settlement/claude/docs/runbook.md: 사이클 준비 실패 복구'}, ensure_ascii=False))
@@ -156,7 +197,12 @@ def main():
                    actual_model=(ready.get('actual_models') or {}).get(str(arm)))
         save(records / 'run.json', run)
         launches.append((run_id, records, prompt))
-    current.update(status='RUNNING', started_at=now)
+    current.update(status='RUNNING', started_at=current.get('started_at') or now)
+    for stale in ('setup_failures', 'setup_failed_at', 'prepared_runs'):     # a failure this launch has now recovered
+        current.pop(stale, None)
+    # each launch with its arms and the pilot flag it ran under; a split launch names its rule (the schedule lists
+    # arms 1, 2, 3 started together — cycle 1 split is the recorded deviation, decision 2026-11-19)
+    current.setdefault('launches', []).append(entry)
     save(cycles_path, cycles)
 
     def launch(item):
@@ -176,7 +222,8 @@ def main():
         run.update(initial_turn_exit=code, initial_turn_failed=bool(code))
         save(records / 'run.json', run)
     # Implementation completion is NOT experiment completion; validation follows.
-    current.update(initial_turns_finished=True, initial_turn_exits={r: c for (r, _, _), c in zip(launches, codes)})
+    exits = dict(current.get('initial_turn_exits') or {}, **{r: c for (r, _, _), c in zip(launches, codes)})
+    current.update(initial_turns_finished=len(exits) == len(ARMS), initial_turn_exits=exits)
     save(cycles_path, cycles)
     return int(any(codes))
 
